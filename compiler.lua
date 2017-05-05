@@ -334,12 +334,13 @@ local function lexSmol(source, filename)
 	-- Detect the package
 	local package = #tokens >= 3
 		and tokens[1].tag == "keyword" and tokens[1].lexeme == "package"
-		and tokens[2].tag == "identifier" and tokens[3].tag == "punctuation"
-		and tokens[3].lexeme == ";"
-		and tokens[2].lexeme
+		and tokens[2].tag == "identifier"
+		and tokens[3].tag == "punctuation" and tokens[3].lexeme == ";"
+		and tokens[2].lexeme --< output
+		
 	if not package then
 		quit("expected a `package` statement at the beginning of " .. filename
-			.. "\n\tFor example, `package example;`")
+			.. "\n\t(For example, `package example;`)")
 	end
 	assert(type(package) == "string")
 
@@ -355,11 +356,6 @@ local function lexSmol(source, filename)
 			}
 		end
 	end
-
-	-- Remove package declaration from tokens
-	table.remove(tokens, 1)
-	table.remove(tokens, 1)
-	table.remove(tokens, 1)
 
 	return tokens
 end
@@ -637,6 +633,7 @@ local function parseSmol(tokens)
 	local K_IS = LEXEME "is"
 	local K_METHOD = LEXEME "method"
 	local K_NEW = LEXEME "new"
+	local K_PACKAGE = LEXEME "package"
 	local K_RETURN = LEXEME "return"
 	local K_STATIC = LEXEME "static"
 	local K_THIS = LEXEME "this"
@@ -990,13 +987,25 @@ local function parseSmol(tokens)
 
 		-- Represents a top-level definition
 		definition = choice {
-			G "import",
 			G "class",
 			G "interface",
 		},
 
+		-- Represents a package declaration
+		package = composite {
+			tag = "package",
+			{"_", K_PACKAGE},
+			{"name", T_IDENTIFIER, "an identifier"},
+			{"_", K_SEMICOLON, "`;` to finish package declaration"},
+		},
+
 		-- Represents an entire source file
-		program = zeroOrMore(G "definition"),
+		program = composite {
+			tag = "program",
+			{"package", G "package", "a package definition to begin file"},
+			{"imports", zeroOrMore(G "import")},
+			{"definitions", zeroOrMore(G "definition")},
+		},
 	}
 
 	-- Sequence of definitions
@@ -1007,6 +1016,12 @@ local function parseSmol(tokens)
 	end
 
 	return program
+end
+
+-- Verifier --------------------------------------------------------------------
+
+local function transpileSmol(sources)
+
 end
 
 -- Main ------------------------------------------------------------------------
@@ -1048,5 +1063,3 @@ for _, sourceFile in ipairs(sourceFiles) do
 	-- Parse contents
 	table.insert(sourceParses, parseSmol(tokens))
 end
-
-print(show(sourceParses))
