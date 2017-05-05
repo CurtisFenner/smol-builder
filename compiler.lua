@@ -22,6 +22,35 @@ setmetatable(_G, {
 	end,
 })
 
+-- Redefine `pairs` to use `__pairs` metamethod
+local oldp41rs = pairs
+local function pairs(object)
+	assert(type(object) == "table" or type(object) == "userdata",
+		"object must be table or userdata in pairs()")
+	-- TODO: deal with locked metatables
+	local metatable = getmetatable(object)
+	if metatable and metatable.__pairs then
+		return metatable.__pairs(object)
+	end
+	return oldp41rs(object)
+end
+
+-- Redefine `ipairs` to respect `__index` metamethod
+local ipairs
+do
+	local function iterator(list, i)
+		if list[i+1] == nil then
+			return nil
+		end
+		return i+1, list[i+1]
+	end
+	ipairs = function(list)
+		return iterator, list, 0
+	end
+end
+
+--------------------------------------------------------------------------------
+
 -- RETURNS a string representing a literal 'equivalent' to the object
 -- (excluding references and non-serializable objects like functions)
 local show
@@ -51,7 +80,7 @@ do
 			table.insert(out, [["]])
 			return table.concat(out)
 		end
-		if type(object) == "table" then
+		if type(object) == "table" or type(object) == "userdata" then
 			local out = {"{ "}
 			for key, value in pairs(object) do
 				table.insert(out, "[")
@@ -67,44 +96,35 @@ do
 	end
 end
 
-do
-	local oldp41rs = pairs
-	pairs = function(object)
-		assert(type(object) == "table", "object must be table in pairs()")
-		-- TODO: allow userdata
-		-- TODO: deal with locked metatables
-		local metatable = getmetatable(object)
-		if metatable and metatable.__pairs then
-			return metatable.__pairs(object)
-		end
-		return oldp41rs(object)
-	end
-end
-
 local function freeze(object)
-	assert(type(object) == "table")
+	assert(type(object) == "table" or type(object) == "userdata")
 
-	return setmetatable({}, {
-		__index = function(_, key)
-			if object[key] == nil then
-				local available = {}
-				for key, value in pairs(object) do
-					table.insert(available,
-						tostring(key) .. "=" .. tostring(value))
-				end
-				error("frozen object has no field `"
-					.. tostring(key) .. "`: available `"
-					.. show(object) .. "`", 2)
+	local out = newproxy(true)
+	local metatable = getmetatable(out)
+	metatable.__index = function(_, key)
+		if object[key] == nil then
+			local available = {}
+			for key, value in pairs(object) do
+				table.insert(available,
+					tostring(key) .. "=" .. tostring(value))
 			end
-			return object[key]
-		end,
-		__newindex = function(_, key)
-			error("cannot write to frozen object", 2)
-		end,
-		__pairs = function()
-			return pairs(object)
-		end,
-	})
+			error("frozen object has no field `"
+				.. tostring(key) .. "`: available `"
+				.. show(object) .. "`", 2)
+		end
+		return object[key]
+	end
+	metatable.__newindex = function(_, key)
+		error("cannot write to frozen object", 2)
+	end
+	metatable.__pairs = function()
+		return pairs(object)
+	end
+	metatable.__len = function()
+		return #object
+	end
+	
+	return out
 end
 
 -- Lexer -----------------------------------------------------------------------
