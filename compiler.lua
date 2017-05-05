@@ -553,8 +553,10 @@ local function parseSmol(tokens)
 				local member, rest = memberParser(stream, parsers)
 
 				if rest then
-					-- Attach field to object
-					object[key] = member
+					-- Attach (non-underscore) field to object
+					if key ~= "_" then
+						object[key] = member
+					end
 					stream = rest
 				elseif required then
 					-- This member was a required cut
