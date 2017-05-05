@@ -3,6 +3,135 @@
 
 --------------------------------------------------------------------------------
 
+if arg[#arg] == "--profile" then
+	-- Enable profiling
+	table.remove(arg)
+
+-- <profiler.lua> --------------------------------------------------------------
+
+	local profile = {}
+	profile.paused = true
+	profile.stack = {}
+	profile.aliases = {}
+	profile.heavy = {clock = 0, count = 1}
+
+	function profile.noteStack()
+		local leafFrame = profile.stack[#profile.stack]
+		local elapsed = leafFrame.endClock - leafFrame.beginClock
+
+		-- Increment the total clock for all functions in the stack
+		local leaf = profile.heavy
+		for _, frame in ipairs(profile.stack) do
+			leaf[frame.id] = leaf[frame.id] or {count = 0, clock = 0}
+			leaf = leaf[frame.id]
+
+			-- Clock totals
+			leaf.clock = leaf.clock + elapsed
+		end
+
+		-- Increment the coun for the leaf frame
+		leaf.count = leaf.count + 1
+	end
+
+	function profile.hook(event)
+		-- XXX: assumes coroutines aren't used, who knows how coroutines affect
+		-- this!
+
+		if profile.paused then
+			return
+		end
+		profile.paused = true
+		-- Cease
+
+		if event == "call" then
+			local info = debug.getinfo(2)
+			local id = info.source .. ":" .. tostring(info.linedefined)
+			if info.source == "=[C]" then
+				id = "[C] " .. tostring(info.func)
+			end
+			local alias = info.name
+			if not info.namewhat:find("%S") then
+				alias = "<anonymous>"
+			end
+
+			-- Record the name
+			profile.aliases[id] = profile.aliases[id] or {}
+			profile.aliases[id][alias] = (profile.aliases[id][alias] or 0) + 1
+
+			--	alias, id)
+
+			table.insert(profile.stack, {
+				id = id,
+				alias = alias,
+				beginClock = os.clock(),
+			})
+		else
+			if #profile.stack > 0 then
+				-- Record the elapsed time / count
+				profile.stack[#profile.stack].endClock = os.clock()
+
+				profile.noteStack()
+				table.remove(profile.stack)
+			else
+				print("\n--profile GENERATING PROFILE REPORT:")
+				print("\n--profile PROFILE REPORT `"
+					.. profile.report() .. "` GENERATED.")
+				profile.paused = true
+				return
+			end
+		end
+
+		-- Continue 
+		profile.paused = false
+	end
+	function profile.report()
+		local function jsonify(object, out)
+			assert(type(out) == "table")
+			if type(object) == "number" then
+				table.insert(out, tostring(object))
+			elseif type(object) == "string" then
+				table.insert(out, '"' .. object .. '"') -- XXX
+			else
+				assert(type(object) == "table")
+				out = out or {}
+				table.insert(out, "{")
+				for key, value in pairs(object) do
+					if #out > 1 then
+						table.insert(out, ", ")
+					end
+					assert(type(key) == "string")
+					table.insert(out, '"')
+					table.insert(out, key)
+					table.insert(out, '":')
+					jsonify(value, out)
+				end
+				table.insert(out, "}")
+			end
+		end
+
+		-- JSONify the profile and write it to a file
+		local filename = "profile" .. tostring(os.time()) .. ".json"
+		local report = io.open(filename, "w")
+		local out = {}
+		jsonify(profile.heavy, out)
+		report:write(table.concat(out))
+		report:write("\n")
+		report:close()
+
+		return filename
+	end
+
+	debug.sethook(profile.hook, "cr")
+	-- Begin
+	profile.paused = false
+
+-- </profiler.lua> -------------------------------------------------------------
+
+
+end
+
+--------------------------------------------------------------------------------
+
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
 -- DOES NOT RETURN.
@@ -70,29 +199,33 @@ do
 	for i = 128, 255 do
 		escapedCharacter[string.char(i)] = "\\" .. tostring(i)
 	end
-	show = function(object)
+	local function showAdd(object, out)
 		if type(object) == "string" then
 			-- Turn into a string literal
-			local out = {[["]]}
+			table.insert(out, [["]])
 			for character in object:gmatch "." do
 				table.insert(out, escapedCharacter[character] or character)
 			end
 			table.insert(out, [["]])
-			return table.concat(out)
-		end
-		if type(object) == "table" or type(object) == "userdata" then
-			local out = {"{ "}
+		elseif type(object) == "table" or type(object) == "userdata" then
+			table.insert(out, "{ ")
 			for key, value in pairs(object) do
 				table.insert(out, "[")
-				table.insert(out, show(key))
+				showAdd(key, out)
 				table.insert(out, "]=")
-				table.insert(out, show(value))
+				showAdd(value, out)
 				table.insert(out, ", ")
 			end
 			table.insert(out, "}")
-			return table.concat(out)
+		else
+			table.insert(out, object)
 		end
-		return tostring(object)
+	end
+
+	show = function(object)
+		local out = {}
+		showAdd(object, out)
+		return table.concat(out)
 	end
 end
 
@@ -369,9 +502,9 @@ local function Stream(list, offset)
 	assert(type(offset) == "number", "offset must be number")
 	for i = 1, #list do
 		assert(type(list[i].location) == "string",
-			"token must have string location; " .. show(list[i]))
+			"token must have string location; ") -- .. show(list[i]))
 		assert(type(list[i].lexeme) == "string",
-			"token must have string lexeme; " .. show(list[i]))
+			"token must have string lexeme; ") -- .. show(list[i]))
 	end
 
 	return {
