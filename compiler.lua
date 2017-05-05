@@ -1,3 +1,8 @@
+-- A transpiler for Smol -> Lua
+-- Curtis Fenner, copyright (C) 2017
+
+--------------------------------------------------------------------------------
+
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
 -- DOES NOT RETURN.
