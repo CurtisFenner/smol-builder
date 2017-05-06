@@ -315,22 +315,14 @@ local function lexSmol(source, filename)
 		Number = true,
 		Boolean = true,
 		Unit = true,
-		Void = true,
+		Never = true,
 	}
 
 	-- Define token parsing rules
 	local TOKENS = {
-		{ -- explicitly scoped type name
-			"[a-z][A-Za-z0-9]*:[A-Z][A-Za-z0-9]*",
-			function(x)
-				local name, package =
-					x:match "([a-z][A-Za-z0-9]*):([A-Z][A-Za-z0-9]*)"
-				return {tag = "typename", name = name, package = package}
-			end
-		},
 		{ -- local type
 			"[A-Z][A-Za-z0-9]*",
-			function(x) return {tag = "local-type", name = x} end
+			function(x) return {tag = "typename", name = x} end
 		},
 		{ -- keywords, local identifiers
 			"[a-z][A-Za-z0-9]*",
@@ -356,7 +348,7 @@ local function lexSmol(source, filename)
 			function(x) return false end
 		},
 		{ -- punctuation (braces, commas, etc)
-			"[.,;|()%[%]{}]",
+			"[.,:;|()%[%]{}]",
 			function(x) return {tag = "punctuation"} end
 		},
 		{ -- operators
@@ -483,32 +475,6 @@ local function lexSmol(source, filename)
 				quit("could not recognize any token " .. location
 					.. " (near `" .. source:sub(1, 15) .. "...`)")
 			end
-		end
-	end
-
-	-- Detect the package
-	local package = #tokens >= 3
-		and tokens[1].tag == "keyword" and tokens[1].lexeme == "package"
-		and tokens[2].tag == "identifier"
-		and tokens[3].tag == "punctuation" and tokens[3].lexeme == ";"
-		and tokens[2].lexeme --< output
-		
-	if not package then
-		quit("expected a `package` statement at the beginning of " .. filename
-			.. "\n\t(For example, `package example;`)")
-	end
-	assert(type(package) == "string")
-
-	-- Replace all local-types with explicit references
-	for i, token in ipairs(tokens) do
-		if token.tag == "local-type" then
-			tokens[i] = freeze {
-				tag = "typename",
-				package = package,
-				name = token.name,
-				location = token.location,
-				lexeme = token.lexeme,
-			}
 		end
 	end
 
@@ -752,6 +718,7 @@ local function parseSmol(tokens)
 	local K_PIPE = LEXEME "|"
 	local K_DOT = LEXEME "."
 	local K_EQUAL = LEXEME "="
+	local K_SCOPE = LEXEME ":"
 
 	local K_CURLY_OPEN = LEXEME "{"
 	local K_CURLY_CLOSE = LEXEME "}"
@@ -777,7 +744,7 @@ local function parseSmol(tokens)
 	-- Built-in types
 	local K_STRING = LEXEME "String"
 	local K_UNIT = LEXEME "Unit"
-	local K_VOID = LEXEME "Void"
+	local K_NEVER = LEXEME "Never"
 	local K_NUMBER = LEXEME "Number"
 	local K_BOOLEAN = LEXEME "Boolean"
 
@@ -866,16 +833,22 @@ local function parseSmol(tokens)
 			K_NUMBER,
 			K_BOOLEAN,
 			K_UNIT,
-			K_VOID,
+			K_NEVER,
 			-- user
 			T_GENERIC,
 			G "concrete-type",
 		},
 		["concrete-type"] = composite {
 			tag = "concrete-type",
-			{"base", T_TYPENAME},
-			{"arguments", optional(G "type-arguments")},
+			{"scope", optional(G "scope")}, -- string | false
+			{"base", T_TYPENAME}, -- {lexeme = string}
+			{"arguments", optional(G "type-arguments")}, -- [ Type ]
 		},
+		["scope"] = parserExtractor(composite {
+			tag = "scope",
+			{"name", T_IDENTIFIER},
+			{"_", K_SCOPE},
+		}, "name"),
 		["type-arguments"] = parserExtractor(composite {
 			tag = "***",
 			{"_", K_SQUARE_OPEN},
@@ -1067,14 +1040,6 @@ local function parseSmol(tokens)
 			K_THIS,
 			T_STRING_LITERAL,
 			T_INTEGER_LITERAL,
-			T_IDENTIFIER,
-			parserExtractor(composite {
-				tag = "***parenthesized expression",
-				{"_", K_ROUND_OPEN},
-				{"expression", G "expression", "expression"},
-				{"_", K_ROUND_CLOSE, "`)`"},
-			}, "expression"),
-
 			composite { -- static method call
 				tag = "static-call",
 				{"base-type", G "type"},
@@ -1084,6 +1049,13 @@ local function parseSmol(tokens)
 				{"arguments", commad(G "expression", "an expression")},
 				{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 			},
+			T_IDENTIFIER,
+			parserExtractor(composite {
+				tag = "***parenthesized expression",
+				{"_", K_ROUND_OPEN},
+				{"expression", G "expression", "expression"},
+				{"_", K_ROUND_CLOSE, "`)`"},
+			}, "expression"),
 		},
 
 		-- Represents an interface
@@ -1155,19 +1127,28 @@ end
 
 -- Verifier --------------------------------------------------------------------
 
-local function transpileSmol(sources)
+-- RETURNS a list of strings whose concatenation is a Lua program
+-- with the same semantics as the provided smol programs
+local function transpileSmolLua(sources, main)
+	assert(type(main) == "string")
 
+	local output = {}
+	error("TODO")
+	return output
 end
 
 -- Main ------------------------------------------------------------------------
 
-if #arg < 2 then
+if #arg < 3 then
 	quit("usage:\n\tlua compiler.lua"
 		.. " <directory containing .smol files>"
 		.. " <mainpackage:Mainclass>"
-		.. "\n\n\tFor example, `lua compiler.lua foo/ main:Main")
+		.. " <output.lua>"
+		.. "\n\n\tFor example, `lua compiler.lua foo/ main:Main program.lua")
 end
 local directory = arg[1]
+local mainFunction = arg[2]
+local outputPath = arg[3]
 
 -- Collect a set of source files to compile
 local sourceFiles = {}
@@ -1198,3 +1179,16 @@ for _, sourceFile in ipairs(sourceFiles) do
 	-- Parse contents
 	table.insert(sourceParses, parseSmol(tokens))
 end
+
+local luaOutput = transpileSmolLua(sourceParses, mainFunction)
+assert(type(luaOutput) == "table")
+
+-- Write the contents to the output file
+local outputFile = io.open(outputPath, "w")
+if not outputFile then
+	quit("could not open output file `" .. outputPath .. "`")
+end
+for _, word in ipairs(luaOutput) do
+	outputFile:write(word)
+end
+outputFile:close()
