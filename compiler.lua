@@ -21,12 +21,16 @@ if arg[#arg] == "--profile" then
 
 		-- Increment the total clock for all functions in the stack
 		local leaf = profile.heavy
+		leaf.clock = leaf.clock + elapsed
+		leaf.aliases = {["<root>"] = true, "<root>"}
+		
 		for _, frame in ipairs(profile.stack) do
 			leaf[frame.id] = leaf[frame.id] or {count = 0, clock = 0}
 			leaf = leaf[frame.id]
 
 			-- Clock totals
 			leaf.clock = leaf.clock + elapsed
+			leaf.aliases = profile.aliases[frame.id]
 		end
 
 		-- Increment the coun for the leaf frame
@@ -56,9 +60,10 @@ if arg[#arg] == "--profile" then
 
 			-- Record the name
 			profile.aliases[id] = profile.aliases[id] or {}
-			profile.aliases[id][alias] = (profile.aliases[id][alias] or 0) + 1
-
-			--	alias, id)
+			if not profile.aliases[id][alias] then
+				profile.aliases[id][alias] = true
+				table.insert(profile.aliases[id], alias)
+			end
 
 			table.insert(profile.stack, {
 				id = id,
@@ -87,35 +92,51 @@ if arg[#arg] == "--profile" then
 	function profile.report()
 		local function jsonify(object, out)
 			assert(type(out) == "table")
-			if type(object) == "number" then
+
+			if type(object) == "number" or type(object) == "boolean" then
 				table.insert(out, tostring(object))
 			elseif type(object) == "string" then
 				table.insert(out, '"' .. object .. '"') -- XXX
 			else
-				assert(type(object) == "table")
-				out = out or {}
-				table.insert(out, "{")
-				for key, value in pairs(object) do
-					if #out > 1 then
-						table.insert(out, ", ")
+				assert(type(object) == "table", "got " .. type(object))
+				if #object > 0 then
+					table.insert(out, "[")
+					local first = true
+					for _, value in ipairs(object) do
+						if not first then
+							table.insert(out, ", ")
+						end
+						first = false
+						jsonify(value, out)
 					end
-					assert(type(key) == "string")
-					table.insert(out, '"')
-					table.insert(out, key)
-					table.insert(out, '":')
-					jsonify(value, out)
+					table.insert(out, "]\n")
+				else
+					table.insert(out, "{")
+					local first = true
+					for key, value in pairs(object) do
+						if not first then
+							table.insert(out, ", ")
+						end
+						first = false
+						assert(type(key) == "string")
+						table.insert(out, '"')
+						table.insert(out, key)
+						table.insert(out, '":')
+						jsonify(value, out)
+					end
+					table.insert(out, "}\n")
 				end
-				table.insert(out, "}")
 			end
 		end
 
 		-- JSONify the profile and write it to a file
-		local filename = "profile" .. tostring(os.time()) .. ".json"
+		local filename = "profiled.js" -- .. tostring(os.time()) .. ".js"
 		local report = io.open(filename, "w")
 		local out = {}
 		jsonify(profile.heavy, out)
+		report:write("profiledata(\n")
 		report:write(table.concat(out))
-		report:write("\n")
+		report:write("\n);\n")
 		report:close()
 
 		return filename
@@ -126,7 +147,6 @@ if arg[#arg] == "--profile" then
 	profile.paused = false
 
 -- </profiler.lua> -------------------------------------------------------------
-
 
 end
 
@@ -248,7 +268,8 @@ local function freeze(object)
 		return object[key]
 	end
 	metatable.__newindex = function(_, key)
-		error("cannot write to frozen object", 2)
+		error("cannot write to field `"
+			.. tostring(key) .. "` on frozen object", 2)
 	end
 	metatable.__pairs = function()
 		return pairs(object)
@@ -591,26 +612,6 @@ local function parseSmol(tokens)
 		return parserMap(parser, function(x)
 			return x[field]
 		end)
-	end
-
-	-- PARSER for a sequence of 1 or more `object`s separated by nothing
-	local function oneOrMore(object)
-		assert(type(object) == "function")
-
-		local z = zeroOrMore(object)
-
-		return function(stream, parsers)
-			assert(parsers)
-
-			-- use zero-or-more parser
-			local list, rest = z(stream, parsers)
-
-			-- reject empty lists
-			if #list == 0 then
-				return nil
-			end
-			return list, rest
-		end
 	end
 
 	-- PARSER for trying each option in order upon failure
