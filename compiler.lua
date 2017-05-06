@@ -13,7 +13,7 @@ if arg[#arg] == "--profile" then
 	profile.paused = true
 	profile.stack = {}
 	profile.aliases = {}
-	profile.heavy = {clock = 0, count = 1}
+	profile.heavy = {clock = 0, count = 1, beginClock = os.clock()}
 
 	function profile.noteStack()
 		local leafFrame = profile.stack[#profile.stack]
@@ -21,20 +21,20 @@ if arg[#arg] == "--profile" then
 
 		-- Increment the total clock for all functions in the stack
 		local leaf = profile.heavy
-		leaf.clock = leaf.clock + elapsed
 		leaf.aliases = {["<root>"] = true, "<root>"}
 		
+		-- Clock
 		for _, frame in ipairs(profile.stack) do
 			leaf[frame.id] = leaf[frame.id] or {count = 0, clock = 0}
 			leaf = leaf[frame.id]
 
 			-- Clock totals
-			leaf.clock = leaf.clock + elapsed
 			leaf.aliases = profile.aliases[frame.id]
 		end
 
 		-- Increment the coun for the leaf frame
 		leaf.count = leaf.count + 1
+		leaf.clock = leaf.clock + elapsed
 	end
 
 	function profile.hook(event)
@@ -78,6 +78,7 @@ if arg[#arg] == "--profile" then
 				profile.noteStack()
 				table.remove(profile.stack)
 			else
+				profile.heavy.clock = os.clock() - profile.heavy.beginClock
 				print("\n--profile GENERATING PROFILE REPORT:")
 				print("\n--profile PROFILE REPORT `"
 					.. profile.report() .. "` GENERATED.")
