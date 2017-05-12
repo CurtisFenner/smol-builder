@@ -1,5 +1,9 @@
--- A transpiler for Smol -> Lua
+-- A transpiler for Smol -> ???
 -- Curtis Fenner, copyright (C) 2017
+
+local INVOKATION = arg[0] .. " " .. table.concat(arg, ", ")
+	.. "\non " .. os.date("!%c")
+	.. "\nsmol version 0??"
 
 --------------------------------------------------------------------------------
 
@@ -132,7 +136,7 @@ if arg[#arg] == "--profile" then
 
 		-- JSONify the profile and write it to a file
 		local filename = "profiled.js" -- .. tostring(os.time()) .. ".js"
-		local report = io.open(filename, "w")
+		local report = io.open(filename, "wb")
 		local out = {}
 		jsonify(profile.heavy, out)
 		report:write("profiledata(\n")
@@ -171,6 +175,28 @@ setmetatable(_G, {
 		error("write to global key `" .. tostring(key) .. "`", 2)
 	end,
 })
+
+setmetatable(string, {
+	__index = function(_, key)
+		error("strings have no `" .. tostring(key) .. "` field", 2)
+	end,
+})
+
+function string.prepad(str, with, length)
+	assert(type(with) == "string", "with must be string")
+	assert(type(length) == "number", "length must be number")
+	assert(#with == 1, "TODO: support #with > 1")
+
+	return string.rep(with, length - #str) .. str
+end
+
+function string.postpad(str, with, length)
+	assert(type(with) == "string", "with must be string")
+	assert(type(length) == "number", "length must be number")
+	assert(#with == 1, "TODO: support #with > 1")
+
+	return str .. string.rep(with, length - #str)
+end
 
 -- Redefine `pairs` to use `__pairs` metamethod
 local oldp41rs = pairs
@@ -217,6 +243,12 @@ do
 		["\""] = [[\"]],
 		["\0"] = [[\0]],
 	}
+	for i = 0, 31 do
+		local c = string.char(i)
+		if not escapedCharacter[c] then
+			escapedCharacter[c] = "\\" .. tostring(i):prepad("0", 3)
+		end
+	end
 	for i = 128, 255 do
 		escapedCharacter[string.char(i)] = "\\" .. tostring(i)
 	end
@@ -239,7 +271,7 @@ do
 			end
 			table.insert(out, "}")
 		else
-			table.insert(out, object)
+			table.insert(out, tostring(object))
 		end
 	end
 
@@ -261,6 +293,14 @@ local function freeze(object)
 			for key, value in pairs(object) do
 				table.insert(available,
 					tostring(key) .. "=" .. tostring(value))
+			end
+
+			if type(key) == "number" then
+				-- XXX: allow reading one past end of arrays
+				local previous = object[key-1]
+				if previous ~= nil then
+					return nil
+				end
 			end
 			error("frozen object has no field `"
 				.. tostring(key) .. "`: available `"
@@ -297,18 +337,21 @@ local function lexSmol(source, filename)
 	source = source .. "\n"
 
 	local IS_KEYWORD = {
+		case = true,
 		class = true,
 		["do"] = true,
 		foreign = true,
 		import = true,
 		interface = true,
 		is = true,
+		match = true,
 		method = true,
 		new = true,
 		package = true,
 		["return"] = true,
 		static = true,
 		this = true,
+		union = true,
 		var = true,
 		-- built-in types
 		String = true,
@@ -350,6 +393,10 @@ local function lexSmol(source, filename)
 		{ -- punctuation (braces, commas, etc)
 			"[.,:;|()%[%]{}]",
 			function(x) return {tag = "punctuation"} end
+		},
+		{ -- assignment
+			"=",
+			function(x) return {tag = "assign"} end
 		},
 		{ -- operators
 			"[+%-*/%^<>=]+",
@@ -657,7 +704,7 @@ local function parseSmol(tokens)
 					stream = rest
 				elseif required then
 					-- This member was a required cut
-					quit("expected ", required, context, stream:location())
+					quit("expected ", required, context, " ", stream:location())
 				else
 					-- This failed to parse
 					return nil
@@ -739,6 +786,7 @@ local function parseSmol(tokens)
 	local K_RETURN = LEXEME "return"
 	local K_STATIC = LEXEME "static"
 	local K_THIS = LEXEME "this"
+	local K_UNION = LEXEME "union"
 	local K_VAR = LEXEME "var"
 
 	-- Built-in types
@@ -773,9 +821,19 @@ local function parseSmol(tokens)
 
 	-- HELPER meaning object repeated 0 or more times,
 	-- separated by commas
-	local function commad(object, expected)
+	local function commad(object, count, expected)
 		assert(type(object) == "function", "object must be function")
 		assert(type(expected) == "string", "expected must be string")
+		assert(type(count) == "string", "count format must be string")
+		assert(type(count) == "string", "count format must be string")
+		local minCount = 0
+		local maxCount = math.huge
+		local matchAtLeast = count:match("^(%d+)%+$")
+		if matchAtLeast then
+			minCount = tonumber(matchAtLeast)
+		else
+			error("unknown comma'd count pattern `" .. count .. "`")
+		end
 
 		return function(stream, parsers)
 			assert(parsers)
@@ -783,7 +841,10 @@ local function parseSmol(tokens)
 			-- Consume the first element of the list
 			local first, rest = object(stream, parsers)
 			if not rest then
-				return {}, stream
+				if minCount <= 0 and 0 <= maxCount then
+					return {}, stream
+				end
+				return nil
 			end
 			stream = rest
 
@@ -792,7 +853,10 @@ local function parseSmol(tokens)
 				-- Consume a comma
 				local _, rest = K_COMMA(stream, parsers)
 				if not rest then
-					return list, stream
+					if minCount <= #list and #list <= maxCount then
+						return list, stream
+					end
+					return nil
 				end
 				stream = rest
 
@@ -817,6 +881,11 @@ local function parseSmol(tokens)
 			tag = "import",
 			{"_", K_IMPORT},
 			{"name", T_IDENTIFIER, "an imported package name"},
+			{"class", optional(parserExtractor(composite { -- string | false
+				tag = "***type name",
+				{"_", K_DOT},
+				{"class", T_TYPENAME, "a type name"},
+			}, "class"))},
 			{"_", K_SEMICOLON, "`;` after import"},
 		},
 
@@ -828,21 +897,21 @@ local function parseSmol(tokens)
 
 		-- Type
 		type = choice {
-			-- BUILT INS
+			-- Built in special types
 			K_STRING,
 			K_NUMBER,
 			K_BOOLEAN,
 			K_UNIT,
 			K_NEVER,
-			-- user
+			-- User defined types
 			T_GENERIC,
 			G "concrete-type",
 		},
 		["concrete-type"] = composite {
 			tag = "concrete-type",
-			{"scope", optional(G "scope")}, -- string | false
-			{"base", T_TYPENAME}, -- {lexeme = string}
-			{"arguments", optional(G "type-arguments")}, -- [ Type ]
+			{"scope", optional(G "scope")}, --: string | false
+			{"base", T_TYPENAME}, --: {lexeme = string}
+			{"arguments", optional(G "type-arguments")}, --: [ Type ]
 		},
 		["scope"] = parserExtractor(composite {
 			tag = "scope",
@@ -852,7 +921,7 @@ local function parseSmol(tokens)
 		["type-arguments"] = parserExtractor(composite {
 			tag = "***",
 			{"_", K_SQUARE_OPEN},
-			{"arguments", commad(G "type", "type argument"), "type arguments"},
+			{"arguments", commad(G "type", "1+", "type argument"), "type arguments"},
 			{"_", K_SQUARE_CLOSE, "`]` to end type arguments"},
 		}, "arguments"),
 
@@ -862,7 +931,7 @@ local function parseSmol(tokens)
 			{"_", K_SQUARE_OPEN},
 			{
 				"parameters",
-				commad(T_GENERIC, "generic parameter variable"),
+				commad(T_GENERIC, "1+", "generic parameter variable"),
 				"generic parameter variables"
 			},
 			{"constraints", optional(G "generic-constraints")},
@@ -873,7 +942,7 @@ local function parseSmol(tokens)
 			{"_", K_PIPE},
 			{
 				"constraints",
-				commad(G "generic-constraint", "generic constraint"),
+				commad(G "generic-constraint", "1+", "generic constraint"),
 				"generic constraints"
 			},
 		}, "constraints"),
@@ -884,17 +953,38 @@ local function parseSmol(tokens)
 			{"constraint", G "type", "a type constrain after `is`"},
 		},
 
+		-- Represents a union
+		union = composite {
+			tag = "union",
+			{"_", K_UNION},
+			{"name", T_TYPENAME, "a type name"},
+			{"generics", optional(G "generics")},
+			{"_", K_CURLY_OPEN, "`{` to begin union body"},
+			{"fields", zeroOrMore(G "field-definition")},
+			{"methods", zeroOrMore(G "method-definition")},
+			{"_", K_CURLY_CLOSE, "`}` to close union body"},
+		},
+
 		-- Represents a class
 		class = composite {
 			tag = "class-definition",
 			{"_", K_CLASS},
 			{"name", T_TYPENAME, "a type name"},
 			{"generics", optional(G "generics")},
+			{"implements", optional(G "implements")},
 			{"_", K_CURLY_OPEN, "`{` to begin class body"},
 			{"fields", zeroOrMore(G "field-definition")},
 			{"methods", zeroOrMore(G "method-definition")},
 			{"_", K_CURLY_CLOSE, "`}` to close class body"},
 		},
+		implements = parserExtractor(composite {
+			tag = "***implements",
+			{"_", K_IS},
+			{
+				"interfaces",
+				commad(G "concrete-type", "1+", "an interface name")
+			},
+		}, "interfaces"),
 		["field-definition"] = composite {
 			tag = "field-definition",
 			{"_", K_VAR},
@@ -924,7 +1014,7 @@ local function parseSmol(tokens)
 		["return-statement"] = composite {
 			tag = "return-statement",
 			{"_", K_RETURN},
-			{"value", optional(G "expression")},
+			{"values", commad(G "expression", "0+", "an expression to return")},
 			{"_", K_SEMICOLON, "`;` to end return-statement"},
 		},
 		["do-statement"] = composite {
@@ -939,7 +1029,7 @@ local function parseSmol(tokens)
 		},
 		["assign-statement"] = composite {
 			tag = "assign-statement",
-			{"variable", G "expression"},
+			{"variables", commad(G "expression", "1+", "a variable")},
 			{"_", K_EQUAL, "`=` after variable"},
 			{"value", G "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end assign-statement"},
@@ -990,9 +1080,19 @@ local function parseSmol(tokens)
 			tag = "new-expression",
 			{"_", K_NEW},
 			{"_", K_ROUND_OPEN, "`(` after `new`"},
-			{"arguments", commad(G "expression", "a constructor argument")},
+			{
+				"arguments",
+				commad(G "named-argument", "0+", "a constructor argument")
+			},
 			{"_", K_ROUND_CLOSE, "`)` to end `new` expression"},
 		},
+		["named-argument"] = composite {
+			tag = "named-argument",
+			{"name", T_IDENTIFIER},
+			{"_", K_EQUAL},
+			{"value", G "expression", "an expression after `=`"},
+		},
+
 		atom = parserMap(composite {
 			tag = "***atom",
 			--
@@ -1018,7 +1118,7 @@ local function parseSmol(tokens)
 			{"call", optional(composite{
 				tag = "***arguments",
 				{"_", K_ROUND_OPEN},
-				{"arguments", commad(G "expression", "an expression")},
+				{"arguments", commad(G "expression", "0+", "an expression")},
 				{"_", K_ROUND_CLOSE, "`)` to end"},
 			})},
 		}, function(x)
@@ -1046,7 +1146,7 @@ local function parseSmol(tokens)
 				{"_", K_DOT, "`.` after type name"},
 				{"name", T_IDENTIFIER, "a static method's name"},
 				{"_", K_ROUND_OPEN, "`(` after static method name"},
-				{"arguments", commad(G "expression", "an expression")},
+				{"arguments", commad(G "expression", "0+", "an expression")},
 				{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 			},
 			T_IDENTIFIER,
@@ -1082,9 +1182,13 @@ local function parseSmol(tokens)
 			{"modifier", G "method-modifier"},
 			{"name", T_IDENTIFIER, "a method name"},
 			{"_", K_ROUND_OPEN, "`(` after method name"},
-			{"parameters", commad(G "variable", "a parameter")},
+			{"parameters", commad(G "variable", "0+", "a parameter")},
 			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
-			{"returns", G "type", "a return type"},
+			{
+				"returns",
+				commad(G "type", "1+", "a return type"),
+				"a return type"
+			},
 		},
 
 		["method-modifier"] = choice {
@@ -1095,6 +1199,7 @@ local function parseSmol(tokens)
 		-- Represents a top-level definition
 		definition = choice {
 			G "class",
+			G "union",
 			G "interface",
 		},
 
@@ -1125,11 +1230,10 @@ local function parseSmol(tokens)
 	return program
 end
 
--- Verifier --------------------------------------------------------------------
+-- Semantics / Verification ----------------------------------------------------
 
--- RETURNS a list of strings whose concatenation is a Lua program
--- with the same semantics as the provided smol programs
-local function transpileSmolLua(sources, main)
+-- RETURNS a semantic description of the program
+local function semanticsSmol(sources, main)
 	assert(type(main) == "string")
 
 	local output = {}
@@ -1137,18 +1241,343 @@ local function transpileSmolLua(sources, main)
 	return output
 end
 
+-- Transpilation ---------------------------------------------------------------
+
+local sourceFromSemantics = {}
+
+-- TYPE Semantics
+-- Semantics.structs : [Struct]
+-- Semantics.unions : [Union]
+-- Semantics.interfaces : [Interface]
+-- Semantics.functions : [Function]
+-- Semantics.main : string
+
+-- TYPE Struct
+-- Struct.name: string
+-- Struct.fields: [{name: string, type: string}]
+-- Struct.typeParameters: [string]
+-- Struct.typeConstraints: [{parameter: string, constraint: string}]
+-- Struct.implements: [string]
+
+-- TYPE Interface
+-- Interface.name: string
+-- Interface.methods: [ {
+--     name: string,
+--     parameters: [string],
+--     returnTypes: [string],
+--     static: boolean
+-- } ]
+-- Interface.parameters: [string]
+-- Interface.constraints: [{parameteR: string, constraint: string}]
+
+-- TYPE Function
+-- Function.name: string
+-- Function.parameters: [{name: string, type: string}]
+-- Function.typeParameters: [string] | false
+-- Function.typeConstraints: [{parameter: string, constraint: string}] | false
+-- Function.returnType: string
+-- Function.body: Statement
+
+-- TYPE Statement
+-- tag: "var" | "string" | "number" | "new" | "interface-static"
+--    | "field" | "call" | "interface-method" | "return"
+
+-- RETURNS a string representing a Lua program with the indicated semantics
+function sourceFromSemantics.lua(semantics)
+
+	local function luaizeFunction(name)
+		assert(type(name) == "string", "luaizeFunction requires string")
+
+		return (name:gsub(":", "_"))
+	end
+
+	local function luaizeConstraint(name)
+		if type(name) == "string" then
+			assert(type(name) == "string", "luaizeConstraint requires string")
+			assert(name:sub(1, 1) == "#")
+
+			return "_con_" .. name:sub(2)
+		end
+		local base = name.type
+		local interface = name.interface
+		assert(type(base) == "string")
+		assert(type(interface) == "string")
+
+		return "impl_" .. luaizeFunction(interface)
+			.. "_for_".. luaizeFunction(base)
+	end
+
+	-- Lua target may ignore
+	-- semantics.structs, semantics.unions, semantics.interfaces
+
+	local output = {
+		"-- THIS FILE GENERATED BY SMOL COMPILER:\n\t-- ",
+		INVOKATION:gsub("\n", "\n\t-- "),
+		"\n"
+	}
+	local function outputHeader(name)
+		local line = "\n-- " .. name .. " "
+		table.insert(output, line:postpad("-", 80))
+		table.insert(output, "\n\n")
+	end
+
+	local function generateStatement(statement, indentation)
+		assert(type(statement.tag) == "string")
+		if statement.tag == "block" then
+			-- XXX: always implicitly surrounded by Lua block
+			for _, s in ipairs(statement.statements) do
+				generateStatement(s, indentation .. "\t")
+			end
+		elseif statement.tag == "var" then
+			table.insert(output, indentation)
+			table.insert(output, "local " .. statement.name)
+			table.insert(output, "\n")		
+		elseif statement.tag == "string" then
+			assert(type(statement.value) == "string")
+
+			table.insert(output, indentation)
+			table.insert(output, statement.dst .. " = ")
+			table.insert(output, "{value = ")
+			table.insert(output, show(statement.value))
+			table.insert(output, "}")
+			table.insert(output, "\n")			
+		elseif statement.tag == "field" then
+			local field = statement.name
+			local object = statement.object
+			assert(type(field) == "string")
+			assert(type(object) == "string")
+
+			table.insert(output, indentation)
+			table.insert(output,
+				statement.dst .. " = " .. object .. "." .. field)
+			table.insert(output, "\n")
+		elseif statement.tag == "number" then
+			table.insert(output, indentation)
+			table.insert(output, statement.dst .. " = ")
+			table.insert(output, "{value = ")
+			table.insert(output, show(statement.value))
+			table.insert(output, "}")
+			table.insert(output, "\n")
+		elseif statement.tag == "interface-method" then
+			local methodName = statement.name
+			assert(type(methodName) == "string")
+			local object = statement.object
+			assert(type(object) == "string")
+			local argumentList = statement.arguments
+
+			local interfaceInformation = statement.interface
+			assert(#interfaceInformation == 2)
+			
+			local methodLua = interfaceInformation[1]
+				.. "['" .. interfaceInformation[2] .. "']."
+				.. methodName
+
+			local arguments = {object}
+			for _, argument in ipairs(argumentList) do
+				table.insert(arguments, argument)
+			end
+
+			table.insert(output, indentation)
+			table.insert(output, statement.dst .. " = " .. methodLua)
+			table.insert(output, "(")
+			table.insert(output, table.concat(arguments, ", "))
+			table.insert(output, ")\n")
+		elseif statement.tag == "call" then
+			assert(type(statement.func) == "string")
+			assert(statement.dsts, show(statement))
+
+			-- Constraint arguments come after
+			local arguments = {}
+			for _, argument in ipairs(statement.arguments) do
+				table.insert(arguments, argument)
+			end
+			for _, constraint in ipairs(statement.constraints) do
+				if type(constraint) == "string" then
+					table.insert(arguments, luaizeConstraint(constraint))
+				else
+					table.insert(arguments, luaizeConstraint(constraint))
+				end
+			end
+
+			-- Destination variables
+			table.insert(output, indentation)
+			for i = 1, #statement.dsts do
+				table.insert(output, statement.dsts[i])
+				if i == #statement.dsts then
+					table.insert(output, " = ")
+				else
+					table.insert(output, ", ")
+				end
+			end
+
+			-- Lua function invocation
+			table.insert(output, luaizeFunction(statement.func))
+			table.insert(output, "(")
+			table.insert(output, table.concat(arguments, ", "))
+			table.insert(output, ")\n")
+		elseif statement.tag == "return" then
+			table.insert(output, indentation)
+			table.insert(output, "return ")
+			table.insert(output, table.concat(statement.values, ", "))
+			table.insert(output, "\n")
+		elseif statement.tag == "new" then
+			table.insert(output, indentation)
+			table.insert(output, statement.dst .. " =")
+			table.insert(output, "{ ")
+			for key, value in pairs(statement.record) do
+				table.insert(output, key .. " = " .. value .. "; ")
+			end
+			assert(statement.constraints ~= nil)
+			for i, constraint in ipairs(statement.constraints) do
+				table.insert(output, "['#" .. i .. "'] = ")
+				table.insert(output, luaizeConstraint(constraint))
+				table.insert(output, "; ")
+			end
+
+			table.insert(output, "}\n")
+		else
+			error("unknown statement tag `" .. statement.tag .. "`")
+		end
+	end
+
+	outputHeader("Foreign functions")
+	-- Body of all foreign functions / types
+	table.insert(output, [[
+-- method Number:show() String
+function Number_show(number)
+	return {value = tostring(number.value)}
+end
+
+-- method String:concat(String) String
+function String_concat(left, right)
+	return {value = left.value .. right.value}
+end
+
+-- static system:Out:println(String) Unit
+function system_Out_println(str)
+	print(str.value)
+end
+
+-- Number is coding:Showable
+impl_coding_Showable_for_Number = {
+	show = Number_show;
+}
+
+]])
+
+	-- Forward declare all functions
+	outputHeader("Function forward declarations")
+	for _, fn in ipairs(semantics.functions) do
+		table.insert(output, "local " .. luaizeFunction(fn.name) .. ";\n")
+	end
+
+	-- Forward declare all impls
+	outputHeader("Interface impl forward declarations")
+	for _, struct in ipairs(semantics.structs) do
+		for _, impl in ipairs(struct.implements) do
+			table.insert(output, "local ")
+			table.insert(output, luaizeConstraint{
+				type = struct.name, interface = impl
+			})
+			table.insert(output, ";\n")
+		end
+	end
+
+	-- Define the body of each function
+	outputHeader("Function definitions")
+	for _, fn in ipairs(semantics.functions) do
+		-- Collect type-parameters and type-constraints as Lua parameters
+		local allParameters = {}
+		for _, parameter in ipairs(fn.parameters) do
+			assert(type(parameter.name) == "string")
+			assert(type(parameter.type) == "string")
+			table.insert(allParameters, parameter.name)
+		end
+		if fn.typeParameters then
+			for _, typeParameter in ipairs(fn.typeParameters) do
+				assert(type(typeParameter) == "string")
+				assert(typeParameter:sub(1, 1) == "#")
+			end
+			for _, typeConstraint in ipairs(fn.typeConstraints) do
+				local constraintOn = typeConstraint.parameter
+				assert(type(constraintOn) == "string",
+					"function typeConstraint.parameter must be string")
+
+				local constraintName = typeConstraint.name
+				assert(type(constraintName) == "string")
+				assert(constraintName:sub(1, 1) == "#")
+
+				local constraintType = typeConstraint.constraint
+
+				table.insert(allParameters, luaizeConstraint(constraintName))
+			end
+		end
+
+		-- Generate Lua function signature
+		table.insert(output, luaizeFunction(fn.name) .. " = function(")
+		table.insert(output, table.concat(allParameters, ", "))
+		table.insert(output, ")\n")
+		table.insert(output, "\tlocal _;\n")
+
+		for _, parameter in ipairs(allParameters) do
+			table.insert(output, "\tassert(nil ~= " .. parameter .. ")\n")
+		end
+
+		-- Generate Lua body
+		generateStatement(fn.body, "")
+
+		-- Generate closing of Lua function
+		table.insert(output, "end\n\n")
+	end
+
+	-- Initialize all impls
+	outputHeader("Initialize impls")
+
+	for _, struct in ipairs(semantics.structs) do
+		for _, impl in ipairs(struct.implements) do
+			-- Search for the interface with the given name
+			local interfaces = {}
+			for _, interface in ipairs(semantics.interfaces) do
+				if interface.name == impl then
+					table.insert(interfaces, interface)
+				end
+			end
+			assert(#interfaces == 1)
+			local interface = interfaces[1]
+			
+			table.insert(output,
+				luaizeConstraint{type = struct.name, interface = impl})
+			table.insert(output, " = {\n")
+			for _, method in ipairs(interface.methods) do
+				table.insert(output, "\t")
+				table.insert(output, method.name)
+				table.insert(output, " = ")
+				table.insert(output,
+					luaizeFunction(struct.name .. ":" .. method.name))
+				table.insert(output, ",\n")
+			end
+			table.insert(output, "}\n\n")
+		end
+	end
+
+	outputHeader("Main Entry")
+
+	table.insert(output, luaizeFunction(semantics.main .. ":main"))
+	table.insert(output, "()\n")
+
+	return table.concat(output)
+end
+
 -- Main ------------------------------------------------------------------------
 
-if #arg < 3 then
+if #arg ~= 2 then
 	quit("usage:\n\tlua compiler.lua"
 		.. " <directory containing .smol files>"
 		.. " <mainpackage:Mainclass>"
-		.. " <output.lua>"
-		.. "\n\n\tFor example, `lua compiler.lua foo/ main:Main program.lua")
+		.. "\n\n\tFor example, `lua compiler.lua foo/ main:Main")
 end
 local directory = arg[1]
 local mainFunction = arg[2]
-local outputPath = arg[3]
 
 -- Collect a set of source files to compile
 local sourceFiles = {}
@@ -1180,15 +1609,4 @@ for _, sourceFile in ipairs(sourceFiles) do
 	table.insert(sourceParses, parseSmol(tokens))
 end
 
-local luaOutput = transpileSmolLua(sourceParses, mainFunction)
-assert(type(luaOutput) == "table")
-
--- Write the contents to the output file
-local outputFile = io.open(outputPath, "w")
-if not outputFile then
-	quit("could not open output file `" .. outputPath .. "`")
-end
-for _, word in ipairs(luaOutput) do
-	outputFile:write(word)
-end
-outputFile:close()
+--local semantics = semanticsSmol(sourceParses, mainFunction)
