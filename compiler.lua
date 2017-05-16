@@ -1792,11 +1792,23 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	-- Collect a map of name => interface
-	local interfaceByName = {}
-	for _, interface in ipairs(interfaceSignatures) do
-		assert(type(interface.name) == "string")
-		interfaceByName[interface.name] = interface
+	local function getDefinition(name)
+		for _, class in ipairs(classSignatures) do
+			if class.name == name then
+				return class, "class"
+			end
+		end
+		for _, interface in ipairs(interfaceSignatures) do
+			if interface.name == name then
+				return interface, "interface"
+			end
+		end
+		for _, union in ipairs(unionSignatures) do
+			if union.name == name then
+				return union, "union"
+			end
+		end
+		error("attempt to get the definition for a non-existant type")
 	end
 
 	-- RETURNS whether or not the types 'a' and 'b' are exactly equal
@@ -1948,14 +1960,41 @@ local function semanticsSmol(sources, main)
 	-- claims to
 	for _, class in ipairs(classSignatures) do
 		for _, impl in ipairs(class.implements) do
-			local signatures = interfaceByName[impl.name]
-			assert(signatures ~= nil)
-			checkClassImplements(class, impl, signatures)
+			local definition, definitionType = getDefinition(impl.name)
+			assert(definition)
+			if definitionType ~= "interface" then
+				quit("The type `", impl.name, "` is a ", definitionType,
+					" rather than an interface, so class " .. class.name,
+					" cannot implement it.",
+					"\nHowever, class " .. class.name,
+					" claims to implement it ", impl.location)
+			end
+			checkClassImplements(class, impl, definition)
 		end
 	end
 
 	-- (4) Check that all type bounds are satisfied
+	local function normalizeType(un, generics)
+		assert(isobject(un), "generics must be an object")
+		assert(isobject(generics), "generics must be an object")
 
+		-- (a) Do package normalization
+		local scope = {}
+		for _, generic in ipairs(generics) do
+			scope[generic.name] = generic
+		end
+		local t = normalizeTypePackage(un, scope)
+
+		-- (b) Check that all implementation requirements are satisfied
+		if t.tag == "generic" then
+			return t
+		elseif t.tag == "type-keyword" then
+			return t
+		elseif t.tag == "type-concrete" then
+
+		end
+		error("unknown type tag `" .. t.tag .. "`")
+	end
 
 	-- TODO
 	return nil
