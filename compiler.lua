@@ -160,8 +160,12 @@ end
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
 -- DOES NOT RETURN.
-local function quit(...)
-	print(table.concat{...})
+local function quit(first, ...)
+	if not first:match("^[A-Z]+:\n$") then
+		print(table.concat{"ERROR:\n", first, ...})
+	else
+		print(table.concat{first, ...})
+	end
 	os.exit(1)
 end
 
@@ -182,17 +186,51 @@ setmetatable(string, {
 	end,
 })
 
+-- RETURNS whether or not instance is a Lua string
+local function isstring(instance)
+	return type(instance) == "string"
+end
+
+-- RETURNS whether or not instance is a Lua object (table or userdata)
+local function isobject(instance)
+	return type(instance) == "userdata" or type(instance) == "table"
+end
+
+-- RETURNS whether or not instance is a Lua number that is integral
+local function isinteger(instance)
+	return type(instance) == "number" and instance%1 == 0
+end
+
+-- RETURNS the n-th (English) ordinal as a word
+function string.ordinal(n)
+	assert(isinteger(n), "n must be an integer")
+	-- 1st, 2nd, 3rd, 4th, 5th, 6th, 7th, 8th, 9th, 10th
+	-- ...
+	-- 21st, 22nd, 23rd, 24th, ... 29th
+	-- ...
+	if 10 <= n%100 and n%100 <= 20 then
+		return n .. "th"
+	elseif n%10 == 1 then
+		return n .. "st"
+	elseif n%10 == 2 then
+		return n .. "nd"
+	elseif n%10 == 3 then
+		return n .. "rd"
+	end
+	return n .. "th"
+end
+
 function string.prepad(str, with, length)
-	assert(type(with) == "string", "with must be string")
-	assert(type(length) == "number", "length must be number")
+	assert(type(with) == "string", "with must be a string")
+	assert(type(length) == "number", "length must be a number")
 	assert(#with == 1, "TODO: support #with > 1")
 
 	return string.rep(with, length - #str) .. str
 end
 
 function string.postpad(str, with, length)
-	assert(type(with) == "string", "with must be string")
-	assert(type(length) == "number", "length must be number")
+	assert(type(with) == "string", "with must be a string")
+	assert(type(length) == "number", "length must be a number")
 	assert(#with == 1, "TODO: support #with > 1")
 
 	return str .. string.rep(with, length - #str)
@@ -201,8 +239,8 @@ end
 -- Redefine `pairs` to use `__pairs` metamethod
 local oldp41rs = pairs
 local function pairs(object)
-	assert(type(object) == "table" or type(object) == "userdata",
-		"object must be table or userdata in pairs()")
+	assert(isobject(object),
+		"object must be reference type in pairs()")
 	-- TODO: deal with locked metatables
 	local metatable = getmetatable(object)
 	if metatable and metatable.__pairs then
@@ -260,7 +298,7 @@ do
 				table.insert(out, escapedCharacter[character] or character)
 			end
 			table.insert(out, [["]])
-		elseif type(object) == "table" or type(object) == "userdata" then
+		elseif isobject(object) then
 			table.insert(out, "{ ")
 			for key, value in pairs(object) do
 				table.insert(out, "[")
@@ -283,7 +321,7 @@ do
 end
 
 local function freeze(object)
-	assert(type(object) == "table" or type(object) == "userdata")
+	assert(isobject(object))
 
 	local out = newproxy(true)
 	local metatable = getmetatable(out)
@@ -298,7 +336,7 @@ local function freeze(object)
 			if type(key) == "number" then
 				-- XXX: allow reading one past end of arrays
 				local previous = object[key-1]
-				if previous ~= nil then
+				if previous ~= nil or key == 1 then
 					return nil
 				end
 			end
@@ -320,6 +358,36 @@ local function freeze(object)
 	end
 	
 	return out
+end
+
+local function withkv(object, key, newValue)
+	local newObject = {}
+	for k, v in pairs(object) do
+		newObject[k] = v
+	end
+
+	newObject[key] = newValue
+	return freeze(newObject)
+end
+
+local function map(f, list)
+	local out = {}
+	for k, v in pairs(list) do
+		out[k] = f(v)
+	end
+	return out
+end
+
+local function findwith(list, property, value)
+	for _, element in ipairs(list) do
+		if element[property] == value then
+			return element
+		end
+	end
+end
+
+local function identity(x)
+	return x
 end
 
 -- Lexer -----------------------------------------------------------------------
@@ -365,7 +433,12 @@ local function lexSmol(source, filename)
 	local TOKENS = {
 		{ -- local type
 			"[A-Z][A-Za-z0-9]*",
-			function(x) return {tag = "typename", name = x} end
+			function(x)
+				if IS_KEYWORD[x] then
+					return {tag = "type-keyword", keyword = x}
+				end
+				return {tag = "typename", name = x}
+			end
 		},
 		{ -- keywords, local identifiers
 			"[a-z][A-Za-z0-9]*",
@@ -440,7 +513,7 @@ local function lexSmol(source, filename)
 			context = context:sub(1, 35-3) .. "..."
 		end
 		local location = "at " .. filename .. ":" .. line .. ":" .. column
-			.. "\n\t(near `" .. context .. "`)"
+			.. "\n\t(at `" .. context .. "`)\n"
 
 		-- Tokenize string literals
 		if source:sub(1, 1) == QUOTE then
@@ -457,12 +530,14 @@ local function lexSmol(source, filename)
 			for i = 2, #source do
 				local c = source:sub(i, i)
 				if c == "\n" then
-					quit("found an unfinished string literal" .. location)
+					quit("The compiler found an unfinished string literal",
+						" that begins ", location)
 				end
 				if escaped then
 					if not SPECIAL[c] then
-						quit("unknown escape sequence `\\"
-							.. c .. "`" .. location)
+						quit("The compiler found an unknown escape sequence",
+							" `\\", c, "`",
+							" in a string literal that begins", location)
 					end
 					content = content .. SPECIAL[c]
 					escaped = not escaped
@@ -519,8 +594,8 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				quit("could not recognize any token " .. location
-					.. " (near `" .. source:sub(1, 15) .. "...`)")
+				quit("The compiler could not recognize any token ", location,
+					" (near `" .. source:sub(1, 15) .. "...`)")
 			end
 		end
 	end
@@ -659,7 +734,9 @@ local function parseSmol(tokens)
 			"components.tag must be string")
 
 		-- A human readable context of the fields
-		local context = " in " .. components.tag
+		local contextMiddle = " in " .. components.tag
+		local contextBegin = " to begin " .. components.tag
+		local contextFinish = " to finish " .. components.tag
 
 		for i = 1, #components do
 			assert(#components[i] >= 2)
@@ -688,7 +765,7 @@ local function parseSmol(tokens)
 			}
 
 			-- Parse fields in sequence
-			for _, component in ipairs(components) do
+			for i, component in ipairs(components) do
 				-- Attempt to parse one field
 				local key = component[1]
 				local memberParser = component[2]
@@ -703,8 +780,16 @@ local function parseSmol(tokens)
 					end
 					stream = rest
 				elseif required then
-					-- This member was a required cut
-					quit("expected ", required, context, " ", stream:location())
+					-- This member was a required cut; report an error with
+					-- the input
+					local context = contextMiddle
+					if i == 1 then
+						context = contextBegin
+					elseif i == #components then
+						context = contextFinish
+					end
+					quit("The compiler expected ", required, context,
+						" ", stream:location())
 				else
 					-- This failed to parse
 					return nil
@@ -819,8 +904,9 @@ local function parseSmol(tokens)
 	local T_STRING_LITERAL = TOKEN "string-literal"
 	local T_OPERATOR = TOKEN "operator"
 
-	-- HELPER meaning object repeated 0 or more times,
-	-- separated by commas
+	-- HELPER meaning object repeated several times,
+	-- separated by commas.
+	-- count: "N+" means "N or more things", N >= 0.
 	local function commad(object, count, expected)
 		assert(type(object) == "function", "object must be function")
 		assert(type(expected) == "string", "expected must be string")
@@ -865,13 +951,18 @@ local function parseSmol(tokens)
 				if not rest then
 					-- After a comma, an object of the proper
 					-- type must follow
-					quit("expected " .. expected .. " after `,` at "
-						.. stream:location())
+					quit("The compiler expected ", expected, " after `,` ",
+						stream:location())
 				end
 				table.insert(list, element)
 				stream = rest
 			end
 		end
+	end
+
+	local function parserOtherwise(p, value)
+		assert(type(p) == "function")
+		return parserMap(p, function(x) return x or value end)
 	end
 
 	-- DEFINES the grammar for the language
@@ -880,7 +971,7 @@ local function parseSmol(tokens)
 		import = composite {
 			tag = "import",
 			{"_", K_IMPORT},
-			{"name", T_IDENTIFIER, "an imported package name"},
+			{"package", T_IDENTIFIER, "an imported package name"},
 			{"class", optional(parserExtractor(composite { -- string | false
 				tag = "***type name",
 				{"_", K_DOT},
@@ -909,20 +1000,27 @@ local function parseSmol(tokens)
 		},
 		["concrete-type"] = composite {
 			tag = "concrete-type",
-			{"scope", optional(G "scope")}, --: string | false
+			{"package", optional(G "package-scope")}, --: string | false
 			{"base", T_TYPENAME}, --: {lexeme = string}
-			{"arguments", optional(G "type-arguments")}, --: [ Type ]
+			{
+				"arguments",
+				parserOtherwise(optional(G "type-arguments"), freeze {})
+			}, --: [ Type ]
 		},
-		["scope"] = parserExtractor(composite {
-			tag = "scope",
+		["package-scope"] = parserExtractor(composite {
+			tag = "package-scope",
 			{"name", T_IDENTIFIER},
 			{"_", K_SCOPE},
 		}, "name"),
 		["type-arguments"] = parserExtractor(composite {
 			tag = "***",
 			{"_", K_SQUARE_OPEN},
-			{"arguments", commad(G "type", "1+", "type argument"), "type arguments"},
-			{"_", K_SQUARE_CLOSE, "`]` to end type arguments"},
+			{
+				"arguments",
+				commad(G "type", "1+", "type argument"),
+				"type arguments"
+			},
+			{"_", K_SQUARE_CLOSE, "`]`"},
 		}, "arguments"),
 
 		-- Represents a generics definition
@@ -934,7 +1032,10 @@ local function parseSmol(tokens)
 				commad(T_GENERIC, "1+", "generic parameter variable"),
 				"generic parameter variables"
 			},
-			{"constraints", optional(G "generic-constraints")},
+			{
+				"constraints",
+				parserOtherwise(optional(G "generic-constraints"), {})
+			},
 			{"_", K_SQUARE_CLOSE, "`]` to end list of generics"},
 		},
 		["generic-constraints"] = parserExtractor(composite {
@@ -950,39 +1051,46 @@ local function parseSmol(tokens)
 			tag = "constraint",
 			{"parameter", T_GENERIC},
 			{"_", K_IS, "`is` after generic parameter"},
-			{"constraint", G "type", "a type constrain after `is`"},
+			{"constraint", G "concrete-type", "a type constrain after `is`"},
 		},
 
 		-- Represents a union
-		union = composite {
-			tag = "union",
+		["union-definition"] = composite {
+			tag = "union-definition",
 			{"_", K_UNION},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", optional(G "generics")},
+			{"generics", parserOtherwise(optional(G "generics"), {
+				parameters = {},
+				constraints = {},
+			})},
 			{"_", K_CURLY_OPEN, "`{` to begin union body"},
 			{"fields", zeroOrMore(G "field-definition")},
 			{"methods", zeroOrMore(G "method-definition")},
-			{"_", K_CURLY_CLOSE, "`}` to close union body"},
+			{"_", K_CURLY_CLOSE, "`}`"},
 		},
 
 		-- Represents a class
-		class = composite {
+		["class-definition"] = composite {
 			tag = "class-definition",
 			{"_", K_CLASS},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", optional(G "generics")},
-			{"implements", optional(G "implements")},
+			{"generics", parserOtherwise(optional(G "generics"), {
+				parameters = {},
+				constraints = {},
+			})},
+			{"implements", parserOtherwise(optional(G "implements"), {})},
 			{"_", K_CURLY_OPEN, "`{` to begin class body"},
 			{"fields", zeroOrMore(G "field-definition")},
 			{"methods", zeroOrMore(G "method-definition")},
-			{"_", K_CURLY_CLOSE, "`}` to close class body"},
+			{"_", K_CURLY_CLOSE, "`}`"},
 		},
 		implements = parserExtractor(composite {
 			tag = "***implements",
 			{"_", K_IS},
 			{
 				"interfaces",
-				commad(G "concrete-type", "1+", "an interface name")
+				commad(G "concrete-type", "1+", "an interface name"),
+				"one or more interface names",
 			},
 		}, "interfaces"),
 		["field-definition"] = composite {
@@ -1159,11 +1267,14 @@ local function parseSmol(tokens)
 		},
 
 		-- Represents an interface
-		interface = composite {
+		["interface-definition"] = composite {
 			tag = "interface-definition",
 			{"_", K_INTERFACE},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", optional(G "generics")},
+			{"generics", parserOtherwise(optional(G "generics"), {
+				parameters = {},
+				constraints = {},
+			})},
 			{"_", K_CURLY_OPEN, "`{` to begin interface body"},
 			{"signatures", zeroOrMore(G "interface-signature")},
 			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
@@ -1198,9 +1309,9 @@ local function parseSmol(tokens)
 
 		-- Represents a top-level definition
 		definition = choice {
-			G "class",
-			G "union",
-			G "interface",
+			G "class-definition",
+			G "union-definition",
+			G "interface-definition",
 		},
 
 		-- Represents a package declaration
@@ -1214,7 +1325,7 @@ local function parseSmol(tokens)
 		-- Represents an entire source file
 		program = composite {
 			tag = "program",
-			{"package", G "package", "a package definition to begin file"},
+			{"package", G "package", "a package definition"},
 			{"imports", zeroOrMore(G "import")},
 			{"definitions", zeroOrMore(G "definition")},
 		},
@@ -1224,7 +1335,7 @@ local function parseSmol(tokens)
 	local program, rest = parsers.program(stream, parsers)
 	assert(rest ~= nil)
 	if rest:size() ~= 0 then
-		quit("expected another definition at " .. rest:location())
+		quit("The compiler expected another definition ", rest:location())
 	end
 
 	return program
@@ -1236,9 +1347,618 @@ end
 local function semanticsSmol(sources, main)
 	assert(type(main) == "string")
 
-	local output = {}
-	error("TODO")
-	return output
+	-- (1) Resolve the set of types that have been defined
+	local typeSourceDefinitions = {}
+	local sourcesByPackage = {}
+	for _, source in ipairs(sources) do
+		local packageName = source.package.name.lexeme
+
+		-- Make this source available from package name
+		sourcesByPackage[packageName] = sourcesByPackage[packageName] or {}
+		table.insert(sourcesByPackage[packageName], source)
+
+		-- Note the definition of all definitions made by this source
+		for _, definition in ipairs(source.definitions) do
+			local typeName = definition.name.lexeme
+			assert(type(typeName) == "string")
+			local fullName = packageName .. ":" .. typeName
+
+			-- Check that the type has not already been defined
+			if typeSourceDefinitions[fullName] then
+				quit("The type `", fullName, "` was already defined ",
+					typeSourceDefinitions[fullName].location,
+					".\nHowever, you are attempting to redefine it ",
+					definition.location)
+			end
+
+			-- Record this type
+			typeSourceDefinitions[fullName] = definition
+		end
+	end
+
+	-- (2) Resolve the full name and arity of all types
+	local classSignatures = {}
+	local interfaceSignatures = {}
+	local unionSignatures = {}
+	for _, source in ipairs(sources) do
+		local packageName = source.package.name.lexeme
+
+		-- A bare `typename` should resolve to `packageMap[typename]:typename`.
+		local packageMap = {}
+		local importLocation = {}
+
+		-- The set of package scopes which may be referred to by this source
+		-- file.
+		local packageIsAvailable = {
+			[packageName] = true
+		}
+
+		-- (i) Scan imports
+		for _, import in ipairs(source.imports) do
+			if import.class then
+				local importedFullName =
+					import.package.lexeme .. ":" .. import.class.lexeme
+
+				-- Check that this name hasn't been imported twice
+				if packageMap[import.class.lexeme] then
+					quit("The type `", import.class.lexeme,
+						" has already been imported ",
+						importLocation[import.class.lexeme],
+						"\nHowever, you are trying to import a type ",
+						"with the same name ", import.location)
+				elseif not typeSourceDefinitions[importedFullName] then
+					quit("The type `", importedFullName, "`",
+						" has not been defined. However, you are trying to",
+						" import it ", import.location)
+				end
+				
+				packageMap[import.class.lexeme] = import.package.lexeme
+				importLocation[import.class.lexeme] = import.location
+			else
+				-- Verify that this package name can be imported
+				if import.package.lexeme == packageName then
+					quit("The package `", packageName, "` cannot import",
+						" itself. However, you are trying to",
+						" `import ", packageName, "` ", import.location)
+				elseif not sourcesByPackage[import.package.lexeme] then
+					quit("There is no package called `", import.package.lexeme,
+						"`. However, you are trying to import it ",
+						import.location)
+				end
+
+				-- The package may be referred to
+				packageIsAvailable[import.package.lexeme] = true
+			end
+		end
+		-- (ii) Scan locally defined types
+		for _, definition in ipairs(source.definitions) do
+			local name = definition.name.lexeme
+			assert(type(name) == "string")
+
+			-- Check that the type has not been imported
+			if packageMap[name] then
+				assert(importLocation[name])
+				quit("The name `", name, "` was imported ",
+					importLocation[name], ".\nHowever, you are attempting to ",
+					"define a type with the name `", name, "` ",
+					definition.location)
+			end
+			packageMap[name] = packageName
+		end
+
+		-- REQUIRES t is a Type
+		-- RETURNS Type
+		local function normalizeTypePackage(t, genericsInScope)
+			assert(isobject(genericsInScope),
+				"genericsInScope must be an object")
+			t = freeze(t)
+
+			if t.tag == "concrete-type" then
+				local shortName = t.base.lexeme
+				local package = t.package
+				if package then
+					package = package.lexeme
+
+					-- Check that it was imported
+					if not packageIsAvailable[package] then
+						quit("The package `", package,
+							"` hasn't been imported. However, `",
+							"a type uses it ", t.location)
+					end
+				else
+					package = packageMap[t.base.lexeme]
+					if not package then
+						quit("There is no type called `", shortName,
+							"` in scope ", t.location)
+					end
+				end
+				assert(type(package) == "string")
+
+				local fullName = package .. ":" .. shortName
+				if not typeSourceDefinitions[fullName] then
+					quit("There is no type called `", fullName, "`. ",
+						"However, it is mentioned ", t.location)
+				end
+
+				-- Check that the number of type parameters is correct
+				local sourceDefinition = typeSourceDefinitions[fullName]
+				local expectedArity = #sourceDefinition.generics.parameters
+				local appliedArity = #t.arguments
+				if expectedArity ~= appliedArity then
+					quit("The type `", fullName, "` expects exactly ",
+						expectedArity, " type parameters.",
+						"\nHowever, ", appliedArity, " were applied ",
+						t.location)
+				end
+
+				-- Normalize all type parameters
+				local arguments = {}
+				for _, argument in ipairs(t.arguments) do
+					table.insert(arguments,
+						normalizeTypePackage(argument, genericsInScope))
+				end
+
+				return freeze {
+					tag = "concrete-type",
+					name = fullName,
+					arguments = arguments,
+					location = t.location,
+				}
+			elseif t.tag == "generic" then
+				-- Check that it is in-scope
+				if not genericsInScope[t.name] then
+					quit("There is no generic `#" .. t.name .. "` in scope.",
+					"\nHowever, it is referenced ", t.location)
+				end
+				return t
+			elseif t.tag == "type-keyword" then
+				return t
+			end
+			error("unknown type tag `" .. t.tag .. "`")
+		end
+
+		-- RETURNS generics
+		-- context: a human-readable string of context (e.g., "class Foo")
+		local function normalizeGenericsPackage(generics, context)
+			assert(isobject(generics))
+			assert(type(context) == "string", "context must be string")
+
+			-- Build a list of type parameters
+			local out = {}
+			local outScope = {}
+			local genericByName = {}
+			for _, parameter in ipairs(generics.parameters) do
+				assert(parameter.tag == "generic")
+				assert(type(parameter.name) == "string")
+
+				-- Check that this generic type hasn't been used before
+				if genericByName[parameter.name] then
+					quit("In " .. context .. ", the type parameter `",
+						parameter.name, "` is defined twice.\n",
+						"The first definition is ",
+						genericByName[parameter.name].location,
+						"The second definition is ", parameter.location)
+				end
+
+				local generic = {
+					name = parameter.name,
+					constraints = {},
+
+					source = parameter,
+					location = parameter.location,
+				}
+
+				-- Record the generic
+				genericByName[parameter.name] = generic
+				table.insert(out, generic)
+				outScope[generic.name] = generic
+			end
+
+			-- outScope is "frozen" here, however we want to allow
+			-- reads to find absence (for error checking).
+			-- TODO: improve that
+
+			local id = 0
+			-- Add each constraint to the appropriate type parameter
+			for _, constraint in ipairs(generics.constraints) do
+				-- Find the matching parameter
+				local parameterName = constraint.parameter.name
+				local parameter = genericByName[parameterName]
+				if not parameter then
+					quit("There is no type parameter called `",
+						parameterName, "` in ", context)
+				end
+				local interface = normalizeTypePackage(
+					constraint.constraint, outScope)
+
+				-- Add that interface to the list of constraint
+				id = id + 1
+				table.insert(parameter.constraints, {
+					interface = interface,
+					name = "#" .. id,
+				})
+
+				-- TODO: prevent duplicate interfaces
+			end
+
+			return freeze(out), outScope
+		end
+
+		local function normalizeSignaturePackage(signature, genericScope)
+			assert(isobject(genericScope), "genericScope must be an object")
+
+			local methodName = signature.name.lexeme
+
+			-- Normalize parameter types
+			local parameters = {}
+			for _, p in ipairs(signature.parameters) do
+				table.insert(parameters, {
+					name = p.name.lexeme,
+					type = normalizeTypePackage(p.type, genericScope),
+					location = p.location,
+				})
+			end 
+			
+			-- Normalize return types
+			local returns = {}
+			for _, t in ipairs(signature.returns) do
+				table.insert(returns, normalizeTypePackage(t, genericScope))
+			end
+
+			-- Static function
+			return {
+				name = methodName,
+				modifier = signature.modifier.lexeme,
+				parameters = parameters,
+				returns = returns,
+				location = signature.location,
+				source = signature,
+			}
+		end
+
+		-- (iii) Rescan all local definitions and emit all signatures with
+		-- fully-qualified types.
+		for _, definition in ipairs(source.definitions) do
+			local fullName = packageName .. ":" .. definition.name.lexeme
+
+			if definition.tag == "class-definition" then
+				-- (a) type parameters / type constraints
+				local generics, genericScope = normalizeGenericsPackage(
+					definition.generics, "class " .. fullName)
+
+				-- map[string]source
+				-- Used for complaining about duplicates
+				local memberSourceDefinition = {}
+
+				-- (b) fields
+				local fields = {}
+				for _, field in ipairs(definition.fields) do
+					-- Check that a named hasn't already been defined
+					if memberSourceDefinition[field.name.lexeme] then
+						local previousField =
+							memberSourceDefinition[field.name.lexeme]
+						quit("In `", fullName, "` a field named `",
+							field.name.lexeme, "` is defined twice.\n",
+							"The first definition is ",
+							previousField.location,
+							"The second definition is ",
+							field.location)
+					end
+					memberSourceDefinition[field.name] = field
+
+					-- Add the field
+					table.insert(fields, {
+						name = field.name.lexeme,
+						type = normalizeTypePackage(field.type, genericScope),
+						location = field.location,
+					})
+				end
+				
+				-- (c) methods and static functions
+				local statics = {}
+				local methods = {}
+				for _, method in ipairs(definition.methods) do
+					-- Normalize the member's signature
+					local signature = normalizeSignaturePackage(
+						method.signature, genericScope)
+
+					-- Include NOT-NORMALIZED body
+					local m = withkv(
+						signature, "body", method.body
+					)
+
+					if m.modifier == "static" then
+						table.insert(statics, m)
+					else
+						table.insert(methods, m)
+					end
+				end
+
+				-- (d) interface implementations
+				local implements = {}
+				for _, interface in ipairs(definition.implements) do
+					table.insert(implements,
+						normalizeTypePackage(interface, genericScope))
+				end
+
+				-- Record this class's signature
+				table.insert(classSignatures, freeze {
+					name = fullName,
+
+					implements = implements,
+					generics = generics,
+
+					fields = fields,
+					statics = statics,
+					methods = methods,
+
+					source = definition,
+					location = definition.location,
+				})
+			elseif definition.tag == "interface-definition" then
+				-- Get in-scope generics
+				local generics, genericScope = normalizeGenericsPackage(
+					definition.generics, "interface " .. fullName)
+
+				-- Add all members
+				local statics = {}
+				local methods = {}
+				for _, signature in ipairs(definition.signatures) do
+					local m = normalizeSignaturePackage(signature, genericScope)
+					if m.modifier == "static" then
+						table.insert(statics, m)
+					else
+						table.insert(methods, m)
+					end
+				end
+
+				-- Record this interface's signature
+				table.insert(interfaceSignatures, freeze {
+					name = fullName,
+					generics = generics,
+					statics = statics,
+					methods = methods,
+
+					source = definition,
+					location = definition.location,
+				})
+			elseif definition.tag == "union-definition" then
+				-- (a) type parameters / type constraints
+				local generics, genericScope = normalizeGenericsPackage(
+					definition.generics, "interface " .. fullName)
+				assert(genericScope)
+
+				-- map[string]source
+				-- Used for complaining about duplicates
+				local memberSourceDefinition = {}
+
+				-- (b) fields
+				local fields = {}
+				for _, field in ipairs(definition.fields) do
+					-- Check that a named hasn't already been defined
+					if memberSourceDefinition[field.name.lexeme] then
+						local previousField =
+							memberSourceDefinition[field.name.lexeme]
+						quit("In `", fullName, "` a field named `",
+							field.name.lexeme, "` is defined twice.\n",
+							"The first definition is ",
+							previousField.location,
+							"The second definition is ",
+							field.location)
+					end
+					memberSourceDefinition[field.name] = field
+
+					-- Add the field
+					table.insert(fields, freeze {
+						name = field.name.lexeme,
+						type = normalizeTypePackage(field.type, genericScope),
+						location = field.location,
+					})
+				end
+
+				-- (c) methods and static functions
+				local statics = {}
+				local methods = {}
+				for _, method in ipairs(definition.methods) do
+					-- Normalize signature
+					local signature = normalizeSignaturePackage(
+						method.signature, genericScope)
+
+					-- Include NOT-NORMALIZED body
+					local m = withkv(signature, "body", method.body)
+
+					if m.modifier == "static" then
+						table.insert(statics, m)
+					else
+						table.insert(methods, m)
+					end
+				end
+
+				-- Record the union's signature
+				table.insert(unionSignatures, freeze {
+					name = fullName,
+					fields = fields,
+					generics = generics,
+
+					methods = methods,
+					statics = statics,
+
+					source = definition,
+					location = definition.location,
+				})
+			else
+				error("unknown definition tag `" .. definition.tag .. "`")
+			end
+		end
+	end
+
+	-- Collect a map of name => interface
+	local interfaceByName = {}
+	for _, interface in ipairs(interfaceSignatures) do
+		assert(type(interface.name) == "string")
+		interfaceByName[interface.name] = interface
+	end
+
+	-- RETURNS whether or not the types 'a' and 'b' are exactly equal
+	local function areEqualTypes(a, b)
+		a, b = freeze(a), freeze(b)
+
+		if a.tag ~= b.tag then
+			return false
+		end
+		if a.tag == "generic" then
+			return a.name == b.name
+		elseif a.tag == "concrete-type" then
+			-- Check the base name is the same
+			if a.name ~= b.name then
+				return false
+			end
+			-- Check the arguments are the same
+			assert(#a.arguments == #b.arguments)
+			for i in ipairs(a.arguments) do
+				if not areEqualTypes(a.arguments[i], b.arguments[i]) then
+					return false
+				end
+			end
+			return true
+		elseif a.tag == "type-keyword" then
+			return a.keyword == b.keyword
+		end
+		error("unknown type tag `" .. a.tag .. "`")
+	end
+
+	-- RETURNS string which is smol code representing type
+	local function typeDescribe(t)
+		t = freeze(t)
+		if t.tag == "generic" then
+			return "#" .. t.name
+		elseif t.tag == "concrete-type" then
+			local out = t.name
+			if #t.arguments > 0 then
+				for i, argument in ipairs(t.arguments) do
+					if i == 1 then
+						out = out .. "["
+					else
+						out = out .. ", "
+					end
+					out = out .. typeDescribe(argument)
+				end
+				out = out .. "]"
+			end
+			return out
+		elseif t.tag == "type-keyword" then
+			return t.keyword
+		end
+		error("unknown type tag `" .. t.tag .. "`")
+	end
+
+	-- RETURNS NOTHING
+	local function checkClassImplements(class, implements, interface)
+		-- RETURNS a type from `interface` with implement arguments substituted
+		local function parameterSubstituted(t)
+			if t.tag == "concrete-type" then
+				return freeze {
+					name = t.base,
+					arguments = map(parameterSubstituted, t.arguments),
+					location = t.location, -- XXX: is this right?
+				}
+			elseif t.tag == "generic" then
+				-- Substitute
+				for i, generic in ipairs(interface.generics) do
+					if generic.name == t.name then
+						return implements.arguments[i]
+					end
+				end
+				error("unmatch generic `" .. t.name .. "`")
+			elseif t.tag == "type-keyword" then
+				return t
+			end
+			error("unknown type tag `" .. t.tag .. "`")
+		end
+
+		-- Check that each static and each method in the interface is
+		-- implemented with the correct signature
+		local memberRepositories = {
+			{r="statics", k="static function"},
+			{r="methods", k="method"},
+		}
+		for _, rk in pairs(memberRepositories) do
+			local REPOSITORY = rk.r
+			local KIND = rk.k
+			for _, signature in ipairs(interface[REPOSITORY]) do
+				assert(isstring(signature.name))
+
+				local CLAIM = "class " .. class.name .. " claims to implement"
+						.. " interface " .. interface.name .. ".\n"
+
+				local impl = findwith(class[REPOSITORY], "name", signature.name)
+				if not impl then
+					quit(CLAIM,
+						"However, it does not implement a ", KIND, " called ",
+						signature.name)
+				end
+
+				local HOWEVER = "However, "
+					.. KIND .. " `" .. signature.name .. "`"
+				local LOCATION = "\n\nThe interface's function signature"
+					.. " is defined " .. signature.location
+					.. "\nThe " .. KIND .. " is implemented at "
+					.. impl.location
+
+				-- Check that parameter types are the same
+				if #signature.parameters ~= #impl.parameters then
+					quit(CLAIM, HOWEVER, " takes ", #impl.parameters,
+						" parameter(s), rather than ", #signature.parameters,
+						" parameter(s).", LOCATION)
+				end
+				for i, generalExpected in ipairs(signature.parameters) do
+					local expected = parameterSubstituted(generalExpected.type)
+					local got = impl.parameters[i].type
+					if not areEqualTypes(expected, got) then
+						quit(CLAIM, HOWEVER, " takes `", typeDescribe(got), "`",
+							" rather than `", typeDescribe(expected), "`",
+							" as the ", string.ordinal(i), " parameter.",
+							LOCATION)
+					end
+				end
+
+				-- Check that return types are the same
+				if #signature.returns ~= #impl.returns then
+					quit(CLAIM, HOWEVER, " returns ",
+						#impl.returns, " rather than ",
+						#signature.returns, " values.",
+						LOCATION)
+				end
+				for i, generalExpected in ipairs(signature.returns) do
+					local expected = parameterSubstituted(generalExpected)
+					if not areEqualTypes(expected, impl.returns[i]) then
+						quit(CLAIM, HOWEVER, " returns ",
+							"`", typeDescribe(impl.returns[i]), "`",
+							" rather than `", typeDescribe(expected), "`",
+							LOCATION)
+					end
+				end
+			end
+		end
+
+		-- All methods are implemented as expected!
+	end
+
+	-- (3) Check that each class actually implements each interface that it
+	-- claims to
+	for _, class in ipairs(classSignatures) do
+		for _, impl in ipairs(class.implements) do
+			local signatures = interfaceByName[impl.name]
+			assert(signatures ~= nil)
+			checkClassImplements(class, impl, signatures)
+		end
+	end
+
+	-- (4) Check that all type bounds are satisfied
+
+
+	-- TODO
+	return nil
 end
 
 -- Transpilation ---------------------------------------------------------------
@@ -1255,26 +1975,44 @@ local sourceFromSemantics = {}
 -- TYPE Struct
 -- Struct.name: string
 -- Struct.fields: [{name: string, type: string}]
--- Struct.typeParameters: [string]
--- Struct.typeConstraints: [{parameter: string, constraint: string}]
+-- Struct.generics: [{
+--     name: string,
+--     constraints: [{interface: string, name: string}]
+-- }]
 -- Struct.implements: [string]
+
+-- TYPE Union
+-- Union.name: string
+-- Union.fields: [{name: string, type: string}]
+-- Union.generics: [{
+--     name: string,
+--     constraints: [{interface: string, name: string}]
+-- }]
 
 -- TYPE Interface
 -- Interface.name: string
+-- Interface.statics: [ {
+--     name: string,
+--     parameters: [{name: string, type: string}],
+--     returnTypes: [string],
+-- } ]
 -- Interface.methods: [ {
 --     name: string,
 --     parameters: [string],
 --     returnTypes: [string],
---     static: boolean
 -- } ]
--- Interface.parameters: [string]
--- Interface.constraints: [{parameteR: string, constraint: string}]
+-- Interface.generics: [{
+--     name: string,
+--     constraints: [{interface: string, name: string}]
+-- }]
 
 -- TYPE Function
 -- Function.name: string
 -- Function.parameters: [{name: string, type: string}]
--- Function.typeParameters: [string] | false
--- Function.typeConstraints: [{parameter: string, constraint: string}] | false
+-- Function.generics: false | [{
+--     name: string,
+--     constraints: [{interface: string, name: string}]
+-- }]
 -- Function.returnType: string
 -- Function.body: Statement
 
@@ -1284,13 +2022,14 @@ local sourceFromSemantics = {}
 
 -- RETURNS a string representing a Lua program with the indicated semantics
 function sourceFromSemantics.lua(semantics)
-
+	-- RETURNS a valid Lua identifier
 	local function luaizeFunction(name)
 		assert(type(name) == "string", "luaizeFunction requires string")
 
 		return (name:gsub(":", "_"))
 	end
 
+	-- RETURNS a valid Lua identifier
 	local function luaizeConstraint(name)
 		if type(name) == "string" then
 			assert(type(name) == "string", "luaizeConstraint requires string")
@@ -1307,31 +2046,32 @@ function sourceFromSemantics.lua(semantics)
 			.. "_for_".. luaizeFunction(base)
 	end
 
-	-- Lua target may ignore
-	-- semantics.structs, semantics.unions, semantics.interfaces
-
 	local output = {
 		"-- THIS FILE GENERATED BY SMOL COMPILER:\n\t-- ",
 		INVOKATION:gsub("\n", "\n\t-- "),
 		"\n"
 	}
+
+	-- OUTPUTS a comment indicating the begin of a new section of the file
 	local function outputHeader(name)
 		local line = "\n-- " .. name .. " "
 		table.insert(output, line:postpad("-", 80))
 		table.insert(output, "\n\n")
 	end
 
+	-- OUTPUTS a Lua serialization of the given statement
 	local function generateStatement(statement, indentation)
 		assert(type(statement.tag) == "string")
 		if statement.tag == "block" then
-			-- XXX: always implicitly surrounded by Lua block
+			-- XXX: always implicitly surrounded by Lua block;
+			-- need not create `do` `end` pair
 			for _, s in ipairs(statement.statements) do
 				generateStatement(s, indentation .. "\t")
 			end
 		elseif statement.tag == "var" then
 			table.insert(output, indentation)
 			table.insert(output, "local " .. statement.name)
-			table.insert(output, "\n")		
+			table.insert(output, ";\n")		
 		elseif statement.tag == "string" then
 			assert(type(statement.value) == "string")
 
@@ -1386,21 +2126,27 @@ function sourceFromSemantics.lua(semantics)
 			assert(type(statement.func) == "string")
 			assert(statement.dsts, show(statement))
 
-			-- Constraint arguments come after
-			local arguments = {}
+			-- Collect the arguments to be passed in the Lua call
+			local luaArguments = {}
+
+			-- Lua arguments include base instance + smol arguments
 			for _, argument in ipairs(statement.arguments) do
-				table.insert(arguments, argument)
+				table.insert(luaArguments, argument)
 			end
+
+			-- Lua arguments include interface constraints
 			for _, constraint in ipairs(statement.constraints) do
 				if type(constraint) == "string" then
-					table.insert(arguments, luaizeConstraint(constraint))
+					table.insert(luaArguments, luaizeConstraint(constraint))
 				else
-					table.insert(arguments, luaizeConstraint(constraint))
+					table.insert(luaArguments, luaizeConstraint(constraint))
 				end
 			end
 
-			-- Destination variables
 			table.insert(output, indentation)
+
+			-- Collect destination variables into assignment string
+			-- NOTE: This may be empty
 			for i = 1, #statement.dsts do
 				table.insert(output, statement.dsts[i])
 				if i == #statement.dsts then
@@ -1410,12 +2156,13 @@ function sourceFromSemantics.lua(semantics)
 				end
 			end
 
-			-- Lua function invocation
+			-- OUTPUT Lua function invocation
 			table.insert(output, luaizeFunction(statement.func))
 			table.insert(output, "(")
-			table.insert(output, table.concat(arguments, ", "))
+			table.insert(output, table.concat(luaArguments, ", "))
 			table.insert(output, ")\n")
 		elseif statement.tag == "return" then
+			-- OUTPUT Lua return
 			table.insert(output, indentation)
 			table.insert(output, "return ")
 			table.insert(output, table.concat(statement.values, ", "))
@@ -1441,7 +2188,7 @@ function sourceFromSemantics.lua(semantics)
 	end
 
 	outputHeader("Foreign functions")
-	-- Body of all foreign functions / types
+	-- OUTPUT the body of all foreign functions and types
 	table.insert(output, [[
 -- method Number:show() String
 function Number_show(number)
@@ -1483,7 +2230,7 @@ impl_coding_Showable_for_Number = {
 		end
 	end
 
-	-- Define the body of each function
+	-- OUTPUT the definition (including the body) of each function
 	outputHeader("Function definitions")
 	for _, fn in ipairs(semantics.functions) do
 		-- Collect type-parameters and type-constraints as Lua parameters
@@ -1493,23 +2240,21 @@ impl_coding_Showable_for_Number = {
 			assert(type(parameter.type) == "string")
 			table.insert(allParameters, parameter.name)
 		end
-		if fn.typeParameters then
-			for _, typeParameter in ipairs(fn.typeParameters) do
-				assert(type(typeParameter) == "string")
-				assert(typeParameter:sub(1, 1) == "#")
-			end
-			for _, typeConstraint in ipairs(fn.typeConstraints) do
-				local constraintOn = typeConstraint.parameter
-				assert(type(constraintOn) == "string",
-					"function typeConstraint.parameter must be string")
+		if fn.generics then
+			for _, generic in ipairs(fn.generics) do
+				assert(type(generic.name) == "string")
 
-				local constraintName = typeConstraint.name
-				assert(type(constraintName) == "string")
-				assert(constraintName:sub(1, 1) == "#")
+				for _, constraint in ipairs(generic.constraints) do
+					assert(type(constraint.name) == "string")
+					assert(type(constraint.interface) == "string")
+					assert(constraint.name:sub(1, 1) == "#") -- e.g., "#2"
 
-				local constraintType = typeConstraint.constraint
+					-- Lua target does not need constraint.interface since
+					-- the type of parameter is not specified
+					table.insert(allParameters,
+						luaizeConstraint(constraint.name))
+				end
 
-				table.insert(allParameters, luaizeConstraint(constraintName))
 			end
 		end
 
@@ -1532,7 +2277,6 @@ impl_coding_Showable_for_Number = {
 
 	-- Initialize all impls
 	outputHeader("Initialize impls")
-
 	for _, struct in ipairs(semantics.structs) do
 		for _, impl in ipairs(struct.implements) do
 			-- Search for the interface with the given name
@@ -1545,6 +2289,7 @@ impl_coding_Showable_for_Number = {
 			assert(#interfaces == 1)
 			local interface = interfaces[1]
 			
+			-- OUTPUT initialize for this impl
 			table.insert(output,
 				luaizeConstraint{type = struct.name, interface = impl})
 			table.insert(output, " = {\n")
@@ -1571,7 +2316,7 @@ end
 -- Main ------------------------------------------------------------------------
 
 if #arg ~= 2 then
-	quit("usage:\n\tlua compiler.lua"
+	quit("USAGE:\n", "\tlua compiler.lua"
 		.. " <directory containing .smol files>"
 		.. " <mainpackage:Mainclass>"
 		.. "\n\n\tFor example, `lua compiler.lua foo/ main:Main")
@@ -1597,7 +2342,7 @@ local sourceParses = {}
 for _, sourceFile in ipairs(sourceFiles) do
 	local file = io.open(sourceFile.path, "r")
 	if not file then
-		quit("could not open source file `" .. sourceFile.path .. "`")
+		quit("The compiler could not open source file `", sourceFile.path, "`")
 	end
 	local contents = file:read("*all")
 	file:close()
@@ -1609,4 +2354,4 @@ for _, sourceFile in ipairs(sourceFiles) do
 	table.insert(sourceParses, parseSmol(tokens))
 end
 
---local semantics = semanticsSmol(sourceParses, mainFunction)
+local semantics = semanticsSmol(sourceParses, mainFunction)
