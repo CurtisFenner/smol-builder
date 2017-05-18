@@ -201,6 +201,10 @@ local function isinteger(instance)
 	return type(instance) == "number" and instance%1 == 0
 end
 
+local function isfunction(instance)
+	return type(instance) == "function"
+end
+
 -- RETURNS the n-th (English) ordinal as a word
 function string.ordinal(n)
 	assert(isinteger(n), "n must be an integer")
@@ -221,16 +225,16 @@ function string.ordinal(n)
 end
 
 function string.prepad(str, with, length)
-	assert(type(with) == "string", "with must be a string")
-	assert(type(length) == "number", "length must be a number")
+	assert(isstring(with), "with must be a string")
+	assert(isinteger(length), "length must be an integer")
 	assert(#with == 1, "TODO: support #with > 1")
 
 	return string.rep(with, length - #str) .. str
 end
 
 function string.postpad(str, with, length)
-	assert(type(with) == "string", "with must be a string")
-	assert(type(length) == "number", "length must be a number")
+	assert(isstring(with), "with must be a string")
+	assert(isinteger(length), "length must be an integer")
 	assert(#with == 1, "TODO: support #with > 1")
 
 	return str .. string.rep(with, length - #str)
@@ -290,8 +294,8 @@ do
 	for i = 128, 255 do
 		escapedCharacter[string.char(i)] = "\\" .. tostring(i)
 	end
-	local function showAdd(object, out)
-		if type(object) == "string" then
+	local function showAdd(object, indent, out)
+		if isstring(object) then
 			-- Turn into a string literal
 			table.insert(out, [["]])
 			for character in object:gmatch "." do
@@ -299,15 +303,15 @@ do
 			end
 			table.insert(out, [["]])
 		elseif isobject(object) then
-			table.insert(out, "{ ")
+			table.insert(out, "{")
 			for key, value in pairs(object) do
-				table.insert(out, "[")
-				showAdd(key, out)
-				table.insert(out, "]=")
-				showAdd(value, out)
-				table.insert(out, ", ")
+				table.insert(out, "\n" .. indent .. "\t[")
+				showAdd(key, indent .. "\t", out)
+				table.insert(out, "] = ")
+				showAdd(value, indent .. "\t", out)
+				table.insert(out, ",")
 			end
-			table.insert(out, "}")
+			table.insert(out, "\n" .. indent .. "}")
 		else
 			table.insert(out, tostring(object))
 		end
@@ -315,7 +319,7 @@ do
 
 	show = function(object)
 		local out = {}
-		showAdd(object, out)
+		showAdd(object, "", out)
 		return table.concat(out)
 	end
 end
@@ -356,7 +360,7 @@ local function freeze(object)
 	metatable.__len = function()
 		return #object
 	end
-	
+
 	return out
 end
 
@@ -378,6 +382,14 @@ local function map(f, list)
 	return out
 end
 
+local function getter(key)
+	assert(key ~= nil)
+
+	return function(object)
+		return object[key]
+	end
+end
+
 local function findwith(list, property, value)
 	for _, element in ipairs(list) do
 		if element[property] == value then
@@ -396,8 +408,8 @@ end
 -- source: the contents of a source file.
 -- filename: a human-readable name indicating this source file.
 local function lexSmol(source, filename)
-	assert(type(source) == "string")
-	assert(type(filename) == "string")
+	assert(isstring(source))
+	assert(isstring(filename))
 
 	-- Normalize line end-ings
 	source = source:gsub("\r*\n\r*", "\n")
@@ -491,7 +503,7 @@ local function lexSmol(source, filename)
 	local line = 1
 	local column = 1
 	local function advanceColumn(str)
-		assert(type(str) == "string" and #str >= 1)
+		assert(isstring(str) and #str >= 1)
 		if #str == 1 then
 			if str == "\r" then
 			elseif str == "\t" then
@@ -609,11 +621,11 @@ end
 local function Stream(list, offset)
 	offset = offset or 0
 	assert(type(list) == "table", "list must be table")
-	assert(type(offset) == "number", "offset must be number")
+	assert(isinteger(offset), "offset must be an integer")
 	for i = 1, #list do
-		assert(type(list[i].location) == "string",
+		assert(isstring(list[i].location),
 			"token must have string location; ") -- .. show(list[i]))
-		assert(type(list[i].lexeme) == "string",
+		assert(isstring(list[i].lexeme),
 			"token must have string lexeme; ") -- .. show(list[i]))
 	end
 
@@ -697,7 +709,7 @@ local function parseSmol(tokens)
 
 	-- PARSER for `parser` but only extracting `field`
 	local function parserExtractor(parser, field)
-		assert(type(field) == "string")
+		assert(isstring(field))
 		return parserMap(parser, function(x)
 			return x[field]
 		end)
@@ -730,8 +742,7 @@ local function parseSmol(tokens)
 	local function composite(components)
 		-- validate input
 		assert(type(components) == "table")
-		assert(type(components.tag) == "string",
-			"components.tag must be string")
+		assert(isstring(components.tag), "components.tag must be string")
 
 		-- A human readable context of the fields
 		local contextMiddle = " in " .. components.tag
@@ -740,7 +751,7 @@ local function parseSmol(tokens)
 
 		for i = 1, #components do
 			assert(#components[i] >= 2)
-			assert(type(components[i][1]) == "string",
+			assert(isstring(components[i][1]),
 				"component must provide key as string")
 			assert(components[i][1] ~= "tag",
 				"component cannot use key 'tag'")
@@ -753,8 +764,7 @@ local function parseSmol(tokens)
 				.. "; " .. i .. " of " .. #components ..  ")")
 
 			assert(#components[i] <= 3)
-			assert(components[i][3] == nil
-				or type(components[i][3]) == "string")
+			assert(components[i][3] == nil or isstring(components[i][3]))
 		end
 
 		return function(stream, parsers)
@@ -1145,8 +1155,11 @@ local function parseSmol(tokens)
 		["var-statement"] = composite {
 			tag = "var-statement",
 			{"_", K_VAR},
-			{"name", T_IDENTIFIER, "a variable name after `var`"},
-			{"type", G "type", "the variable's type after variable's name"},
+			{
+				"variables",
+				commad(G "variable", "1+", "a variable"),
+				"one or more variables",
+			},
 			{"_", K_EQUAL, "`=` after the variable in the var-statement"},
 			{"value", G "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end var-statement"},
@@ -1168,7 +1181,7 @@ local function parseSmol(tokens)
 					right = operation.operand,
 					operator = operation.operator.lexeme,
 				}
-				assert(type(out.operator) == "string")
+				assert(isstring(out.operator))
 				if out.left.tag == "binary" then
 					if out.left.operator ~= out.operator then
 						print("warning: operator precedence is not yet implemented")
@@ -1209,10 +1222,12 @@ local function parseSmol(tokens)
 		}, function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
+				assert(isstring(access.location))
 				out = {
 					tag = "access",
 					base = out,
 					access = access,
+					location = access.location,
 				}
 			end
 			return out
@@ -1235,11 +1250,13 @@ local function parseSmol(tokens)
 					tag = "call",
 					arguments = x.call.arguments,
 					name = x.name,
+					location = x.location,
 				}
 			end
 			return {
 				tag = "field",
 				name = x.name,
+				location = x.location,
 			}
 		end),
 
@@ -1296,7 +1313,7 @@ local function parseSmol(tokens)
 			{"parameters", commad(G "variable", "0+", "a parameter")},
 			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
 			{
-				"returns",
+				"returnTypes",
 				commad(G "type", "1+", "a return type"),
 				"a return type"
 			},
@@ -1345,7 +1362,7 @@ end
 
 -- RETURNS a semantic description of the program
 local function semanticsSmol(sources, main)
-	assert(type(main) == "string")
+	assert(isstring(main))
 
 	-- (1) Resolve the set of types that have been defined
 	local typeSourceDefinitions = {}
@@ -1360,7 +1377,7 @@ local function semanticsSmol(sources, main)
 		-- Note the definition of all definitions made by this source
 		for _, definition in ipairs(source.definitions) do
 			local typeName = definition.name.lexeme
-			assert(type(typeName) == "string")
+			assert(isstring(typeName))
 			local fullName = packageName .. ":" .. typeName
 
 			-- Check that the type has not already been defined
@@ -1433,7 +1450,7 @@ local function semanticsSmol(sources, main)
 		-- (ii) Scan locally defined types
 		for _, definition in ipairs(source.definitions) do
 			local name = definition.name.lexeme
-			assert(type(name) == "string")
+			assert(isstring(name))
 
 			-- Check that the type has not been imported
 			if packageMap[name] then
@@ -1462,7 +1479,7 @@ local function semanticsSmol(sources, main)
 					-- Check that it was imported
 					if not packageIsAvailable[package] then
 						quit("The package `", package,
-							"` hasn't been imported. However, `",
+							"` hasn't been imported. However, ",
 							"a type uses it ", t.location)
 					end
 				else
@@ -1472,7 +1489,7 @@ local function semanticsSmol(sources, main)
 							"` in scope ", t.location)
 					end
 				end
-				assert(type(package) == "string")
+				assert(isstring(package))
 
 				local fullName = package .. ":" .. shortName
 				if not typeSourceDefinitions[fullName] then
@@ -1521,7 +1538,7 @@ local function semanticsSmol(sources, main)
 		-- context: a human-readable string of context (e.g., "class Foo")
 		local function normalizeGenericsPackage(generics, context)
 			assert(isobject(generics))
-			assert(type(context) == "string", "context must be string")
+			assert(isstring(context), "context must be string")
 
 			-- Build a list of type parameters
 			local out = {}
@@ -1529,7 +1546,7 @@ local function semanticsSmol(sources, main)
 			local genericByName = {}
 			for _, parameter in ipairs(generics.parameters) do
 				assert(parameter.tag == "generic")
-				assert(type(parameter.name) == "string")
+				assert(isstring(parameter.name))
 
 				-- Check that this generic type hasn't been used before
 				if genericByName[parameter.name] then
@@ -1601,7 +1618,7 @@ local function semanticsSmol(sources, main)
 			
 			-- Normalize return types
 			local returns = {}
-			for _, t in ipairs(signature.returns) do
+			for _, t in ipairs(signature.returnTypes) do
 				table.insert(returns, normalizeTypePackage(t, genericScope))
 			end
 
@@ -1610,7 +1627,7 @@ local function semanticsSmol(sources, main)
 				name = methodName,
 				modifier = signature.modifier.lexeme,
 				parameters = parameters,
-				returns = returns,
+				returnTypes = returns,
 				location = signature.location,
 				source = signature,
 			}
@@ -1694,6 +1711,8 @@ local function semanticsSmol(sources, main)
 
 					source = definition,
 					location = definition.location,
+
+					normalizeTypePackage = normalizeTypePackage,
 				})
 			elseif definition.tag == "interface-definition" then
 				-- Get in-scope generics
@@ -1721,6 +1740,8 @@ local function semanticsSmol(sources, main)
 
 					source = definition,
 					location = definition.location,
+
+					normalizeTypePackage = normalizeTypePackage,
 				})
 			elseif definition.tag == "union-definition" then
 				-- (a) type parameters / type constraints
@@ -1785,6 +1806,8 @@ local function semanticsSmol(sources, main)
 
 					source = definition,
 					location = definition.location,
+
+					normalizeTypePackage = normalizeTypePackage,					
 				})
 			else
 				error("unknown definition tag `" .. definition.tag .. "`")
@@ -1793,6 +1816,7 @@ local function semanticsSmol(sources, main)
 	end
 
 	local function getDefinition(name)
+		assert(isstring(name), "name must be a string")
 		for _, class in ipairs(classSignatures) do
 			if class.name == name then
 				return class, "class"
@@ -1864,28 +1888,44 @@ local function semanticsSmol(sources, main)
 		error("unknown type tag `" .. t.tag .. "`")
 	end
 
+	-- RETURNS a type with generics substituted
+	-- genericMap: [string] => type
+	local function instantiateGenerics(t, genericMap)
+		assert(isobject(t), "t must be an object")
+		assert(isstring(t.tag), "type must have a string tag")
+		assert(isobject(genericMap))
+
+		local function recursive(u)
+			return instantiateGenerics(u, genericMap)
+		end
+
+		if t.tag == "concrete-type" then
+			return freeze {
+				tag = "concrete-type",
+				name = t.name,
+				arguments = map(recursive, t.arguments),
+				location = t.location, -- XXX: is this the right location?
+			}
+		elseif t.tag == "generic" then
+			local match = genericMap[t.name]
+			assert(match)
+			return match
+		elseif t.tag == "type-keyword" then
+			return t
+		end
+		error("unknown type tag `" .. tostring(t.tag) .. "`")
+	end
+
 	-- RETURNS NOTHING
 	local function checkClassImplements(class, implements, interface)
 		-- RETURNS a type from `interface` with implement arguments substituted
+		local genericMap = {}
+		for i, generic in ipairs(interface.generics) do
+			genericMap[generic.name] = implements.arguments[i]
+		end
+
 		local function parameterSubstituted(t)
-			if t.tag == "concrete-type" then
-				return freeze {
-					name = t.base,
-					arguments = map(parameterSubstituted, t.arguments),
-					location = t.location, -- XXX: is this right?
-				}
-			elseif t.tag == "generic" then
-				-- Substitute
-				for i, generic in ipairs(interface.generics) do
-					if generic.name == t.name then
-						return implements.arguments[i]
-					end
-				end
-				error("unmatch generic `" .. t.name .. "`")
-			elseif t.tag == "type-keyword" then
-				return t
-			end
-			error("unknown type tag `" .. t.tag .. "`")
+			return instantiateGenerics(t, genericMap)
 		end
 
 		-- Check that each static and each method in the interface is
@@ -1935,17 +1975,17 @@ local function semanticsSmol(sources, main)
 				end
 
 				-- Check that return types are the same
-				if #signature.returns ~= #impl.returns then
+				if #signature.returnTypes ~= #impl.returnTypes then
 					quit(CLAIM, HOWEVER, " returns ",
-						#impl.returns, " rather than ",
-						#signature.returns, " values.",
+						#impl.returnTypes, " rather than ",
+						#signature.returnTypes, " values.",
 						LOCATION)
 				end
-				for i, generalExpected in ipairs(signature.returns) do
+				for i, generalExpected in ipairs(signature.returnTypes) do
 					local expected = parameterSubstituted(generalExpected)
-					if not areEqualTypes(expected, impl.returns[i]) then
+					if not areEqualTypes(expected, impl.returnTypes[i]) then
 						quit(CLAIM, HOWEVER, " returns ",
-							"`", typeDescribe(impl.returns[i]), "`",
+							"`", typeDescribe(impl.returnTypes[i]), "`",
 							" rather than `", typeDescribe(expected), "`",
 							LOCATION)
 					end
@@ -1973,10 +2013,44 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	-- (4) Check that all type bounds are satisfied
-	local function normalizeType(un, generics)
+	-- RETURNS nothing
+	local function checkTypeImplements(t, constraint, genericScope)
+		assert(isobject(genericScope), "genericScope must be an object")
+
+		if t.tag == "generic" then
+			error "TODO: lookup genericScope"
+		elseif t.tag == "type-keyword" then
+			local map = nil
+			if t.keyword == "Number" then
+				map = {
+					["core:Showable"] = true,
+					["core:Readable[Number]"] = true,
+				}
+			elseif t.keyword == "String" then
+				map = {
+					["core:Showable"] = true,
+					["core:Readable[String]"] = true,
+				}
+			elseif t.keyword == "Boolean" then
+				map = {
+					["core:Showable"] = true,
+					["core:Readable[Boolean]"] = true,
+				}
+			end
+			assert(map)
+			return map[typeDescribe(t)] or false
+		elseif t.tag == "concrete-type" then
+			error "TODO: refer to definition"
+		end
+		error("unknown type tag `" .. t.tag .. "`")
+	end
+
+	-- (4) Check that all type bounds are satisfied; compile!
+	local function normalizeType(un, generics, normalizeTypePackage)
 		assert(isobject(un), "generics must be an object")
 		assert(isobject(generics), "generics must be an object")
+		assert(isfunction(normalizeTypePackage),
+			"normalizeTypePackage must be a function")
 
 		-- (a) Do package normalization
 		local scope = {}
@@ -1990,10 +2064,541 @@ local function semanticsSmol(sources, main)
 			return t
 		elseif t.tag == "type-keyword" then
 			return t
-		elseif t.tag == "type-concrete" then
+		elseif t.tag == "concrete-type" then
+			local definition = getDefinition(t.name)
 
+			-- Normalize and validate type arguments;
+			-- Collect the assignment of generic variables
+			local genericMap = {}
+			for i, argument in ipairs(t.arguments) do
+				genericMap[definition.generics[i].name] =
+					normalizeType(argument, generics, normalizeTypePackage)
+			end
+			
+			-- ex.: definition: `class Box[#T | #T is Readable[#T]]`
+			-- ex.: t: `Box[Number]`
+			-- ex.: genericMap: {`#T` => `Number`}
+			-- Verify that each constraint is satisfied
+			for i, argument in ipairs(t.arguments) do
+				local genericConstraints = definition.generics[i].constraints
+				for _, genericConstraint in ipairs(genericConstraints) do
+					-- ex.: genericConstraint.interface: `Readable[#T]`
+					local constraintType = instantiateGenerics(
+						genericConstraint.interface,
+						genericMap)
+					-- ex.: constraintType: `Readable[Number]`
+					checkTypeImplements(argument, constraintType, generics)
+				end
+			end
+
+			return t
 		end
 		error("unknown type tag `" .. t.tag .. "`")
+	end
+
+	-- Defines the Number type and its members
+	local TYPE_NUMBER = {
+		tag = "type-keyword",
+		keyword = "Number",
+
+		-- XXX: can we use this in getMembers?
+		fields = {},
+		methods = {},
+		statics = {},
+		generics = {},
+	}
+
+	local function getMembers(t, context)
+		assert(isobject(t), "type must be an object")
+		assert(isobject(context), "context must be an object")
+		assert(isobject(context.generics), "context.generics must be an object")
+
+		if t.tag == "generic" then
+			-- Look up generic context to get a list of available
+			-- statics/methods based on interfaces
+			error("TODO: getMembers(generic)")
+		elseif t.tag == "concrete-type" then
+			-- Look up type with getDefinition
+			local definition, definitionKind = getDefinition(t.name)
+			if definitionKind == "class" then
+				-- methods, statics, fields:
+				local methods = {}
+				
+				-- RETURNS a type
+				-- Instantiate a member type using the specified arguments
+				local function instantiateMember(u)
+					assert(isobject(u))
+
+					-- Build generic map
+					local genericMap = {}
+					for i, generic in ipairs(definition.generics) do
+						local name = generic.name
+						local argument = t.arguments[i]
+						genericMap[name] = argument
+					end
+
+					-- Use generic map for substitution
+					return instantiateGenerics(u, genericMap)
+				end
+
+				-- Instantiate all methods
+				local methods = {}
+				for _, method in ipairs(definition.methods) do
+					-- Instantiate return types and parameters
+					local returnTypes =
+						map(instantiateMember, method.returnTypes)
+					local parameters = map(function(x)
+						return {
+							name = x.name,
+							type = instantiateMember(x.type)
+						}
+					end, method.parameters)
+
+					table.insert(methods, freeze {
+						name = method.name,
+						returnTypes = returnTypes,
+						parameters = parameters,
+					})
+				end
+
+				-- Instantiate all statics
+				local statics = {}
+				for _, static in ipairs(definition.statics) do
+					-- Instantiate return types and parameters
+					local returnTypes =
+						map(instantiateMember, static.returnTypes)
+					local parameters = map(function(x)
+						return {
+							name = x.name,
+							type = instantiateMember(x.type)
+						}
+					end, static.parameters)
+
+					table.insert(statics, freeze {
+						name = static.name,
+						returnTypes = returnTypes,
+						parameters = parameters,
+					})
+				end
+
+				local fields = {}
+				for _, field in ipairs(definition.fields) do
+					-- Instantiate field's type
+					table.insert(fields, freeze {
+						name = field.name,
+						type = instantiateMember(field.type),
+					})
+				end
+
+				return freeze {
+					methods = methods,
+					statics = statics,
+					fields = fields,
+					generics = definition.generics,
+				}
+			elseif definitionKind == "interface" then
+				-- (Used only as helper)
+				error("TODO")
+			elseif definitionKind == "union" then
+				error("TODO")
+			end
+		elseif t.tag == "type-keyword" then
+			-- Use static list
+			if t.keyword == "Number" then
+				return TYPE_NUMBER
+			end
+			error("unknown type keyword `" .. t.keyword .. "`")
+		end
+	
+		error("unknown type tag `" .. t.tag .. "`")
+	end
+
+	-- RETURNS (a list of IR-statements, expression info)
+	-- expression info: a list of {name = string, type = Type}
+	local function compileExpression(ast, normalizer, context)
+		assert(isobject(ast))
+		assert(isstring(ast.tag))
+		assert(isobject(context), "context must be an object")
+		assert(isinteger(context.unique))
+
+		local function recursive(e, ...)
+			assert(... == nil)
+			local a, b, c = compileExpression(e, normalizer, context)
+			assert(c == nil)
+			assert(isobject(a), "1st from compileExpression must be an object")
+			assert(isobject(b), "2nd from compileExpression must be an object")
+			return a, b
+		end
+
+		-- RETURNS an identifier unique to the current statement compilation
+		local function tmp(hint)
+			if not isstring(hint) then
+				assert(hint == nil)
+			end
+			local id = "_tmp_" .. tostring(context.unique)
+			if hint then
+				id = id .. "_" .. hint
+			end
+			context.unique = context.unique + 1
+			return id
+		end
+
+		if ast.tag == "integer-literal" then
+			local id = tmp("int")
+			local out = {
+				{tag = "var",
+					name = id,
+					type = "Number",
+				},
+				{tag = "number",
+					value = ast.value,
+					dst = id,
+				},
+			}
+			local info = {
+				{name = id, type = TYPE_NUMBER},
+			}
+			return out, info
+		elseif ast.tag == "identifier" then
+			local name = ast.name
+
+			-- (1) Look up the variable in scope
+			local type = nil
+			for _, scope in ipairs(context.scopes) do
+				if scope[name] then
+					type = scope[name].type
+					break
+				end
+			end
+
+			if not type then
+				quit("No variable called `", name, "` is in scope ",
+					ast.location) 
+			end
+
+			return {}, {{name = name, type = type}}
+		elseif ast.tag == "access" then
+			local out, baseInfo = recursive(ast.base)
+			if #baseInfo ~= 1 then
+				quit("You are trying to access a method/field on something with " .. #baseInfo .. " values (rather than 1) ", ast.location)
+			end
+			local baseType = baseInfo[1].type
+			local baseSrc = baseInfo[1].name
+
+			if ast.access.tag == "call" then
+				local members = getMembers(baseType, context)
+				local name = ast.access.name.name
+				assert(isstring(name))
+
+				-- Find method being called
+				local method = findwith(members.methods, "name", name)
+				if not method then
+					quit("The type `", typeDescribe(baseType), "` does not",
+						" define a method called `", name, "`.",
+						"\nHowever, you are trying to call it ",
+						ast.access.location)
+				end
+
+				-- Compile each argument
+				local argumentsInfo = {}
+				for i, argument in ipairs(ast.access.arguments) do
+					local irs, info = recursive(argument)
+					for _, ir in ipairs(irs) do
+						table.insert(out, ir)
+					end
+
+					-- Check the plurality
+					if #info ~= 1 then
+						quit("The ", string.ordinal(i), " argument to a method call is ", #info, " values (rather than 1) ", ast.access.location)
+					end
+
+					table.insert(argumentsInfo, info[1])
+				end
+
+				-- Verify the argument types match the definition
+				if #argumentsInfo ~= #method.parameters then
+					quit("Member function `",
+						typeDescribe(baseType) .. "." .. name,
+						"` expects ", #method.parameters, " arguments,",
+						" but it was given ", #argumentsInfo, " ",
+						ast.location)
+				end
+				for i, argument in ipairs(argumentsInfo) do
+					local expected = method.parameters[i].type
+					local got = argument.type
+
+					if not areEqualTypes(expected, got) then
+						quit("The ", string.ordinal(i), " argument to the",
+						" method `",
+						typeDescribe(baseType) .. "." .. name,
+						"` expects the type `", typeDescribe(expected), "`.",
+						"\nHowever, a value of type `", typeDescribe(got), "`",
+						" was passed ", ast.location)
+					end
+				end
+
+				error("TODO")
+			elseif ast.access.tag == "field" then
+				error("TODO: access/field")
+			end
+
+			error("unknown access tag `" .. ast.access.tag .. "`")
+		elseif ast.tag == "static-call" then
+			local out = {}
+			local name = ast.name.lexeme
+			assert(isstring(name))
+			local baseType = normalizer(ast["base-type"])
+
+			local members = getMembers(baseType, context)
+
+			local static = findwith(members.statics, "name", name)
+			if not static then
+				quit("The type `", typeDescribe(baseType), "` does not define",
+					" a static function called `", name, "`.",
+					"\nHowever, you try to call it ", ast.location)
+			end
+			
+			-- Compile each argument
+			local argumentsInfo = {}
+			for i, argument in ipairs(ast.arguments) do
+				local irs, info = recursive(argument)
+				for _, ir in ipairs(irs) do
+					table.insert(out, ir)
+				end
+				if #info ~= 1 then
+					quit("The ", string.ordinal(i), " argument to a",
+						" static function ", argument.location,
+						" returns ", #info, " values rather than 1, so it",
+						" cannot be used as a function argument.")
+				end
+				table.insert(argumentsInfo, info[1])
+			end
+
+			-- Validate the arguments
+			if #static.parameters ~= #ast.arguments then
+				quit("static function expected ", #static.parameters, " parameters but ", #ast.arguments, " were given ", ast.location)
+			end
+			for i, argument in ipairs(argumentsInfo) do
+				local expected = static.parameters[i].type
+				local got = argument.type
+				if not areEqualTypes(expected, got) then
+					quit("The ", string.ordinal(i),
+						" argument to the static function `",
+						typeDescribe(baseType), ".", name,
+						"` expects the type `", typeDescribe(expected), "`.",
+						"\nHowever, a value of type `", typeDescribe(got), "`",
+						" is used ", ast.location)
+				end
+			end
+
+			-- Create variables for each return
+			local outputInfo = {}
+			for _, returnType in ipairs(static.returnTypes) do
+				local name = tmp()
+				table.insert(outputInfo, {
+					name = name,
+					type = returnType,
+				})
+				table.insert(out, {tag = "var",
+					name = name,
+					type = returnType,
+				})
+			end
+			
+			-- Execute the call
+			if baseType.tag == "generic" then
+				error("TODO: static interface call")
+			elseif baseType.tag == "concrete-type"
+			or baseType.tag == "type-keyword" then
+				-- Simple static function
+				local func = baseType.name .. ":" .. static.name
+
+				local arguments = map(getter "name", argumentsInfo)
+
+				-- Refer to the class's generics to get constraints:
+				local constraints = {}
+				for _, generic in ipairs(members.generics) do
+					for _, constraint in ipairs(generic.constraints) do
+						error("TODO!")
+					end
+				end
+				
+				table.insert(out, {tag = "call",
+					func = func,
+					arguments = arguments,
+					constraints = constraints,
+					dsts = map(function(x) return x.name end, outputInfo),
+				})
+			end
+
+			return out, outputInfo
+		end
+
+		error("unknown expression tag `" .. ast.tag .. "`")
+	end
+
+	-- RETURNS a list of IR-statements
+	-- MODIFIES funcOut.body to be a list
+	-- MODIFIES context
+	local function compileStatement(ast, normalizer, context)
+		local function recursive(x)
+			return compileStatement(x, normalizer, context)
+		end
+
+		if ast.tag == "block" then
+			-- Open a new variable scope
+			table.insert(context.scopes, {})
+
+			local statements = {}
+			for _, statement in ipairs(ast.statements) do
+				for _, ir in ipairs(recursive(statement)) do
+					table.insert(statements, ir)
+				end
+			end
+
+			local compiled = {tag = "block",
+				statements = statements,
+			}
+
+			-- Close variable scope
+			table.remove(context.scopes)
+			return {compiled}
+		elseif ast.tag == "var-statement" then
+			local out = {}
+
+			-- (1) Define variables
+			local variableTypes = {}
+			for _, variable in ipairs(ast.variables) do
+				-- (i) Normalize type
+				local variableType = normalizer(variable.type)
+				local name = variable.name.name
+				assert(isstring(name))
+
+				-- (ii) Check for shadowing
+				for _, scope in ipairs(context.scopes) do
+					if scope[name] then
+						quit("You tried to define the variable `",
+							name, "` ", variable.location,
+							"However, a variable called `", name, "`",
+							" that was defined ", scope[name].location,
+							" is still in-scope.")
+					end
+				end
+
+				-- (iii) Add variable to current scope
+				local currentScope = context.scopes[#context.scopes]
+				currentScope[name] = {
+					type = variableType,
+					location = variable.location,
+				}
+
+				-- (iv) Output var IR statement
+				table.insert(out, {tag = "var",
+					name = name,
+					type = variableType,
+				})
+				table.insert(variableTypes, variableType)
+			end
+
+			-- (2) Assign variables
+			-- (i) Compile expression and output IR statements
+			local irs, expressionInfo =
+				compileExpression(ast.value, normalizer, context)
+			for _, ir in ipairs(irs) do
+				table.insert(out, ir)
+			end
+
+			-- (ii) Verify that types match
+			if #expressionInfo ~= #ast.variables then
+				quit("You try to define " .. #ast.variables .. " variable(s) ",
+					ast.location, "However, the initial expression provides ",
+					#expressionInfo, " values instead of ", #ast.variables)
+			end
+			for i, variableType in ipairs(variableTypes) do
+				if not areEqualTypes(expressionInfo[i].type, variableType) then
+					quit("Variable `", ast.variables[i].name, "` is declared",
+						" with type `", typeDescribe(variableType), "`.",
+						"\nHowever, its initial value is of type `",
+						typeDescribe(expressionInfo[i].type), "`")
+				end
+			end
+
+			-- (iii) Output each assignment
+			for i, info in ipairs(expressionInfo) do
+				table.insert(out, {tag = "assign",
+					source = expressionInfo[i].name,
+					dst = ast.variables[i].name,
+				})
+			end
+
+			return out
+		end
+		error("unknown statement type `" .. ast.tag .. "`")
+	end
+
+	local compiled = {
+		structs = {},
+		functions = {},
+	}
+
+	-- (a) Classes
+	for _, class in ipairs(classSignatures) do
+		local function typeNormalizer(t, ...)
+			assert(... == nil)
+
+			return normalizeType(t, class.generics, class.normalizeTypePackage)
+		end
+
+		local structOut = {}
+		structOut.name = class.name
+
+		-- TODO: Validate generic constraints
+
+		-- Validate all fields
+		structOut.fields = {}
+		for _, field in ipairs(class.fields) do
+			table.insert(structOut.fields, {
+				name = field.name,
+				type = typeNormalizer(field.type)
+			})
+		end
+
+		-- Validate and compile statics
+		for _, static in ipairs(class.statics) do
+			local funcOut = {
+				modifier = "static",
+				class = class,
+			}
+
+			funcOut.name = static.name
+
+			funcOut.parameters = {}
+			local parameterScope = {}
+			for _, parameter in ipairs(static.parameters) do
+				local parameterType = typeNormalizer(parameter.type)
+				table.insert(funcOut.parameters, {
+					name = parameter.name,
+					type = parameterType,
+				})
+				parameterScope[parameter.name] = {
+					type = parameterType,
+					location = parameter.location,
+				}
+			end
+
+			funcOut.returnTypes = {}
+			for _, returnType in ipairs(static.returnTypes) do
+				table.insert(funcOut.returnTypes, typeNormalizer(returnType))
+			end
+
+			local scopes = {parameterScope}
+			funcOut.body = compileStatement(static.body, typeNormalizer, {
+				unique = 0,
+				scopes = scopes,
+				generics = class.generics,
+			})
+			table.insert(compiled.functions, funcOut)
+		end
 	end
 
 	-- TODO
@@ -2013,46 +2618,46 @@ local sourceFromSemantics = {}
 
 -- TYPE Struct
 -- Struct.name: string
--- Struct.fields: [{name: string, type: string}]
+-- Struct.fields: [{name: string, type: Type}]
 -- Struct.generics: [{
 --     name: string,
---     constraints: [{interface: string, name: string}]
+--     constraints: [{interface: ConcreteType, name: string}]
 -- }]
--- Struct.implements: [string]
+-- Struct.implements: [Type]
 
 -- TYPE Union
 -- Union.name: string
--- Union.fields: [{name: string, type: string}]
+-- Union.fields: [{name: string, type: Type}]
 -- Union.generics: [{
 --     name: string,
---     constraints: [{interface: string, name: string}]
+--     constraints: [{interface: ConcreteType, name: string}]
 -- }]
 
 -- TYPE Interface
 -- Interface.name: string
 -- Interface.statics: [ {
 --     name: string,
---     parameters: [{name: string, type: string}],
---     returnTypes: [string],
+--     parameters: [{name: string, type: Type}],
+--     returnTypes: [Type],
 -- } ]
 -- Interface.methods: [ {
 --     name: string,
---     parameters: [string],
---     returnTypes: [string],
+--     parameters: [Type],
+--     returnTypes: [Type],
 -- } ]
 -- Interface.generics: [{
 --     name: string,
---     constraints: [{interface: string, name: string}]
+--     constraints: [{interface: ConcreteType, name: string}]
 -- }]
 
 -- TYPE Function
 -- Function.name: string
--- Function.parameters: [{name: string, type: string}]
+-- Function.parameters: [{name: string, type: Type}]
 -- Function.generics: false | [{
 --     name: string,
---     constraints: [{interface: string, name: string}]
+--     constraints: [{interface: ConcreteType, name: string}]
 -- }]
--- Function.returnType: string
+-- Function.returnTypes: [Type]
 -- Function.body: Statement
 
 -- TYPE Statement
@@ -2063,23 +2668,22 @@ local sourceFromSemantics = {}
 function sourceFromSemantics.lua(semantics)
 	-- RETURNS a valid Lua identifier
 	local function luaizeFunction(name)
-		assert(type(name) == "string", "luaizeFunction requires string")
+		assert(isstring(name), "luaizeFunction requires string")
 
 		return (name:gsub(":", "_"))
 	end
 
 	-- RETURNS a valid Lua identifier
 	local function luaizeConstraint(name)
-		if type(name) == "string" then
-			assert(type(name) == "string", "luaizeConstraint requires string")
+		if isstring(name) then
 			assert(name:sub(1, 1) == "#")
 
 			return "_con_" .. name:sub(2)
 		end
 		local base = name.type
 		local interface = name.interface
-		assert(type(base) == "string")
-		assert(type(interface) == "string")
+		assert(isstring(base))
+		assert(isstring(interface))
 
 		return "impl_" .. luaizeFunction(interface)
 			.. "_for_".. luaizeFunction(base)
@@ -2100,7 +2704,7 @@ function sourceFromSemantics.lua(semantics)
 
 	-- OUTPUTS a Lua serialization of the given statement
 	local function generateStatement(statement, indentation)
-		assert(type(statement.tag) == "string")
+		assert(isstring(statement.tag))
 		if statement.tag == "block" then
 			-- XXX: always implicitly surrounded by Lua block;
 			-- need not create `do` `end` pair
@@ -2112,7 +2716,7 @@ function sourceFromSemantics.lua(semantics)
 			table.insert(output, "local " .. statement.name)
 			table.insert(output, ";\n")		
 		elseif statement.tag == "string" then
-			assert(type(statement.value) == "string")
+			assert(isstring(statement.value))
 
 			table.insert(output, indentation)
 			table.insert(output, statement.dst .. " = ")
@@ -2123,8 +2727,8 @@ function sourceFromSemantics.lua(semantics)
 		elseif statement.tag == "field" then
 			local field = statement.name
 			local object = statement.object
-			assert(type(field) == "string")
-			assert(type(object) == "string")
+			assert(isstring(field))
+			assert(isstring(object))
 
 			table.insert(output, indentation)
 			table.insert(output,
@@ -2139,9 +2743,9 @@ function sourceFromSemantics.lua(semantics)
 			table.insert(output, "\n")
 		elseif statement.tag == "interface-method" then
 			local methodName = statement.name
-			assert(type(methodName) == "string")
+			assert(isstring(methodName))
 			local object = statement.object
-			assert(type(object) == "string")
+			assert(isstring(object))
 			local argumentList = statement.arguments
 
 			local interfaceInformation = statement.interface
@@ -2162,7 +2766,7 @@ function sourceFromSemantics.lua(semantics)
 			table.insert(output, table.concat(arguments, ", "))
 			table.insert(output, ")\n")
 		elseif statement.tag == "call" then
-			assert(type(statement.func) == "string")
+			assert(isstring(statement.func))
 			assert(statement.dsts, show(statement))
 
 			-- Collect the arguments to be passed in the Lua call
@@ -2175,7 +2779,7 @@ function sourceFromSemantics.lua(semantics)
 
 			-- Lua arguments include interface constraints
 			for _, constraint in ipairs(statement.constraints) do
-				if type(constraint) == "string" then
+				if isstring(constraint) then
 					table.insert(luaArguments, luaizeConstraint(constraint))
 				else
 					table.insert(luaArguments, luaizeConstraint(constraint))
@@ -2275,17 +2879,17 @@ impl_coding_Showable_for_Number = {
 		-- Collect type-parameters and type-constraints as Lua parameters
 		local allParameters = {}
 		for _, parameter in ipairs(fn.parameters) do
-			assert(type(parameter.name) == "string")
-			assert(type(parameter.type) == "string")
+			assert(isstring(parameter.name))
+			assert(isstring(parameter.type))
 			table.insert(allParameters, parameter.name)
 		end
 		if fn.generics then
 			for _, generic in ipairs(fn.generics) do
-				assert(type(generic.name) == "string")
+				assert(isstring(generic.name))
 
 				for _, constraint in ipairs(generic.constraints) do
-					assert(type(constraint.name) == "string")
-					assert(type(constraint.interface) == "string")
+					assert(isstring(constraint.name))
+					assert(isstring(constraint.interface))
 					assert(constraint.name:sub(1, 1) == "#") -- e.g., "#2"
 
 					-- Lua target does not need constraint.interface since
