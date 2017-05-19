@@ -433,13 +433,13 @@ end
 local _TYPE_SPECS = {}
 
 -- RETURNS nothing
-local function REGISTER_TYPE(name, specification)
+local function REGISTER_TYPE(name, predicate)
 	assert(isstring(name), "name must be a string")
-	assert(isfunction(specification))
+	assert(isfunction(predicate))
 	assert(not _TYPE_SPECS[name],
 		"Type `" .. name .. "` has already been defined")
 
-	table.insert(_TYPE_SPECS, {name = name, specification = specification})
+	table.insert(_TYPE_SPECS, {name = name, predicate = predicate})
 end
 
 -- RETURNS a type predicate
@@ -453,13 +453,13 @@ local function TYPE_PREDICATE(name)
 
 	local found = findwith(_TYPE_SPECS, "name", name)
 	assert(found, "No type called `" .. name .. "` has been registered")
-	return found
+	return found.predicate
 end
 
 -- RETURNS a string representing the type of an object
 local function typefull(object)
 	for i = #_TYPE_SPECS, 1, -1 do
-		if _TYPE_SPECS[i].specification(object) then
+		if _TYPE_SPECS[i].predicate(object) then
 			return _TYPE_SPECS[i].name
 		end
 	end
@@ -1116,6 +1116,22 @@ local function parseSmol(tokens)
 
 	-- DEFINES the grammar for the language
 	local parsers = {
+		-- Represents an entire source file
+		["program"] = composite {
+			tag = "program",
+			{"package", G "package", "a package definition"},
+			{"imports", zeroOrMore(G "import")},
+			{"definitions", zeroOrMore(G "definition")},
+		},
+
+		-- Represents a package declaration
+		["package"] = composite {
+			tag = "package",
+			{"_", K_PACKAGE},
+			{"name", T_IDENTIFIER, "an identifier"},
+			{"_", K_SEMICOLON, "`;` to finish package declaration"},
+		},
+
 		-- Represents an import
 		["import"] = composite {
 			tag = "import",
@@ -1129,48 +1145,57 @@ local function parseSmol(tokens)
 			{"_", K_SEMICOLON, "`;` after import"},
 		},
 
-		["variable"] = composite {
-			tag = "variable",
-			{"name", T_IDENTIFIER},
-			{"type", G "type", "a type after variable name"},
+		-- Represents a top-level definition
+		definition = choice {
+			G "class-definition",
+			G "union-definition",
+			G "interface-definition",
 		},
 
-		-- Type
-		["type"] = choice {
-			-- Built in special types
-			K_STRING,
-			K_NUMBER,
-			K_BOOLEAN,
-			K_UNIT,
-			K_NEVER,
-			-- User defined types
-			T_GENERIC,
-			G "concrete-type",
+		-- Represents a class
+		["class-definition"] = composite {
+			tag = "class-definition",
+			{"_", K_CLASS},
+			{"name", T_TYPENAME, "a type name"},
+			{"generics", parserOtherwise(optional(G "generics"), {
+				parameters = {},
+				constraints = {},
+			})},
+			{"implements", parserOtherwise(optional(G "implements"), {})},
+			{"_", K_CURLY_OPEN, "`{` to begin class body"},
+			{"fields", zeroOrMore(G "field-definition")},
+			{"methods", zeroOrMore(G "method-definition")},
+			{"_", K_CURLY_CLOSE, "`}`"},
 		},
-		["concrete-type"] = composite {
-			tag = "concrete-type",
-			{"package", optional(G "package-scope")}, --: string | false
-			{"base", T_TYPENAME}, --: {lexeme = string}
-			{
-				"arguments",
-				parserOtherwise(optional(G "type-arguments"), freeze {})
-			}, --: [ Type ]
+
+		-- Represents a union
+		["union-definition"] = composite {
+			tag = "union-definition",
+			{"_", K_UNION},
+			{"name", T_TYPENAME, "a type name"},
+			{"generics", parserOtherwise(optional(G "generics"), {
+				parameters = {},
+				constraints = {},
+			})},
+			{"_", K_CURLY_OPEN, "`{` to begin union body"},
+			{"fields", zeroOrMore(G "field-definition")},
+			{"methods", zeroOrMore(G "method-definition")},
+			{"_", K_CURLY_CLOSE, "`}`"},
 		},
-		["package-scope"] = parserExtractor(composite {
-			tag = "package-scope",
-			{"name", T_IDENTIFIER},
-			{"_", K_SCOPE},
-		}, "name"),
-		["type-arguments"] = parserExtractor(composite {
-			tag = "***",
-			{"_", K_SQUARE_OPEN},
-			{
-				"arguments",
-				commad(G "type", "1+", "type argument"),
-				"type arguments"
-			},
-			{"_", K_SQUARE_CLOSE, "`]`"},
-		}, "arguments"),
+
+		-- Represents an interface
+		["interface-definition"] = composite {
+			tag = "interface-definition",
+			{"_", K_INTERFACE},
+			{"name", T_TYPENAME, "a type name"},
+			{"generics", parserOtherwise(optional(G "generics"), {
+				parameters = {},
+				constraints = {},
+			})},
+			{"_", K_CURLY_OPEN, "`{` to begin interface body"},
+			{"signatures", zeroOrMore(G "interface-signature")},
+			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
+		},
 
 		-- Represents a generics definition
 		["generics"] = composite {
@@ -1205,36 +1230,45 @@ local function parseSmol(tokens)
 			{"constraint", G "concrete-type", "a type constrain after `is`"},
 		},
 
-		-- Represents a union
-		["union-definition"] = composite {
-			tag = "union-definition",
-			{"_", K_UNION},
-			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(optional(G "generics"), {
-				parameters = {},
-				constraints = {},
-			})},
-			{"_", K_CURLY_OPEN, "`{` to begin union body"},
-			{"fields", zeroOrMore(G "field-definition")},
-			{"methods", zeroOrMore(G "method-definition")},
-			{"_", K_CURLY_CLOSE, "`}`"},
+		-- Represents a smol Type
+		["type"] = choice {
+			-- Built in special types
+			K_STRING,
+			K_NUMBER,
+			K_BOOLEAN,
+			K_UNIT,
+			K_NEVER,
+			-- User defined types
+			T_GENERIC,
+			G "concrete-type",
 		},
 
-		-- Represents a class
-		["class-definition"] = composite {
-			tag = "class-definition",
-			{"_", K_CLASS},
-			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(optional(G "generics"), {
-				parameters = {},
-				constraints = {},
-			})},
-			{"implements", parserOtherwise(optional(G "implements"), {})},
-			{"_", K_CURLY_OPEN, "`{` to begin class body"},
-			{"fields", zeroOrMore(G "field-definition")},
-			{"methods", zeroOrMore(G "method-definition")},
-			{"_", K_CURLY_CLOSE, "`}`"},
+		["concrete-type"] = composite {
+			tag = "concrete-type",
+			{"package", optional(G "package-scope")}, --: string | false
+			{"base", T_TYPENAME}, --: {lexeme = string}
+			{
+				"arguments",
+				parserOtherwise(optional(G "type-arguments"), freeze {})
+			}, --: [ Type ]
 		},
+
+		["package-scope"] = parserExtractor(composite {
+			tag = "***package-scope",
+			{"name", T_IDENTIFIER},
+			{"_", K_SCOPE},
+		}, "name"),
+
+		["type-arguments"] = parserExtractor(composite {
+			tag = "***",
+			{"_", K_SQUARE_OPEN},
+			{
+				"arguments",
+				commad(G "type", "1+", "type argument"),
+				"type arguments"
+			},
+			{"_", K_SQUARE_CLOSE, "`]`"},
+		}, "arguments"),
 
 		["implements"] = parserExtractor(composite {
 			tag = "***implements",
@@ -1260,7 +1294,42 @@ local function parseSmol(tokens)
 			{"body", G "block", "a method body"},
 		},
 
-		-- Statements!
+		["interface-signature"] = parserExtractor(composite {
+			tag = "***signature",
+			{"signature", G "signature"},
+			{"_", K_SEMICOLON, "`;` after interface method"},
+		}, "signature"),
+
+		-- Represents a function signature, including name, scope,
+		-- parameters, and return type.
+		["signature"] = composite {
+			tag = "signature",
+			{"foreign", optional(K_FOREIGN)},
+			{"modifier", G "method-modifier"},
+			{"name", T_IDENTIFIER, "a method name"},
+			{"_", K_ROUND_OPEN, "`(` after method name"},
+			{"parameters", commad(G "variable", "0+", "a parameter")},
+			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
+			{
+				"returnTypes",
+				commad(G "type", "1+", "a return type"),
+				"a return type"
+			},
+		},
+
+		["method-modifier"] = choice {
+			K_METHOD,
+			K_STATIC,
+		},
+
+		-- Represents a smol statement / control structure
+		["statement"] = choice {
+			G "return-statement",
+			G "do-statement",
+			G "var-statement",
+			G "assign-statement",
+		},
+
 		["block"] = composite {
 			tag = "block",
 			{"_", K_CURLY_OPEN},
@@ -1268,11 +1337,10 @@ local function parseSmol(tokens)
 			{"_", K_CURLY_CLOSE, "`}` to end statement block"},
 		},
 
-		["statement"] = choice {
-			G "return-statement",
-			G "do-statement",
-			G "var-statement",
-			G "assign-statement",
+		["variable"] = composite {
+			tag = "variable",
+			{"name", T_IDENTIFIER},
+			{"type", G "type", "a type after variable name"},
 		},
 
 		["return-statement"] = composite {
@@ -1367,25 +1435,18 @@ local function parseSmol(tokens)
 
 		["atom"] = parserMap(composite {
 			tag = "***atom",
-			--
 			{"base", G "atom-base"},
 			{"accesses", zeroOrMore(G "access")},
 		}, function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
-				assert(isstring(access.location))
-				out = {
-					tag = "access",
-					base = out,
-					access = access,
-					location = access.location,
-				}
+				out = withkv(access, "base", out)
 			end
 			return out
 		end),
 
 		["access"] = parserMap(composite {
-			tag = "***call",
+			tag = "***access",
 			{"_", K_DOT},
 			{"name", T_IDENTIFIER, "a method/field name"},
 			-- N.B.: Optional, since a field access is also possible...
@@ -1398,15 +1459,15 @@ local function parseSmol(tokens)
 		}, function(x)
 			if x.call then
 				return {
-					tag = "call",
+					tag = "method-call",
 					arguments = x.call.arguments,
-					name = x.name,
+					func = x.name.lexeme, --: string
 					location = x.location,
 				}
 			end
 			return {
 				tag = "field",
-				name = x.name,
+				field = x.name.lexeme, --: string
 				location = x.location,
 			}
 		end),
@@ -1432,71 +1493,6 @@ local function parseSmol(tokens)
 				{"expression", G "expression", "expression"},
 				{"_", K_ROUND_CLOSE, "`)`"},
 			}, "expression"),
-		},
-
-		-- Represents an interface
-		["interface-definition"] = composite {
-			tag = "interface-definition",
-			{"_", K_INTERFACE},
-			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(optional(G "generics"), {
-				parameters = {},
-				constraints = {},
-			})},
-			{"_", K_CURLY_OPEN, "`{` to begin interface body"},
-			{"signatures", zeroOrMore(G "interface-signature")},
-			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
-		},
-
-		["interface-signature"] = parserExtractor(composite {
-			tag = "***signature",
-			{"signature", G "signature"},
-			{"_", K_SEMICOLON, "`;` after interface method"},
-		}, "signature"),
-
-		-- Represents a function signature, including name, scope,
-		-- parameters, and return type.
-		["signature"] = composite {
-			tag = "signature",
-			{"foreign", optional(K_FOREIGN)},
-			{"modifier", G "method-modifier"},
-			{"name", T_IDENTIFIER, "a method name"},
-			{"_", K_ROUND_OPEN, "`(` after method name"},
-			{"parameters", commad(G "variable", "0+", "a parameter")},
-			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
-			{
-				"returnTypes",
-				commad(G "type", "1+", "a return type"),
-				"a return type"
-			},
-		},
-
-		["method-modifier"] = choice {
-			K_METHOD,
-			K_STATIC,
-		},
-
-		-- Represents a top-level definition
-		definition = choice {
-			G "class-definition",
-			G "union-definition",
-			G "interface-definition",
-		},
-
-		-- Represents a package declaration
-		package = composite {
-			tag = "package",
-			{"_", K_PACKAGE},
-			{"name", T_IDENTIFIER, "an identifier"},
-			{"_", K_SEMICOLON, "`;` to finish package declaration"},
-		},
-
-		-- Represents an entire source file
-		program = composite {
-			tag = "program",
-			{"package", G "package", "a package definition"},
-			{"imports", zeroOrMore(G "import")},
-			{"definitions", zeroOrMore(G "definition")},
 		},
 	}
 
@@ -2429,7 +2425,7 @@ local function semanticsSmol(sources, main)
 			end
 
 			return {}, {{name = name, type = type}}
-		elseif ast.tag == "access" then
+		elseif ast.tag == "method-call" then
 			local out, baseInfo = recursive(ast.base)
 			if #baseInfo ~= 1 then
 				quit("You are trying to access a method/field on something with " .. #baseInfo .. " values (rather than 1) ", ast.location)
@@ -2437,64 +2433,56 @@ local function semanticsSmol(sources, main)
 			local baseType = baseInfo[1].type
 			local baseSrc = baseInfo[1].name
 
-			if ast.access.tag == "call" then
-				local members = getMembers(baseType, context)
-				local name = ast.access.name.name
-				assert(isstring(name))
+			local members = getMembers(baseType, context)
+			local name = ast.func
+			assertis(name, "string")
 
-				-- Find method being called
-				local method = findwith(members.methods, "name", name)
-				if not method then
-					quit("The type `", typeDescribe(baseType), "` does not",
-						" define a method called `", name, "`.",
-						"\nHowever, you are trying to call it ",
-						ast.access.location)
-				end
-
-				-- Compile each argument
-				local argumentsInfo = {}
-				for i, argument in ipairs(ast.access.arguments) do
-					local irs, info = recursive(argument)
-					for _, ir in ipairs(irs) do
-						table.insert(out, ir)
-					end
-
-					-- Check the plurality
-					if #info ~= 1 then
-						quit("The ", string.ordinal(i), " argument to a method call is ", #info, " values (rather than 1) ", ast.access.location)
-					end
-
-					table.insert(argumentsInfo, info[1])
-				end
-
-				-- Verify the argument types match the definition
-				if #argumentsInfo ~= #method.parameters then
-					quit("Member function `",
-						typeDescribe(baseType) .. "." .. name,
-						"` expects ", #method.parameters, " arguments,",
-						" but it was given ", #argumentsInfo, " ",
-						ast.location)
-				end
-				for i, argument in ipairs(argumentsInfo) do
-					local expected = method.parameters[i].type
-					local got = argument.type
-
-					if not areEqualTypes(expected, got) then
-						quit("The ", string.ordinal(i), " argument to the",
-						" method `",
-						typeDescribe(baseType) .. "." .. name,
-						"` expects the type `", typeDescribe(expected), "`.",
-						"\nHowever, a value of type `", typeDescribe(got), "`",
-						" was passed ", ast.location)
-					end
-				end
-
-				error("TODO")
-			elseif ast.access.tag == "field" then
-				error("TODO: access/field")
+			local method = findwith(members.methods, "name", name)
+			if not method then
+				quit("The type `", typeDescribe(baseType), "` does not",
+					" define a method called `", name, "`.",
+					"\nHowever, you are trying to call it ",
+					ast.location)
 			end
 
-			error("unknown access tag `" .. ast.access.tag .. "`")
+			local argumentsInfo = {}
+			for i, argument in ipairs(ast.arguments) do
+				local irs, info = recursive(argument)
+				for _, ir in ipairs(irs) do
+					table.insert(out, ir)
+				end
+
+				-- Check the plurality of the argument
+				if #info ~= 1 then
+					quit("The ", string.ordinal(i), " argument to a method call is ", #info, " values (rather than 1) ", ast.access.location)
+				end
+
+				table.insert(argumentsInfo, info[1])
+			end
+
+			-- Verify the argument types match the parameter types
+			if #argumentsInfo ~= #method.parameters then
+				quit("Member function `",
+					typeDescribe(baseType) .. "." .. name,
+					"` expects ", #method.parameters, " arguments,",
+					" but it was given ", #argumentsInfo, " ",
+					ast.location)
+			end
+			for i, argument in ipairs(argumentsInfo) do
+				local expected = method.parameters[i].type
+				local got = argument.type
+
+				if not areEqualTypes(expected, got) then
+					quit("The ", string.ordinal(i), " argument to the",
+					" method `",
+					typeDescribe(baseType) .. "." .. name,
+					"` expects the type `", typeDescribe(expected), "`.",
+					"\nHowever, a value of type `", typeDescribe(got), "`",
+					" was passed ", ast.location)
+				end
+			end
+
+			error("TODO")
 		elseif ast.tag == "static-call" then
 			local out = {}
 			local name = ast.name.lexeme
