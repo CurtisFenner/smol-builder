@@ -171,6 +171,7 @@ end
 
 local debugPrint = function() end
 
+-- Prevent the use of global variables
 setmetatable(_G, {
 	__index = function(_, key)
 		error("read of global key `" .. tostring(key) .. "`", 2)
@@ -180,6 +181,7 @@ setmetatable(_G, {
 	end,
 })
 
+-- Prevent (unintentional) accesses of undefined methods and fields on strings
 setmetatable(string, {
 	__index = function(_, key)
 		error("strings have no `" .. tostring(key) .. "` field", 2)
@@ -211,6 +213,7 @@ local function isinteger(instance)
 	return type(instance) == "number" and instance%1 == 0
 end
 
+-- RETURNS whether or not instance is a Lua function
 local function isfunction(instance)
 	return type(instance) == "function"
 end
@@ -283,7 +286,7 @@ end
 -- (excluding references and non-serializable objects like functions)
 local show
 do
-	local escapedCharacter = {
+	local specialCharacterRepresentation = {
 		["\a"] = [[\a]],
 		["\b"] = [[\b]],
 		["\f"] = [[\f]],
@@ -297,19 +300,23 @@ do
 	}
 	for i = 0, 31 do
 		local c = string.char(i)
-		if not escapedCharacter[c] then
-			escapedCharacter[c] = "\\" .. tostring(i):prepad("0", 3)
+		if not specialCharacterRepresentation[c] then
+			specialCharacterRepresentation[c] = "\\" .. tostring(i):prepad("0", 3)
 		end
 	end
 	for i = 128, 255 do
-		escapedCharacter[string.char(i)] = "\\" .. tostring(i)
+		specialCharacterRepresentation[string.char(i)] = "\\" .. tostring(i)
 	end
+
+	-- RETURNS nothing
+	-- MODIFIES out by appending strings to it
 	local function showAdd(object, indent, out)
 		if isstring(object) then
 			-- Turn into a string literal
 			table.insert(out, [["]])
 			for character in object:gmatch "." do
-				table.insert(out, escapedCharacter[character] or character)
+				table.insert(out,
+					specialCharacterRepresentation[character] or character)
 			end
 			table.insert(out, [["]])
 		elseif isobject(object) then
@@ -327,13 +334,17 @@ do
 		end
 	end
 
-	show = function(object)
+	-- RETURNS a nearly-valid Lua expression literal representing the
+	-- (acyclic) Lua value
+	show = function(value)
 		local out = {}
-		showAdd(object, "", out)
+		showAdd(value, "", out)
 		return table.concat(out)
 	end
 end
 
+-- RETURNS a copy of `object` that cannot be modified, and that errors
+-- when a non-existent key is read.
 local function freeze(object)
 	assert(isobject(object))
 
@@ -376,6 +387,8 @@ end
 
 -- Generic Helpers -------------------------------------------------------------
 
+-- RETURNS a frozen version of `object` such that accesses to key `key`
+-- produce `newValue` instead of referring to `object`'s definition
 local function withkv(object, key, newValue)
 	local newObject = {}
 	for k, v in pairs(object) do
@@ -386,6 +399,7 @@ local function withkv(object, key, newValue)
 	return freeze(newObject)
 end
 
+-- RETURNS a list produced by mapping each element of `list` through `f`
 local function map(f, list)
 	local out = {}
 	for k, v in pairs(list) do
@@ -430,9 +444,15 @@ end
 
 -- RETURNS a type predicate
 local function TYPE_PREDICATE(name)
-	assert(isstring(name))
+	if isfunction(name) then
+		return name
+	end
+
+	assert(isstring(name),
+		"name must be a string but instead it's a " .. type(name))
+
 	local found = findwith(_TYPE_SPECS, "name", name)
-	assert(found)
+	assert(found, "No type called `" .. name .. "` has been registered")
 	return found
 end
 
@@ -448,10 +468,7 @@ end
 
 -- ASSERTS that `value` is of the specified type `t`
 local function assertis(value, t)
-	assert(isstring(t), "`assertis` requires the type to be a string")
-
-	local spec = _TYPE_SPECS[t]
-	assert(spec, "`" .. t .. "` has not been registered as a type")
+	local spec = TYPE_PREDICATE(t)
 
 	if not spec(value) then
 		error("value must be a `" .. t .. "`, however it is a `"
@@ -478,10 +495,7 @@ local function recordType(record)
 
 	local function predicate(object)
 		for key, predicate in pairs(record) do
-			if isstring(predicate) then
-				predicate = TYPE_PREDICATE(predicate)
-			end
-			if not predicate(object[key]) then
+			if not TYPE_PREDICATE(predicate)(object[key]) then
 				return false
 			end
 		end
@@ -504,13 +518,14 @@ local function listType(element)
 		for key, value in pairs(object) do
 			if not isinteger(key) then
 				return false
-			end
-			if key ~= 1 and object[key-1] == nil then
+			elseif key ~= 1 and object[key-1] == nil then
 				return false
 			end
 		end
 		return true
 	end
+
+	return predicate
 end
 
 -- RETURNS a type-predicate
@@ -554,33 +569,33 @@ local function lexSmol(source, filename)
 	source = source .. "\n"
 
 	local IS_KEYWORD = {
-		case = true,
-		class = true,
+		["case"] = true,
+		["class"] = true,
 		["do"] = true,
-		foreign = true,
-		import = true,
-		interface = true,
-		is = true,
-		match = true,
-		method = true,
-		new = true,
-		package = true,
+		["foreign"] = true,
+		["import"] = true,
+		["interface"] = true,
+		["is"] = true,
+		["match"] = true,
+		["method"] = true,
+		["new"] = true,
+		["package"] = true,
 		["return"] = true,
-		static = true,
-		this = true,
-		union = true,
-		var = true,
+		["static"] = true,
+		["this"] = true,
+		["union"] = true,
+		["var"] = true,
 		-- built-in types
-		String = true,
-		Number = true,
-		Boolean = true,
-		Unit = true,
-		Never = true,
+		["Boolean"] = true,
+		["Never"] = true,
+		["Number"] = true,
+		["String"] = true,
+		["Unit"] = true,
 	}
 
 	-- Define token parsing rules
 	local TOKENS = {
-		{ -- local type
+		{ -- type keywords, type names
 			"[A-Z][A-Za-z0-9]*",
 			function(x)
 				if IS_KEYWORD[x] then
@@ -598,7 +613,7 @@ local function lexSmol(source, filename)
 				return {tag = "identifier", name = x}
 			end
 		},
-		{ -- generic parameters
+		{ -- generic type parameters
 			"#[A-Z][A-Za-z0-9]*",
 			function(x)
 				return {tag = "generic", name = x:sub(2)}
@@ -609,7 +624,7 @@ local function lexSmol(source, filename)
 			function(x) return false end
 		},
 		{ -- comments
-			"//[^\n]*",
+			"//[^\n]*", -- (greedy)
 			function(x) return false end
 		},
 		{ -- punctuation (braces, commas, etc)
@@ -636,33 +651,38 @@ local function lexSmol(source, filename)
 	local BACKSLASH = "\\"
 
 	local tokens = {}
+
 	-- Track the location into the source file each token is
 	local line = 1
 	local column = 1
-	local function advanceColumn(str)
-		assert(isstring(str) and #str >= 1)
-		if #str == 1 then
-			if str == "\r" then
-			elseif str == "\t" then
-				column = column + 4 -- XXX: fix this
+	local function advanceCursor(str)
+		assert(isstring(str))
+		for c in str:gmatch(".") do
+			if c == "\r" then
+				-- Carriage returns do not affect reported cursor location
+			elseif c == "\n" then
+				column = 1
+				line = line + 1
+			elseif c == "\t" then
+				-- XXX: This reports column (assuming tab = 4)
+				-- rather than character.
+				-- (VSCode default behavior when tabs are size 4)
+				-- (Atom default behavior counts characters)
+				column = math.ceil(column/4)*4 + 1
 			else
 				column = column + 1
 			end
-			return
-		end
-		for c in str:gmatch(".") do
-			advanceColumn(c)
 		end
 	end
 
 	while #source > 0 do
 		-- Compute human-readable description of location
-		local context = source:gsub("%s+", " ")
-		if #context > 35 then
-			context = context:sub(1, 35-3) .. "..."
+		local sourceContext = source:gsub("%s+", " ")
+		if #sourceContext > 35 then
+			sourceContext = sourceContext:sub(1, 35-3) .. "..."
 		end
 		local location = "at " .. filename .. ":" .. line .. ":" .. column
-			.. "\n\t(at `" .. context .. "`)\n"
+			.. "\n\t(at `" .. sourceContext .. "`)\n"
 
 		-- Tokenize string literals
 		if source:sub(1, 1) == QUOTE then
@@ -694,7 +714,7 @@ local function lexSmol(source, filename)
 					escaped = true
 				elseif c == QUOTE then
 					-- Update location
-					advanceColumn(source:sub(1, i))
+					advanceCursor(source:sub(1, i))
 					local lexeme = source:sub(1, i)
 					-- String literal is complete
 					source = source:sub(i+1)
@@ -726,14 +746,7 @@ local function lexSmol(source, filename)
 					end
 
 					-- Advance the cursor through the text file
-					for c in match:gmatch(".") do
-						if c == "\n" then
-							line = line + 1
-							column = 1
-						else
-							advanceColumn(c)
-						end
-					end
+					advanceCursor(match)
 					source = source:sub(#match+1)
 
 					matched = true
@@ -754,17 +767,18 @@ end
 
 -- Stream ----------------------------------------------------------------------
 
+REGISTER_TYPE("Token", recordType {
+	location = "string",
+	tag = "string",
+	lexeme = "string",
+})
+
 -- REPRESENTS a streamable sequence of tokens
 local function Stream(list, offset)
 	offset = offset or 0
 	assert(type(list) == "table", "list must be table")
 	assert(isinteger(offset), "offset must be an integer")
-	for i = 1, #list do
-		assert(isstring(list[i].location),
-			"token must have string location; ") -- .. show(list[i]))
-		assert(isstring(list[i].lexeme),
-			"token must have string lexeme; ") -- .. show(list[i]))
-	end
+	assertis(list, listType "Token")
 
 	return {
 		_list = list,
@@ -794,18 +808,6 @@ end
 
 local function parseSmol(tokens)
 	local stream = Stream(tokens)
-
-	local function parserGenerator(grammar)
-		local parsers = {}
-		for key, value in pairs(grammar) do
-			assert(type(value) == "function",
-				"parser for `" .. key .. "` must be a function")
-
-			parsers[key] = value
-		end
-
-		return parsers
-	end
 
 	-- PARSER for a sequence of 0 or more `object`s separated by nothing
 	local function zeroOrMore(object)
@@ -1113,9 +1115,9 @@ local function parseSmol(tokens)
 	end
 
 	-- DEFINES the grammar for the language
-	local parsers = parserGenerator {
+	local parsers = {
 		-- Represents an import
-		import = composite {
+		["import"] = composite {
 			tag = "import",
 			{"_", K_IMPORT},
 			{"package", T_IDENTIFIER, "an imported package name"},
@@ -1127,14 +1129,14 @@ local function parseSmol(tokens)
 			{"_", K_SEMICOLON, "`;` after import"},
 		},
 
-		variable = composite {
+		["variable"] = composite {
 			tag = "variable",
 			{"name", T_IDENTIFIER},
 			{"type", G "type", "a type after variable name"},
 		},
 
 		-- Type
-		type = choice {
+		["type"] = choice {
 			-- Built in special types
 			K_STRING,
 			K_NUMBER,
@@ -1171,7 +1173,7 @@ local function parseSmol(tokens)
 		}, "arguments"),
 
 		-- Represents a generics definition
-		generics = composite {
+		["generics"] = composite {
 			tag = "generics",
 			{"_", K_SQUARE_OPEN},
 			{
@@ -1185,6 +1187,7 @@ local function parseSmol(tokens)
 			},
 			{"_", K_SQUARE_CLOSE, "`]` to end list of generics"},
 		},
+
 		["generic-constraints"] = parserExtractor(composite {
 			tag = "***",
 			{"_", K_PIPE},
@@ -1194,6 +1197,7 @@ local function parseSmol(tokens)
 				"generic constraints"
 			},
 		}, "constraints"),
+
 		["generic-constraint"] = composite {
 			tag = "constraint",
 			{"parameter", T_GENERIC},
@@ -1231,7 +1235,8 @@ local function parseSmol(tokens)
 			{"methods", zeroOrMore(G "method-definition")},
 			{"_", K_CURLY_CLOSE, "`}`"},
 		},
-		implements = parserExtractor(composite {
+
+		["implements"] = parserExtractor(composite {
 			tag = "***implements",
 			{"_", K_IS},
 			{
@@ -1240,6 +1245,7 @@ local function parseSmol(tokens)
 				"one or more interface names",
 			},
 		}, "interfaces"),
+
 		["field-definition"] = composite {
 			tag = "field-definition",
 			{"_", K_VAR},
@@ -1247,6 +1253,7 @@ local function parseSmol(tokens)
 			{"type", G "type", "the field's type after field name"},
 			{"_", K_SEMICOLON, "`;` after field type"},
 		},
+
 		["method-definition"] = composite {
 			tag = "method-definition",
 			{"signature", G "signature"},
@@ -1254,24 +1261,27 @@ local function parseSmol(tokens)
 		},
 
 		-- Statements!
-		block = composite {
+		["block"] = composite {
 			tag = "block",
 			{"_", K_CURLY_OPEN},
 			{"statements", zeroOrMore(G "statement")},
 			{"_", K_CURLY_CLOSE, "`}` to end statement block"},
 		},
-		statement = choice {
+
+		["statement"] = choice {
 			G "return-statement",
 			G "do-statement",
 			G "var-statement",
 			G "assign-statement",
 		},
+
 		["return-statement"] = composite {
 			tag = "return-statement",
 			{"_", K_RETURN},
 			{"values", commad(G "expression", "0+", "an expression to return")},
 			{"_", K_SEMICOLON, "`;` to end return-statement"},
 		},
+
 		["do-statement"] = composite {
 			tag = "do-statement",
 			{"_", K_DO},
@@ -1282,6 +1292,7 @@ local function parseSmol(tokens)
 			},
 			{"_", K_SEMICOLON, "`;` to end do-statement"},
 		},
+
 		["assign-statement"] = composite {
 			tag = "assign-statement",
 			{"variables", commad(G "expression", "1+", "a variable")},
@@ -1289,6 +1300,7 @@ local function parseSmol(tokens)
 			{"value", G "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end assign-statement"},
 		},
+
 		["var-statement"] = composite {
 			tag = "var-statement",
 			{"_", K_VAR},
@@ -1303,7 +1315,7 @@ local function parseSmol(tokens)
 		},
 
 		-- Expressions!
-		expression = parserMap(composite {
+		["expression"] = parserMap(composite {
 			tag = "***expression",
 			{"base", G "atom"},
 			{"operations", zeroOrMore(G "operation")},
@@ -1328,7 +1340,8 @@ local function parseSmol(tokens)
 			assert(out)
 			return out
 		end),
-		operation = composite {
+
+		["operation"] = composite {
 			tag = "***operation",
 			{"operator", T_OPERATOR},
 			{"operand", G "atom", "atom after operator"},
@@ -1344,6 +1357,7 @@ local function parseSmol(tokens)
 			},
 			{"_", K_ROUND_CLOSE, "`)` to end `new` expression"},
 		},
+
 		["named-argument"] = composite {
 			tag = "named-argument",
 			{"name", T_IDENTIFIER},
@@ -1351,7 +1365,7 @@ local function parseSmol(tokens)
 			{"value", G "expression", "an expression after `=`"},
 		},
 
-		atom = parserMap(composite {
+		["atom"] = parserMap(composite {
 			tag = "***atom",
 			--
 			{"base", G "atom-base"},
@@ -1370,7 +1384,7 @@ local function parseSmol(tokens)
 			return out
 		end),
 
-		access = parserMap(composite {
+		["access"] = parserMap(composite {
 			tag = "***call",
 			{"_", K_DOT},
 			{"name", T_IDENTIFIER, "a method/field name"},
@@ -1433,6 +1447,7 @@ local function parseSmol(tokens)
 			{"signatures", zeroOrMore(G "interface-signature")},
 			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
 		},
+
 		["interface-signature"] = parserExtractor(composite {
 			tag = "***signature",
 			{"signature", G "signature"},
@@ -1441,7 +1456,7 @@ local function parseSmol(tokens)
 
 		-- Represents a function signature, including name, scope,
 		-- parameters, and return type.
-		signature = composite {
+		["signature"] = composite {
 			tag = "signature",
 			{"foreign", optional(K_FOREIGN)},
 			{"modifier", G "method-modifier"},
