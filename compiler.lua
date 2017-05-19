@@ -196,6 +196,16 @@ local function isobject(instance)
 	return type(instance) == "userdata" or type(instance) == "table"
 end
 
+-- RETURNS whether or not instance is a Lua number
+local function isnumber(instance)
+	return type(instance) == "number"
+end
+
+-- RETURNS whether or not instance is a Lua boolean
+local function isboolean(instance)
+	return type(instance) == "boolean"
+end
+
 -- RETURNS whether or not instance is a Lua number that is integral
 local function isinteger(instance)
 	return type(instance) == "number" and instance%1 == 0
@@ -364,6 +374,8 @@ local function freeze(object)
 	return out
 end
 
+-- Generic Helpers -------------------------------------------------------------
+
 local function withkv(object, key, newValue)
 	local newObject = {}
 	for k, v in pairs(object) do
@@ -401,6 +413,131 @@ end
 local function identity(x)
 	return x
 end
+
+-- Lua Type Specifications -----------------------------------------------------
+
+local _TYPE_SPECS = {}
+
+-- RETURNS nothing
+local function REGISTER_TYPE(name, specification)
+	assert(isstring(name), "name must be a string")
+	assert(isfunction(specification))
+	assert(not _TYPE_SPECS[name],
+		"Type `" .. name .. "` has already been defined")
+
+	table.insert(_TYPE_SPECS, {name = name, specification = specification})
+end
+
+-- RETURNS a type predicate
+local function TYPE_PREDICATE(name)
+	assert(isstring(name))
+	local found = findwith(_TYPE_SPECS, "name", name)
+	assert(found)
+	return found
+end
+
+-- RETURNS a string representing the type of an object
+local function typefull(object)
+	for i = #_TYPE_SPECS, 1, -1 do
+		if _TYPE_SPECS[i].specification(object) then
+			return _TYPE_SPECS[i].name
+		end
+	end
+	error("unregistered primitive `" .. type(object) .. "`")
+end
+
+-- ASSERTS that `value` is of the specified type `t`
+local function assertis(value, t)
+	assert(isstring(t), "`assertis` requires the type to be a string")
+
+	local spec = _TYPE_SPECS[t]
+	assert(spec, "`" .. t .. "` has not been registered as a type")
+
+	if not spec(value) then
+		error("value must be a `" .. t .. "`, however it is a `"
+			.. typefull(value) .. "`", 2)
+	end
+end
+
+-- RETURNS a type-predicate
+local function constantType(value)
+	return function(object)
+		return object == value
+	end
+end
+
+-- RETURNS a type-predicate
+local function recordType(record)
+	assert(isobject(record))
+
+	for key, value in pairs(record) do
+		assert(isstring(key), "record key must be string")
+		assert(isstring(value) or isfunction(value),
+			"record key must be string or predicate")
+	end
+
+	local function predicate(object)
+		for key, predicate in pairs(record) do
+			if isstring(predicate) then
+				predicate = TYPE_PREDICATE(predicate)
+			end
+			if not predicate(object[key]) then
+				return false
+			end
+		end
+		-- TODO: what if it has EXTRA fields?
+		return true
+	end
+
+	return predicate
+end
+
+-- RETURNS a type-predicate
+local function listType(element)
+	assert(isstring(element) or isfunction(element),
+		"listType element must be a type name (string) or a type-predicate")
+	
+	local function predicate(object)
+		if not isobject(object) then
+			return false
+		end
+		for key, value in pairs(object) do
+			if not isinteger(key) then
+				return false
+			end
+			if key ~= 1 and object[key-1] == nil then
+				return false
+			end
+		end
+		return true
+	end
+end
+
+-- RETURNS a type-predicate
+local function choiceType(...)
+	local choices = {...}
+	assert(#choices >= 1)
+
+	local function predicate(object)
+		for _, p in ipairs(choices) do
+			if p(object) then
+				return true
+			end
+		end
+		return false
+	end
+
+	return predicate
+end
+
+-- Register the primitive types
+REGISTER_TYPE("object", isobject)
+REGISTER_TYPE("number", isnumber)
+REGISTER_TYPE("integer", isinteger)
+REGISTER_TYPE("string", isstring)
+REGISTER_TYPE("function", isfunction)
+REGISTER_TYPE("boolean", isboolean)
+REGISTER_TYPE("nil", constantType(nil))
 
 -- Lexer -----------------------------------------------------------------------
 
@@ -2654,15 +2791,40 @@ local sourceFromSemantics = {}
 -- Function.name: string
 -- Function.parameters: [{name: string, type: Type}]
 -- Function.generics: false | [{
---     name: string,
---     constraints: [{interface: ConcreteType, name: string}]
+--     name: string, // name of the type parameter
+--     constraints: [{
+--         interface: ConcreteType,
+--         name: string // name of the constraint; these must be "#1", "#2", ...
+--     }]
 -- }]
 -- Function.returnTypes: [Type]
 -- Function.body: Statement
 
--- TYPE Statement
--- tag: "var" | "string" | "number" | "new" | "interface-static"
---    | "field" | "call" | "interface-method" | "return"
+-- TYPE Impl
+-- tag: "local-impl" => name: constraint-var (string)
+-- tag: "field-impl" => object: ir-var (string), field: string (e.g., "#2")
+-- tag: "build-impl" => base: string (type name w/ package), arguments: [Impl]
+
+-- TYPE Statement (ir-var = string)
+-- tag: "var-ir" => name: ir-var, type: Type
+-- tag: "string-load-ir" => dst: ir-var, value: string
+-- tag: "number-load-ir" => dst: ir-var, value: number
+-- tag: "call-ir" =>
+--     func: string,
+--     arguments: [ir-var],
+--     dsts: [ir-var], 
+--     constraints: [Impl],
+-- tag: "interface-ir" =>
+--     impl: Impl,
+--     func: string,
+--     arguments: [ir-var],
+--     dsts: [ir-var],
+-- tag: "new-ir" =>
+--     record: {string (field name) => ir-var},
+--     constraints: [Impl],
+--     dst: ir-var,
+-- tag: "field-ir" => dst: ir-var, object: ir-var, field: string
+-- tag: "return-ir" => values: [ir-var]
 
 -- RETURNS a string representing a Lua program with the indicated semantics
 function sourceFromSemantics.lua(semantics)
@@ -2671,22 +2833,6 @@ function sourceFromSemantics.lua(semantics)
 		assert(isstring(name), "luaizeFunction requires string")
 
 		return (name:gsub(":", "_"))
-	end
-
-	-- RETURNS a valid Lua identifier
-	local function luaizeConstraint(name)
-		if isstring(name) then
-			assert(name:sub(1, 1) == "#")
-
-			return "_con_" .. name:sub(2)
-		end
-		local base = name.type
-		local interface = name.interface
-		assert(isstring(base))
-		assert(isstring(interface))
-
-		return "impl_" .. luaizeFunction(interface)
-			.. "_for_".. luaizeFunction(base)
 	end
 
 	local output = {
@@ -2705,17 +2851,17 @@ function sourceFromSemantics.lua(semantics)
 	-- OUTPUTS a Lua serialization of the given statement
 	local function generateStatement(statement, indentation)
 		assert(isstring(statement.tag))
-		if statement.tag == "block" then
+		if statement.tag == "block-ir" then
 			-- XXX: always implicitly surrounded by Lua block;
 			-- need not create `do` `end` pair
 			for _, s in ipairs(statement.statements) do
 				generateStatement(s, indentation .. "\t")
 			end
-		elseif statement.tag == "var" then
+		elseif statement.tag == "var-ir" then
 			table.insert(output, indentation)
 			table.insert(output, "local " .. statement.name)
 			table.insert(output, ";\n")		
-		elseif statement.tag == "string" then
+		elseif statement.tag == "string-load-ir" then
 			assert(isstring(statement.value))
 
 			table.insert(output, indentation)
@@ -2724,7 +2870,14 @@ function sourceFromSemantics.lua(semantics)
 			table.insert(output, show(statement.value))
 			table.insert(output, "}")
 			table.insert(output, "\n")			
-		elseif statement.tag == "field" then
+		elseif statement.tag == "number-load-ir" then
+			table.insert(output, indentation)
+			table.insert(output, statement.dst .. " = ")
+			table.insert(output, "{value = ")
+			table.insert(output, show(statement.value))
+			table.insert(output, "}")
+			table.insert(output, "\n")
+		elseif statement.tag == "field-ir" then
 			local field = statement.name
 			local object = statement.object
 			assert(isstring(field))
@@ -2734,97 +2887,24 @@ function sourceFromSemantics.lua(semantics)
 			table.insert(output,
 				statement.dst .. " = " .. object .. "." .. field)
 			table.insert(output, "\n")
-		elseif statement.tag == "number" then
-			table.insert(output, indentation)
-			table.insert(output, statement.dst .. " = ")
-			table.insert(output, "{value = ")
-			table.insert(output, show(statement.value))
-			table.insert(output, "}")
-			table.insert(output, "\n")
-		elseif statement.tag == "interface-method" then
-			local methodName = statement.name
-			assert(isstring(methodName))
-			local object = statement.object
-			assert(isstring(object))
-			local argumentList = statement.arguments
+		elseif statement.tag == "call-ir" then
+			local func = statement.func
+			assertis(func, "string")
 
-			local interfaceInformation = statement.interface
-			assert(#interfaceInformation == 2)
-			
-			local methodLua = interfaceInformation[1]
-				.. "['" .. interfaceInformation[2] .. "']."
-				.. methodName
-
-			local arguments = {object}
-			for _, argument in ipairs(argumentList) do
-				table.insert(arguments, argument)
-			end
-
-			table.insert(output, indentation)
-			table.insert(output, statement.dst .. " = " .. methodLua)
-			table.insert(output, "(")
-			table.insert(output, table.concat(arguments, ", "))
-			table.insert(output, ")\n")
-		elseif statement.tag == "call" then
-			assert(isstring(statement.func))
-			assert(statement.dsts, show(statement))
-
-			-- Collect the arguments to be passed in the Lua call
 			local luaArguments = {}
 
-			-- Lua arguments include base instance + smol arguments
-			for _, argument in ipairs(statement.arguments) do
-				table.insert(luaArguments, argument)
-			end
+			error("TODO")
+		elseif statement.tag == "interface-ir" then
 
-			-- Lua arguments include interface constraints
-			for _, constraint in ipairs(statement.constraints) do
-				if isstring(constraint) then
-					table.insert(luaArguments, luaizeConstraint(constraint))
-				else
-					table.insert(luaArguments, luaizeConstraint(constraint))
-				end
-			end
-
-			table.insert(output, indentation)
-
-			-- Collect destination variables into assignment string
-			-- NOTE: This may be empty
-			for i = 1, #statement.dsts do
-				table.insert(output, statement.dsts[i])
-				if i == #statement.dsts then
-					table.insert(output, " = ")
-				else
-					table.insert(output, ", ")
-				end
-			end
-
-			-- OUTPUT Lua function invocation
-			table.insert(output, luaizeFunction(statement.func))
-			table.insert(output, "(")
-			table.insert(output, table.concat(luaArguments, ", "))
-			table.insert(output, ")\n")
-		elseif statement.tag == "return" then
+			error("TODO")
+		elseif statement.tag == "return-ir" then
 			-- OUTPUT Lua return
 			table.insert(output, indentation)
 			table.insert(output, "return ")
 			table.insert(output, table.concat(statement.values, ", "))
 			table.insert(output, "\n")
-		elseif statement.tag == "new" then
-			table.insert(output, indentation)
-			table.insert(output, statement.dst .. " =")
-			table.insert(output, "{ ")
-			for key, value in pairs(statement.record) do
-				table.insert(output, key .. " = " .. value .. "; ")
-			end
-			assert(statement.constraints ~= nil)
-			for i, constraint in ipairs(statement.constraints) do
-				table.insert(output, "['#" .. i .. "'] = ")
-				table.insert(output, luaizeConstraint(constraint))
-				table.insert(output, "; ")
-			end
-
-			table.insert(output, "}\n")
+		elseif statement.tag == "new-ir" then
+			error("TODO")
 		else
 			error("unknown statement tag `" .. statement.tag .. "`")
 		end
