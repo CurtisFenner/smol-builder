@@ -490,7 +490,7 @@ local function recordType(record)
 	for key, value in pairs(record) do
 		assert(isstring(key), "record key must be string")
 		assert(isstring(value) or isfunction(value),
-			"record key must be string or predicate")
+			"record value must be string or predicate")
 	end
 
 	local function predicate(object)
@@ -519,6 +519,25 @@ local function listType(element)
 			if not isinteger(key) then
 				return false
 			elseif key ~= 1 and object[key-1] == nil then
+				return false
+			end
+		end
+		return true
+	end
+
+	return predicate
+end
+
+-- RETURNS a type-predicate
+local function mapType(from, to)
+	local function predicate(object)
+		local from = TYPE_PREDICATE(from)
+		local to = TYPE_PREDICATE(to)
+		if not isobject(object) then
+			return false
+		end
+		for key, value in pairs(object) do
+			if not from(key) or not to(value) then
 				return false
 			end
 		end
@@ -842,15 +861,26 @@ local function parseSmol(tokens)
 				return nil
 			end
 
-			return f(object), rest
+			local out = f(object)
+			assert(out ~= nil)
+			if isobject(out) then
+				out = withkv(out, "location", stream:location())
+			end
+			return out, rest
 		end
 	end
 
 	-- PARSER for `parser` but only extracting `field`
-	local function parserExtractor(parser, field)
-		assert(isstring(field))
+	local function parserExtractor(parser, ...)
+		local fields = {...}
+		assertis(fields, listType "string")
+		assert(1 <= #fields)
+
 		return parserMap(parser, function(x)
-			return x[field]
+			for _, field in ipairs(fields) do
+				x = x[field]
+			end
+			return x
 		end)
 	end
 
@@ -1031,8 +1061,9 @@ local function parseSmol(tokens)
 	local K_BOOLEAN = LEXEME "Boolean"
 
 	-- PARSER for token tag ("typename", "identifier", "operator", etc)
-	local function TOKEN(tokenType)
-		assert(type(tokenType) == "string", "tokenType must be string")
+	local function TOKEN(tokenType, field)
+		assertis(tokenType, "string")
+		assertis(field, "string")
 
 		return function(stream, parsers)
 			assert(parsers)
@@ -1040,18 +1071,17 @@ local function parseSmol(tokens)
 				return nil
 			end
 			if stream:head().tag == tokenType then
-				debugPrint("TOKEN", tokenType, stream:location())
-				return stream:head(), stream:rest()
+				return stream:head()[field], stream:rest()
 			end
 			return nil
 		end
 	end
-	local T_IDENTIFIER = TOKEN "identifier"
-	local T_TYPENAME = TOKEN "typename"
-	local T_GENERIC = TOKEN "generic"
-	local T_INTEGER_LITERAL = TOKEN "integer-literal"
-	local T_STRING_LITERAL = TOKEN "string-literal"
-	local T_OPERATOR = TOKEN "operator"
+	local T_IDENTIFIER = TOKEN("identifier", "lexeme")
+	local T_TYPENAME = TOKEN("typename", "lexeme")
+	local T_GENERIC = TOKEN("generic", "name")
+	local T_INTEGER_LITERAL = TOKEN("integer-literal", "value")
+	local T_STRING_LITERAL = TOKEN("string-literal", "value")
+	local T_OPERATOR = TOKEN("operator", "lexeme")
 
 	-- HELPER meaning object repeated several times,
 	-- separated by commas.
@@ -1117,20 +1147,20 @@ local function parseSmol(tokens)
 	-- DEFINES the grammar for the language
 	local parsers = {
 		-- Represents an entire source file
-		["program"] = composite {
-			tag = "program",
-			{"package", G "package", "a package definition"},
+		["source"] = composite {
+			tag = "source",
+			{"package", G "package", "a package definition"}, --: string
 			{"imports", zeroOrMore(G "import")},
 			{"definitions", zeroOrMore(G "definition")},
 		},
 
 		-- Represents a package declaration
-		["package"] = composite {
-			tag = "package",
+		["package"] = parserExtractor(composite {
+			tag = "***package",
 			{"_", K_PACKAGE},
 			{"name", T_IDENTIFIER, "an identifier"},
 			{"_", K_SEMICOLON, "`;` to finish package declaration"},
-		},
+		}, "name"),
 
 		-- Represents an import
 		["import"] = composite {
@@ -1146,7 +1176,7 @@ local function parseSmol(tokens)
 		},
 
 		-- Represents a top-level definition
-		definition = choice {
+		["definition"] = choice {
 			G "class-definition",
 			G "union-definition",
 			G "interface-definition",
@@ -1245,8 +1275,11 @@ local function parseSmol(tokens)
 
 		["concrete-type"] = composite {
 			tag = "concrete-type",
-			{"package", optional(G "package-scope")}, --: string | false
-			{"base", T_TYPENAME}, --: {lexeme = string}
+			{
+				"package", --: string | false
+				optional(G "package-scope"),
+			},
+			{"base", T_TYPENAME}, --: string
 			{
 				"arguments",
 				parserOtherwise(optional(G "type-arguments"), freeze {})
@@ -1390,13 +1423,13 @@ local function parseSmol(tokens)
 		}, function(x)
 			-- XXX: no precedence yet; assume left-associative
 			local out = x.base
-			assert(out)
+			assertis(out.tag, "string")
 			for _, operation in ipairs(x.operations) do
 				out = {
 					tag = "binary",
 					left = out,
 					right = operation.operand,
-					operator = operation.operator.lexeme,
+					operator = operation.operator,
 				}
 				assert(isstring(out.operator))
 				if out.left.tag == "binary" then
@@ -1461,13 +1494,13 @@ local function parseSmol(tokens)
 				return {
 					tag = "method-call",
 					arguments = x.call.arguments,
-					func = x.name.lexeme, --: string
+					func = x.name, --: string
 					location = x.location,
 				}
 			end
 			return {
 				tag = "field",
-				field = x.name.lexeme, --: string
+				field = x.name, --: string
 				location = x.location,
 			}
 		end),
@@ -1475,8 +1508,12 @@ local function parseSmol(tokens)
 		["atom-base"] = choice {
 			G "new-expression",
 			K_THIS,
-			T_STRING_LITERAL,
-			T_INTEGER_LITERAL,
+			parserMap(T_STRING_LITERAL, function(v)
+				return {tag = "string-literal", value = v}
+			end),
+			parserMap(T_INTEGER_LITERAL, function(v)
+				return {tag = "number-literal", value = v}
+			end),
 			composite { -- static method call
 				tag = "static-call",
 				{"base-type", G "type"},
@@ -1486,7 +1523,9 @@ local function parseSmol(tokens)
 				{"arguments", commad(G "expression", "0+", "an expression")},
 				{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 			},
-			T_IDENTIFIER,
+			parserMap(T_IDENTIFIER, function(n)
+				return {tag = "identifier", name = n}
+			end),
 			parserExtractor(composite {
 				tag = "***parenthesized expression",
 				{"_", K_ROUND_OPEN},
@@ -1497,56 +1536,342 @@ local function parseSmol(tokens)
 	}
 
 	-- Sequence of definitions
-	local program, rest = parsers.program(stream, parsers)
+	local source, rest = parsers.source(stream, parsers)
 	assert(rest ~= nil)
 	if rest:size() ~= 0 then
 		quit("The compiler expected another definition ", rest:location())
 	end
 
-	return program
+	return source
 end
 
 -- Semantics / Verification ----------------------------------------------------
 
--- RETURNS a semantic description of the program
+REGISTER_TYPE("Semantics", recordType {
+	structs = listType "StructIR",
+	unions = listType "UnionIR",
+	interfaces = listType "InterfaceIR",
+	functions = listType "FunctionIR",
+	main = "string",
+})
+
+REGISTER_TYPE("StructIR", recordType {
+	name = "string",
+	fields = listType "VariableIR",
+	generics = listType "TypeParameterIR",
+	implements = listType "Type",
+})
+
+REGISTER_TYPE("UnionIR", recordType {
+	name = "string",
+	fields = listType "VariableIR",
+	generics = listType "TypeParameterIR",
+})
+
+REGISTER_TYPE("InterfaceIR", recordType {
+	name = "string",
+	statics = listType("SignatureIR"),
+	methods = listType("SignatureIR"),
+	generics = listType("TypeParameterIR"),
+})
+
+REGISTER_TYPE("TypeParameterIR", recordType {
+	name = "string", -- Type parameter name (e.g., "#Right")
+	constraints = listType(recordType {
+		interface = "ConcreteType+",
+		name = "string", -- e.g., "#2"
+	}),
+})
+
+REGISTER_TYPE("FunctionIR", recordType {
+	name = "string",
+	parameters = listType "VariableIR",
+	generics = listType "TypeParameterIR",
+	returnTypes = listType "Type+",
+	body = "Body-IR",
+})
+
+REGISTER_TYPE("VariableIR", recordType {
+	name = "string",
+	type = "Type+",
+})
+
+--------------------------------------------------------------------------------
+
+REGISTER_TYPE("Type+", choiceType(
+	"ConcreteType+", "KeywordType+", "GenericType+"
+))
+
+REGISTER_TYPE("ConcreteType+", recordType {
+	tag = constantType "concrete-type+",
+
+	name = "string",
+	arguments = listType "Type+",
+
+	location = "string",
+})
+
+REGISTER_TYPE("KeywordType+", recordType {
+	tag = constantType "keyword-type+",
+
+	name = "string",
+
+	location = "string",
+})
+
+REGISTER_TYPE("GenericType+", recordType {
+	tag = constantType "GenericType+",
+	
+	name = "string", -- e.g., "Foo" for `#Foo`
+
+	location = "string",
+})
+
+--------------------------------------------------------------------------------
+
+REGISTER_TYPE("ImplIR", choiceType(
+	"LocalImplIR", "FieldImplIR", "BuildImplIR"
+))
+
+REGISTER_TYPE("LocalImplIR", recordType {
+	tag = constantType "local-impl-ir",
+
+	name = "string",
+})
+
+REGISTER_TYPE("FieldImplIR", recordType {
+	tag = constantType "field-impl-ir",
+
+	object = "string", -- IR variable
+	field = "string", -- e.g., "#2"
+})
+
+REGISTER_TYPE("BuildImplIR", recordType {
+	tag = constantType "build-impl-ir",
+
+	base = "string",
+	arguments = listType "ImplIR",
+})
+
+--------------------------------------------------------------------------------
+
+-- TYPE Statement (ir-var = string)
+-- tag: "var-ir" => name: ir-var, type: Type
+-- tag: "string-load-ir" => dst: ir-var, value: string
+-- tag: "number-load-ir" => dst: ir-var, value: number
+-- tag: "call-ir" =>
+--     func: string,
+--     arguments: [ir-var],
+--     dsts: [ir-var], 
+--     constraints: [Impl],
+-- tag: "interface-ir" =>
+--     impl: Impl,
+--     func: string,
+--     arguments: [ir-var],
+--     dsts: [ir-var],
+-- tag: "new-ir" =>
+--     record: {string (field name) => ir-var},
+--     constraints: [Impl],
+--     dst: ir-var,
+-- tag: "field-ir" => dst: ir-var, object: ir-var, field: string
+-- tag: "return-ir" => values: [ir-var]
+
+--------------------------------------------------------------------------------
+
+local REPORT = {}
+
+function REPORT.TYPE_DEFINED_TWICE(first, second)
+	assertis(first.name, "string")
+	assertis(second.name, "string")
+	assert(first.name == second.name)
+
+	local name = first.name
+
+	quit("The type `", name, "` was already defined ",
+		first.location,
+		".\nHowever, you are attempting to redefine it ",
+		second.location)
+end
+
+function REPORT.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
+	p = freeze(p)
+	local name = p.name
+	local first = p.firstLocation
+	local second = p.secondLocation
+	assertis(name, "string")
+
+	quit("TYPE BROUGHT INTO SCOPE TWICE")
+end
+
+function REPORT.UNKNOWN_TYPE_IMPORTED(p)
+	p = freeze(p)
+	quit("The type `", p.name, "` has not been defined.",
+		"\nHowever, you are trying to import it ", p.location)
+end
+
+function REPORT.UNKNOWN_PACKAGE_USED(p)
+	p = freeze(p)
+	quit("The package `", p.package, "` has not been imported.",
+		"\nHowever, you are trying to use it ", p.location)
+end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS an IR description of the program
 local function semanticsSmol(sources, main)
-	assert(isstring(main))
+	assertis(main, "string")
 
-	-- (1) Resolve the set of types that have been defined
-	local typeSourceDefinitions = {}
-	local sourcesByPackage = {}
+	-- (1) Resolve the set of types and the set of packages that have been
+	-- defined
+	local isPackageDefined = {}
+	local definitionSourceByFullName = {}
 	for _, source in ipairs(sources) do
-		local packageName = source.package.name.lexeme
+		local package = source.package
+		assertis(package, "string")
 
-		-- Make this source available from package name
-		sourcesByPackage[packageName] = sourcesByPackage[packageName] or {}
-		table.insert(sourcesByPackage[packageName], source)
+		-- Mark this package name as defined
+		-- Package names MAY be repeated between several sources
+		isPackageDefined[package] = true
 
-		-- Note the definition of all definitions made by this source
+		-- Record the definition of all types in this package
 		for _, definition in ipairs(source.definitions) do
-			local typeName = definition.name.lexeme
-			assert(isstring(typeName))
-			local fullName = packageName .. ":" .. typeName
+			local fullName = package .. ":" .. definition.name
 
-			-- Check that the type has not already been defined
-			if typeSourceDefinitions[fullName] then
-				quit("The type `", fullName, "` was already defined ",
-					typeSourceDefinitions[fullName].location,
-					".\nHowever, you are attempting to redefine it ",
-					definition.location)
+			-- Check that this type is not defined twice
+			local previousDefinition = definitionSourceByFullName[fullName]
+			if previousDefinition then
+				Report.TYPE_DEFINED_TWICE(previousDefinition, definition)
 			end
 
-			-- Record this type
-			typeSourceDefinitions[fullName] = definition
+			definitionSourceByFullName[fullName] = definition
 		end
 	end
+
+	-- (2) Fully qualify all local type names
+	local classDefinitions = {}
+	local interfaceDefinitions = {}
+	local unionDefinitions = {}
+	for _, source in ipairs(sources) do
+		local package = source.package
+
+		-- A bare `typename` should resolve to the type with name `typename`
+		-- in package `packageScopeMap[typename].package`
+		local packageScopeMap = {}
+		local function defineLocalType(name, package, location)
+			if packageScopeMap[name] then
+				Report.TYPE_BROUGHT_INTO_SCOPE_TWICE {
+					name = name,
+					firstLocation = packageScopeMap[name].location,
+					secondLocation = location,
+				}
+			end
+			packageScopeMap[name] = {
+				package = package,
+				location = location,
+			}
+		end
+
+		-- Only types in this set can be legally referred to
+		local packageIsInScope = {
+			[package] = true,
+		}
+
+		-- Bring each imported type/package into scope
+		for _, import in ipairs(source.imports) do
+			if import.class then
+				-- Check that the type exists
+				local importedFullName = import.package .. ":" .. import.class
+				if not definitionSourceByFullName[importedFullName] then
+					Report.UNKNOWN_TYPE_IMPORTED {
+						location = import.location,
+						name = importedFullName,
+					}
+				end
+
+				defineLocalType(import.class, import.package, import.location)
+			else
+				-- Importing an entire package
+				packageIsInScope[import.package] = true
+			end
+		end
+		
+		-- Bring each defined type into scope
+		local classes = {}
+		local interfaces = {}
+		local unions = {}
+		for _, definition in ipairs(source.definitions) do
+			local location = definition.location
+			defineLocalType(definition.name, source.package, location)
+			if definition.tag == "class-definition" then
+				table.insert(classes, definition)
+			elseif definition.tag == "interface-definition" then
+				table.insert(interfaces, definition)
+			elseif definition.tag == "union-definition" then
+				table.insert(unions, definition)
+			else
+				error("unknown definition tag `" .. definition.tag .. "`")
+			end
+		end
+
+		assertis(packageIsInScope, mapType("string", constantType(true)))
+
+		-- Verifies that a type is properly-in-scope
+		local function typeFinder(t)
+			if t.tag == "concrete-type" then
+				local package = t.package
+				if not package then
+					package = packageScopeMap[t.name]
+					if not package then
+						Report.UNKNOWN_LOCAL_TYPE_USED {
+							name = t.name,
+							location = t.location,
+						}
+					end
+				elseif not packageIsInScope[package] then
+					Report.UNKNOWN_PACKAGE_USED {
+						package = package,
+						location = t.location,
+					}
+				end
+				return {tag = "ConcreteType+",
+					name = package .. ":" .. t.name,
+					arguments = map(typeFinder, t.arguments),
+					location = t.location,
+				}
+			elseif t.tag == "generic" then
+				return {tag = "GenericType+",
+					name = t.name,
+					location = t.location,
+				}
+			elseif t.tag == "type-keyword" then
+				return {tag = "KeywordType+",
+					name = t.name,
+					location = t.location,
+				}
+			end
+			error("unhandled ast type tag `" .. t.tag .. "`")
+		end
+
+
+	end
+
+	-- (3) Compile all code bodies
+	assertis(classDefinitions, listType "StructIR")
+	assertis(interfaceDefinitions, listType "InterfaceIR")
+	assertis(unionDefinitions, listType "UnionIR")
+
+end
+
+-- RETURNS a semantic description of the program
+local function semanticsSmolOld(sources, main)
+	assert(isstring(main))
 
 	-- (2) Resolve the full name and arity of all types
 	local classSignatures = {}
 	local interfaceSignatures = {}
 	local unionSignatures = {}
 	for _, source in ipairs(sources) do
-		local packageName = source.package.name.lexeme
+		local packageName = source.package.name
 
 		-- A bare `typename` should resolve to `packageMap[typename]:typename`.
 		local packageMap = {}
@@ -1562,13 +1887,13 @@ local function semanticsSmol(sources, main)
 		for _, import in ipairs(source.imports) do
 			if import.class then
 				local importedFullName =
-					import.package.lexeme .. ":" .. import.class.lexeme
+					import.package .. ":" .. import.class
 
 				-- Check that this name hasn't been imported twice
-				if packageMap[import.class.lexeme] then
-					quit("The type `", import.class.lexeme,
+				if packageMap[import.class] then
+					quit("The type `", import.class,
 						" has already been imported ",
-						importLocation[import.class.lexeme],
+						importLocation[import.class],
 						"\nHowever, you are trying to import a type ",
 						"with the same name ", import.location)
 				elseif not typeSourceDefinitions[importedFullName] then
@@ -1577,28 +1902,28 @@ local function semanticsSmol(sources, main)
 						" import it ", import.location)
 				end
 				
-				packageMap[import.class.lexeme] = import.package.lexeme
-				importLocation[import.class.lexeme] = import.location
+				packageMap[import.class] = import.package
+				importLocation[import.class] = import.location
 			else
 				-- Verify that this package name can be imported
-				if import.package.lexeme == packageName then
+				if import.package == packageName then
 					quit("The package `", packageName, "` cannot import",
 						" itself. However, you are trying to",
 						" `import ", packageName, "` ", import.location)
-				elseif not sourcesByPackage[import.package.lexeme] then
-					quit("There is no package called `", import.package.lexeme,
+				elseif not packageNameDefined[import.package] then
+					quit("There is no package called `", import.package,
 						"`. However, you are trying to import it ",
 						import.location)
 				end
 
 				-- The package may be referred to
-				packageIsAvailable[import.package.lexeme] = true
+				packageIsAvailable[import.package] = true
 			end
 		end
 		-- (ii) Scan locally defined types
 		for _, definition in ipairs(source.definitions) do
-			local name = definition.name.lexeme
-			assert(isstring(name))
+			local name = definition.name
+			assertis(name, "string")
 
 			-- Check that the type has not been imported
 			if packageMap[name] then
@@ -1608,6 +1933,7 @@ local function semanticsSmol(sources, main)
 					"define a type with the name `", name, "` ",
 					definition.location)
 			end
+
 			packageMap[name] = packageName
 		end
 
@@ -1616,30 +1942,31 @@ local function semanticsSmol(sources, main)
 		local function normalizeTypePackage(t, genericsInScope)
 			assert(isobject(genericsInScope),
 				"genericsInScope must be an object")
+			assertis(packageMap, mapType("string", "string"))
 			t = freeze(t)
 
 			if t.tag == "concrete-type" then
-				local shortName = t.base.lexeme
-				local package = t.package
-				if package then
-					package = package.lexeme
-
-					-- Check that it was imported
-					if not packageIsAvailable[package] then
-						quit("The package `", package,
+				local package
+				if t.package then
+					-- Check that the referenced package has been imported
+					if not packageIsAvailable[t.package] then
+						quit("The package `", t.package,
 							"` hasn't been imported. However, ",
-							"a type uses it ", t.location)
+							"a type refers to it ", t.location)
 					end
+
+					package = t.package
 				else
-					package = packageMap[t.base.lexeme]
-					if not package then
-						quit("There is no type called `", shortName,
+					if not packageMap[t.base] then
+						quit("There is no type called `", t.base,
 							"` in scope ", t.location)
 					end
-				end
-				assert(isstring(package))
 
-				local fullName = package .. ":" .. shortName
+					package = packageMap[t.base]
+				end
+				assertis(package, "string")
+
+				local fullName = package .. ":" .. t.base
 				if not typeSourceDefinitions[fullName] then
 					quit("There is no type called `", fullName, "`. ",
 						"However, it is mentioned ", t.location)
@@ -1752,13 +2079,13 @@ local function semanticsSmol(sources, main)
 		local function normalizeSignaturePackage(signature, genericScope)
 			assert(isobject(genericScope), "genericScope must be an object")
 
-			local methodName = signature.name.lexeme
+			local methodName = signature.name
 
 			-- Normalize parameter types
 			local parameters = {}
 			for _, p in ipairs(signature.parameters) do
 				table.insert(parameters, {
-					name = p.name.lexeme,
+					name = p.name,
 					type = normalizeTypePackage(p.type, genericScope),
 					location = p.location,
 				})
@@ -1773,7 +2100,7 @@ local function semanticsSmol(sources, main)
 			-- Static function
 			return {
 				name = methodName,
-				modifier = signature.modifier.lexeme,
+				modifier = signature.modifier,
 				parameters = parameters,
 				returnTypes = returns,
 				location = signature.location,
@@ -1784,7 +2111,7 @@ local function semanticsSmol(sources, main)
 		-- (iii) Rescan all local definitions and emit all signatures with
 		-- fully-qualified types.
 		for _, definition in ipairs(source.definitions) do
-			local fullName = packageName .. ":" .. definition.name.lexeme
+			local fullName = packageName .. ":" .. definition.name
 
 			if definition.tag == "class-definition" then
 				-- (a) type parameters / type constraints
@@ -1799,11 +2126,11 @@ local function semanticsSmol(sources, main)
 				local fields = {}
 				for _, field in ipairs(definition.fields) do
 					-- Check that a named hasn't already been defined
-					if memberSourceDefinition[field.name.lexeme] then
+					if memberSourceDefinition[field.name] then
 						local previousField =
-							memberSourceDefinition[field.name.lexeme]
+							memberSourceDefinition[field.name]
 						quit("In `", fullName, "` a field named `",
-							field.name.lexeme, "` is defined twice.\n",
+							field.name, "` is defined twice.\n",
 							"The first definition is ",
 							previousField.location,
 							"The second definition is ",
@@ -1813,7 +2140,7 @@ local function semanticsSmol(sources, main)
 
 					-- Add the field
 					table.insert(fields, {
-						name = field.name.lexeme,
+						name = field.name,
 						type = normalizeTypePackage(field.type, genericScope),
 						location = field.location,
 					})
@@ -1905,11 +2232,11 @@ local function semanticsSmol(sources, main)
 				local fields = {}
 				for _, field in ipairs(definition.fields) do
 					-- Check that a named hasn't already been defined
-					if memberSourceDefinition[field.name.lexeme] then
+					if memberSourceDefinition[field.name] then
 						local previousField =
-							memberSourceDefinition[field.name.lexeme]
+							memberSourceDefinition[field.name]
 						quit("In `", fullName, "` a field named `",
-							field.name.lexeme, "` is defined twice.\n",
+							field.name, "` is defined twice.\n",
 							"The first definition is ",
 							previousField.location,
 							"The second definition is ",
@@ -1919,7 +2246,7 @@ local function semanticsSmol(sources, main)
 
 					-- Add the field
 					table.insert(fields, freeze {
-						name = field.name.lexeme,
+						name = field.name,
 						type = normalizeTypePackage(field.type, genericScope),
 						location = field.location,
 					})
@@ -2485,7 +2812,7 @@ local function semanticsSmol(sources, main)
 			error("TODO")
 		elseif ast.tag == "static-call" then
 			local out = {}
-			local name = ast.name.lexeme
+			local name = ast.name
 			assert(isstring(name))
 			local baseType = normalizer(ast["base-type"])
 
@@ -2748,86 +3075,6 @@ end
 -- Transpilation ---------------------------------------------------------------
 
 local sourceFromSemantics = {}
-
--- TYPE Semantics
--- Semantics.structs : [Struct]
--- Semantics.unions : [Union]
--- Semantics.interfaces : [Interface]
--- Semantics.functions : [Function]
--- Semantics.main : string
-
--- TYPE Struct
--- Struct.name: string
--- Struct.fields: [{name: string, type: Type}]
--- Struct.generics: [{
---     name: string,
---     constraints: [{interface: ConcreteType, name: string}]
--- }]
--- Struct.implements: [Type]
-
--- TYPE Union
--- Union.name: string
--- Union.fields: [{name: string, type: Type}]
--- Union.generics: [{
---     name: string,
---     constraints: [{interface: ConcreteType, name: string}]
--- }]
-
--- TYPE Interface
--- Interface.name: string
--- Interface.statics: [ {
---     name: string,
---     parameters: [{name: string, type: Type}],
---     returnTypes: [Type],
--- } ]
--- Interface.methods: [ {
---     name: string,
---     parameters: [Type],
---     returnTypes: [Type],
--- } ]
--- Interface.generics: [{
---     name: string,
---     constraints: [{interface: ConcreteType, name: string}]
--- }]
-
--- TYPE Function
--- Function.name: string
--- Function.parameters: [{name: string, type: Type}]
--- Function.generics: false | [{
---     name: string, // name of the type parameter
---     constraints: [{
---         interface: ConcreteType,
---         name: string // name of the constraint; these must be "#1", "#2", ...
---     }]
--- }]
--- Function.returnTypes: [Type]
--- Function.body: Statement
-
--- TYPE Impl
--- tag: "local-impl" => name: constraint-var (string)
--- tag: "field-impl" => object: ir-var (string), field: string (e.g., "#2")
--- tag: "build-impl" => base: string (type name w/ package), arguments: [Impl]
-
--- TYPE Statement (ir-var = string)
--- tag: "var-ir" => name: ir-var, type: Type
--- tag: "string-load-ir" => dst: ir-var, value: string
--- tag: "number-load-ir" => dst: ir-var, value: number
--- tag: "call-ir" =>
---     func: string,
---     arguments: [ir-var],
---     dsts: [ir-var], 
---     constraints: [Impl],
--- tag: "interface-ir" =>
---     impl: Impl,
---     func: string,
---     arguments: [ir-var],
---     dsts: [ir-var],
--- tag: "new-ir" =>
---     record: {string (field name) => ir-var},
---     constraints: [Impl],
---     dst: ir-var,
--- tag: "field-ir" => dst: ir-var, object: ir-var, field: string
--- tag: "return-ir" => values: [ir-var]
 
 -- RETURNS a string representing a Lua program with the indicated semantics
 function sourceFromSemantics.lua(semantics)
