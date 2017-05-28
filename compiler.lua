@@ -157,6 +157,8 @@ end
 
 --------------------------------------------------------------------------------
 
+local show;
+
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
 -- DOES NOT RETURN.
@@ -253,11 +255,30 @@ function string.postpad(str, with, length)
 	return str .. string.rep(with, length - #str)
 end
 
+-- RETURNS a list of keys into the given table
+-- Indices of lists are guaranteed to be returned in order;
+-- Otherwise, the order is not specified
+function table.keys(t)
+	local marked = {}
+	local out = {}
+	for i in ipairs(t) do
+		table.insert(out, i)
+		marked[i] = true
+	end
+	for i in pairs(t) do
+		if not marked[i] then
+			table.insert(out, i)
+		end
+	end
+	return out
+end
+
 -- Redefine `pairs` to use `__pairs` metamethod
 local oldp41rs = pairs
 local function pairs(object)
 	assert(isobject(object),
-		"object must be reference type in pairs()")
+		"object must be reference type in pairs();"
+		.. "\ngot `" .. type(object) .. "`")
 	-- TODO: deal with locked metatables
 	local metatable = getmetatable(object)
 	if metatable and metatable.__pairs then
@@ -284,7 +305,6 @@ end
 
 -- RETURNS a string representing a literal 'equivalent' to the object
 -- (excluding references and non-serializable objects like functions)
-local show
 do
 	local specialCharacterRepresentation = {
 		["\a"] = [[\a]],
@@ -389,7 +409,7 @@ end
 
 -- RETURNS a frozen version of `object` such that accesses to key `key`
 -- produce `newValue` instead of referring to `object`'s definition
-local function withkv(object, key, newValue)
+function table.with(object, key, newValue)
 	local newObject = {}
 	for k, v in pairs(object) do
 		newObject[k] = v
@@ -400,9 +420,11 @@ local function withkv(object, key, newValue)
 end
 
 -- RETURNS a list produced by mapping each element of `list` through `f`
-local function map(f, list)
+function table.map(f, list)
+	assert(type(f) == "function",
+		"the first argument to table.map must be a function")
 	local out = {}
-	for k, v in pairs(list) do
+	for k, v in ipairs(list) do
 		out[k] = f(v)
 	end
 	return out
@@ -618,7 +640,7 @@ local function lexSmol(source, filename)
 			"[A-Z][A-Za-z0-9]*",
 			function(x)
 				if IS_KEYWORD[x] then
-					return {tag = "type-keyword", keyword = x}
+					return {tag = "type-keyword", name = x}
 				end
 				return {tag = "typename", name = x}
 			end
@@ -864,7 +886,7 @@ local function parseSmol(tokens)
 			local out = f(object)
 			assert(out ~= nil)
 			if isobject(out) then
-				out = withkv(out, "location", stream:location())
+				out = table.with(out, "location", stream:location())
 			end
 			return out, rest
 		end
@@ -1185,6 +1207,7 @@ local function parseSmol(tokens)
 		-- Represents a class
 		["class-definition"] = composite {
 			tag = "class-definition",
+			{"foreign", optional(K_FOREIGN)},
 			{"_", K_CLASS},
 			{"name", T_TYPENAME, "a type name"},
 			{"generics", parserOtherwise(optional(G "generics"), {
@@ -1197,6 +1220,15 @@ local function parseSmol(tokens)
 			{"methods", zeroOrMore(G "method-definition")},
 			{"_", K_CURLY_CLOSE, "`}`"},
 		},
+		["implements"] = parserExtractor(composite {
+			tag = "***implements",
+			{"_", K_IS},
+			{
+				"interfaces",
+				commad(G "concrete-type", "1+", "an interface name"),
+				"one or more interface names",
+			},
+		}, "interfaces"),
 
 		-- Represents a union
 		["union-definition"] = composite {
@@ -1207,6 +1239,8 @@ local function parseSmol(tokens)
 				parameters = {},
 				constraints = {},
 			})},
+			-- TODO: do unions actually allow implements?
+			{"implements", parserOtherwise(optional(G "implements"), {})},
 			{"_", K_CURLY_OPEN, "`{` to begin union body"},
 			{"fields", zeroOrMore(G "field-definition")},
 			{"methods", zeroOrMore(G "method-definition")},
@@ -1269,7 +1303,9 @@ local function parseSmol(tokens)
 			K_UNIT,
 			K_NEVER,
 			-- User defined types
-			T_GENERIC,
+			parserMap(T_GENERIC, function(x)
+				return {tag = "generic", name = x, location = "???"}
+			end),
 			G "concrete-type",
 		},
 
@@ -1302,16 +1338,6 @@ local function parseSmol(tokens)
 			},
 			{"_", K_SQUARE_CLOSE, "`]`"},
 		}, "arguments"),
-
-		["implements"] = parserExtractor(composite {
-			tag = "***implements",
-			{"_", K_IS},
-			{
-				"interfaces",
-				commad(G "concrete-type", "1+", "an interface name"),
-				"one or more interface names",
-			},
-		}, "interfaces"),
 
 		["field-definition"] = composite {
 			tag = "field-definition",
@@ -1473,7 +1499,7 @@ local function parseSmol(tokens)
 		}, function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
-				out = withkv(access, "base", out)
+				out = table.with(access, "base", out)
 			end
 			return out
 		end),
@@ -1559,7 +1585,7 @@ REGISTER_TYPE("StructIR", recordType {
 	name = "string",
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
-	implements = listType "Type",
+	implements = listType "ConcreteType+",
 })
 
 REGISTER_TYPE("UnionIR", recordType {
@@ -1589,6 +1615,13 @@ REGISTER_TYPE("FunctionIR", recordType {
 	generics = listType "TypeParameterIR",
 	returnTypes = listType "Type+",
 	body = "Body-IR",
+})
+
+REGISTER_TYPE("Signature", recordType {
+	name = "string",
+	parameters = listType "VariableIR",
+	returnTypes = listType "Type+",
+	modifier = choiceType(constantType "static", constantType "method"),
 })
 
 REGISTER_TYPE("VariableIR", recordType {
@@ -1678,9 +1711,9 @@ REGISTER_TYPE("BuildImplIR", recordType {
 
 --------------------------------------------------------------------------------
 
-local REPORT = {}
+local Report = {}
 
-function REPORT.TYPE_DEFINED_TWICE(first, second)
+function Report.TYPE_DEFINED_TWICE(first, second)
 	assertis(first.name, "string")
 	assertis(second.name, "string")
 	assert(first.name == second.name)
@@ -1693,7 +1726,21 @@ function REPORT.TYPE_DEFINED_TWICE(first, second)
 		second.location)
 end
 
-function REPORT.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
+function Report.GENERIC_DEFINED_TWICE(p)
+	quit("The generic variable `#", p.name, "` was already defined ",
+		p.firstLocation,
+		".\nHowever, you are attempting to redefine it ",
+		p.secondLocation)
+end
+
+function Report.MEMBER_DEFINED_TWICE(p)
+	quit("The member `" .. p.name .. "` was already defined ",
+		p.firstLocation,
+		".\nHowever, you are attempting to redefine it ",
+		p.secondLocation)
+end
+
+function Report.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
 	p = freeze(p)
 	local name = p.name
 	local first = p.firstLocation
@@ -1703,15 +1750,25 @@ function REPORT.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
 	quit("TYPE BROUGHT INTO SCOPE TWICE")
 end
 
-function REPORT.UNKNOWN_TYPE_IMPORTED(p)
+function Report.UNKNOWN_TYPE_IMPORTED(p)
 	p = freeze(p)
-	quit("The type `", p.name, "` has not been defined.",
+	quit("A type called `", p.name, "` has not been defined.",
 		"\nHowever, you are trying to import it ", p.location)
 end
 
-function REPORT.UNKNOWN_PACKAGE_USED(p)
+function Report.UNKNOWN_PACKAGE_USED(p)
 	p = freeze(p)
 	quit("The package `", p.package, "` has not been imported.",
+		"\nHowever, you are trying to use it ", p.location)
+end
+
+function Report.UNKNOWN_GENERIC_USED(p)
+	quit("A generic variable called `#" .. p.name .. "` has not been defined.",
+		"\nHowever, you are trying to use it ", p.location)
+end
+
+function Report.UNKNOWN_LOCAL_TYPE_USED(p)
+	quit("There is no type called `" .. p.name .. "` in scope.",
 		"\nHowever, you are trying to use it ", p.location)
 end
 
@@ -1748,9 +1805,10 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- (2) Fully qualify all local type names
-	local classDefinitions = {}
+	local structDefinitions = {}
 	local interfaceDefinitions = {}
 	local unionDefinitions = {}
+
 	for _, source in ipairs(sources) do
 		local package = source.package
 
@@ -1794,57 +1852,47 @@ local function semanticsSmol(sources, main)
 				packageIsInScope[import.package] = true
 			end
 		end
-		
+
 		-- Bring each defined type into scope
-		local classes = {}
-		local interfaces = {}
-		local unions = {}
 		for _, definition in ipairs(source.definitions) do
 			local location = definition.location
 			defineLocalType(definition.name, source.package, location)
-			if definition.tag == "class-definition" then
-				table.insert(classes, definition)
-			elseif definition.tag == "interface-definition" then
-				table.insert(interfaces, definition)
-			elseif definition.tag == "union-definition" then
-				table.insert(unions, definition)
-			else
-				error("unknown definition tag `" .. definition.tag .. "`")
-			end
 		end
 
 		assertis(packageIsInScope, mapType("string", constantType(true)))
 
-		-- Verifies that a type is properly-in-scope
+		-- RETURNS a Type+ with a fully-qualified name
 		local function typeFinder(t)
 			if t.tag == "concrete-type" then
 				local package = t.package
 				if not package then
-					package = packageScopeMap[t.name]
+					package = packageScopeMap[t.base]
 					if not package then
 						Report.UNKNOWN_LOCAL_TYPE_USED {
-							name = t.name,
+							name = t.base,
 							location = t.location,
 						}
 					end
+					package = package.package
 				elseif not packageIsInScope[package] then
 					Report.UNKNOWN_PACKAGE_USED {
 						package = package,
 						location = t.location,
 					}
 				end
-				return {tag = "ConcreteType+",
-					name = package .. ":" .. t.name,
-					arguments = map(typeFinder, t.arguments),
+				assertis(package, "string")
+				return {tag = "concrete-type+",
+					name = package .. ":" .. t.base,
+					arguments = table.map(typeFinder, t.arguments),
 					location = t.location,
 				}
 			elseif t.tag == "generic" then
-				return {tag = "GenericType+",
+				return {tag = "generic-type+",
 					name = t.name,
 					location = t.location,
 				}
 			elseif t.tag == "type-keyword" then
-				return {tag = "KeywordType+",
+				return {tag = "keyword-type+",
 					name = t.name,
 					location = t.location,
 				}
@@ -1852,1224 +1900,164 @@ local function semanticsSmol(sources, main)
 			error("unhandled ast type tag `" .. t.tag .. "`")
 		end
 
-
-	end
-
-	-- (3) Compile all code bodies
-	assertis(classDefinitions, listType "StructIR")
-	assertis(interfaceDefinitions, listType "InterfaceIR")
-	assertis(unionDefinitions, listType "UnionIR")
-
-end
-
--- RETURNS a semantic description of the program
-local function semanticsSmolOld(sources, main)
-	assert(isstring(main))
-
-	-- (2) Resolve the full name and arity of all types
-	local classSignatures = {}
-	local interfaceSignatures = {}
-	local unionSignatures = {}
-	for _, source in ipairs(sources) do
-		local packageName = source.package.name
-
-		-- A bare `typename` should resolve to `packageMap[typename]:typename`.
-		local packageMap = {}
-		local importLocation = {}
-
-		-- The set of package scopes which may be referred to by this source
-		-- file.
-		local packageIsAvailable = {
-			[packageName] = true
-		}
-
-		-- (i) Scan imports
-		for _, import in ipairs(source.imports) do
-			if import.class then
-				local importedFullName =
-					import.package .. ":" .. import.class
-
-				-- Check that this name hasn't been imported twice
-				if packageMap[import.class] then
-					quit("The type `", import.class,
-						" has already been imported ",
-						importLocation[import.class],
-						"\nHowever, you are trying to import a type ",
-						"with the same name ", import.location)
-				elseif not typeSourceDefinitions[importedFullName] then
-					quit("The type `", importedFullName, "`",
-						" has not been defined. However, you are trying to",
-						" import it ", import.location)
-				end
-				
-				packageMap[import.class] = import.package
-				importLocation[import.class] = import.location
-			else
-				-- Verify that this package name can be imported
-				if import.package == packageName then
-					quit("The package `", packageName, "` cannot import",
-						" itself. However, you are trying to",
-						" `import ", packageName, "` ", import.location)
-				elseif not packageNameDefined[import.package] then
-					quit("There is no package called `", import.package,
-						"`. However, you are trying to import it ",
-						import.location)
-				end
-
-				-- The package may be referred to
-				packageIsAvailable[import.package] = true
-			end
-		end
-		-- (ii) Scan locally defined types
-		for _, definition in ipairs(source.definitions) do
-			local name = definition.name
-			assertis(name, "string")
-
-			-- Check that the type has not been imported
-			if packageMap[name] then
-				assert(importLocation[name])
-				quit("The name `", name, "` was imported ",
-					importLocation[name], ".\nHowever, you are attempting to ",
-					"define a type with the name `", name, "` ",
-					definition.location)
-			end
-
-			packageMap[name] = packageName
-		end
-
-		-- REQUIRES t is a Type
-		-- RETURNS Type
-		local function normalizeTypePackage(t, genericsInScope)
-			assert(isobject(genericsInScope),
-				"genericsInScope must be an object")
-			assertis(packageMap, mapType("string", "string"))
-			t = freeze(t)
-
-			if t.tag == "concrete-type" then
-				local package
-				if t.package then
-					-- Check that the referenced package has been imported
-					if not packageIsAvailable[t.package] then
-						quit("The package `", t.package,
-							"` hasn't been imported. However, ",
-							"a type refers to it ", t.location)
-					end
-
-					package = t.package
-				else
-					if not packageMap[t.base] then
-						quit("There is no type called `", t.base,
-							"` in scope ", t.location)
-					end
-
-					package = packageMap[t.base]
-				end
-				assertis(package, "string")
-
-				local fullName = package .. ":" .. t.base
-				if not typeSourceDefinitions[fullName] then
-					quit("There is no type called `", fullName, "`. ",
-						"However, it is mentioned ", t.location)
-				end
-
-				-- Check that the number of type parameters is correct
-				local sourceDefinition = typeSourceDefinitions[fullName]
-				local expectedArity = #sourceDefinition.generics.parameters
-				local appliedArity = #t.arguments
-				if expectedArity ~= appliedArity then
-					quit("The type `", fullName, "` expects exactly ",
-						expectedArity, " type parameters.",
-						"\nHowever, ", appliedArity, " were applied ",
-						t.location)
-				end
-
-				-- Normalize all type parameters
-				local arguments = {}
-				for _, argument in ipairs(t.arguments) do
-					table.insert(arguments,
-						normalizeTypePackage(argument, genericsInScope))
-				end
-
-				return freeze {
-					tag = "concrete-type",
-					name = fullName,
-					arguments = arguments,
-					location = t.location,
-				}
-			elseif t.tag == "generic" then
-				-- Check that it is in-scope
-				if not genericsInScope[t.name] then
-					quit("There is no generic `#" .. t.name .. "` in scope.",
-					"\nHowever, it is referenced ", t.location)
-				end
-				return t
-			elseif t.tag == "type-keyword" then
-				return t
-			end
-			error("unknown type tag `" .. t.tag .. "`")
-		end
-
-		-- RETURNS generics
-		-- context: a human-readable string of context (e.g., "class Foo")
-		local function normalizeGenericsPackage(generics, context)
-			assert(isobject(generics))
-			assert(isstring(context), "context must be string")
-
-			-- Build a list of type parameters
-			local out = {}
-			local outScope = {}
-			local genericByName = {}
-			for _, parameter in ipairs(generics.parameters) do
-				assert(parameter.tag == "generic")
-				assert(isstring(parameter.name))
-
-				-- Check that this generic type hasn't been used before
-				if genericByName[parameter.name] then
-					quit("In " .. context .. ", the type parameter `",
-						parameter.name, "` is defined twice.\n",
-						"The first definition is ",
-						genericByName[parameter.name].location,
-						"The second definition is ", parameter.location)
-				end
-
-				local generic = {
-					name = parameter.name,
-					constraints = {},
-
-					source = parameter,
-					location = parameter.location,
-				}
-
-				-- Record the generic
-				genericByName[parameter.name] = generic
-				table.insert(out, generic)
-				outScope[generic.name] = generic
-			end
-
-			-- outScope is "frozen" here, however we want to allow
-			-- reads to find absence (for error checking).
-			-- TODO: improve that
-
-			local id = 0
-			-- Add each constraint to the appropriate type parameter
-			for _, constraint in ipairs(generics.constraints) do
-				-- Find the matching parameter
-				local parameterName = constraint.parameter.name
-				local parameter = genericByName[parameterName]
-				if not parameter then
-					quit("There is no type parameter called `",
-						parameterName, "` in ", context)
-				end
-				local interface = normalizeTypePackage(
-					constraint.constraint, outScope)
-
-				-- Add that interface to the list of constraint
-				id = id + 1
-				table.insert(parameter.constraints, {
-					interface = interface,
-					name = "#" .. id,
-				})
-
-				-- TODO: prevent duplicate interfaces
-			end
-
-			return freeze(out), outScope
-		end
-
-		local function normalizeSignaturePackage(signature, genericScope)
-			assert(isobject(genericScope), "genericScope must be an object")
-
-			local methodName = signature.name
-
-			-- Normalize parameter types
-			local parameters = {}
-			for _, p in ipairs(signature.parameters) do
-				table.insert(parameters, {
-					name = p.name,
-					type = normalizeTypePackage(p.type, genericScope),
-					location = p.location,
-				})
-			end 
-			
-			-- Normalize return types
-			local returns = {}
-			for _, t in ipairs(signature.returnTypes) do
-				table.insert(returns, normalizeTypePackage(t, genericScope))
-			end
-
-			-- Static function
+		-- RETURNS a signature
+		local function compiledSignature(signature)
 			return {
-				name = methodName,
+				foreign = signature.foreign,
 				modifier = signature.modifier,
-				parameters = parameters,
-				returnTypes = returns,
-				location = signature.location,
-				source = signature,
+				name = signature.name,
+				returnTypes = table.map(typeFinder, signature.returnTypes),
+				parameters = table.map(function(p)
+					return {name = p.name, type = typeFinder(p.type)}
+				end, signature.parameters),
 			}
 		end
 
-		-- (iii) Rescan all local definitions and emit all signatures with
-		-- fully-qualified types.
-		for _, definition in ipairs(source.definitions) do
-			local fullName = packageName .. ":" .. definition.name
+		-- RETURNS a list[TypeParameterIR]
+		local function compiledGenerics(generics)
+			local list = {}
+			local map = {}
+			for _, parameterAST in ipairs(generics.parameters) do
+				local parameter = {
+					name = parameterAST,
+					constraints = {},
+				}
+				table.insert(list, parameter)
 
-			if definition.tag == "class-definition" then
-				-- (a) type parameters / type constraints
-				local generics, genericScope = normalizeGenericsPackage(
-					definition.generics, "class " .. fullName)
-
-				-- map[string]source
-				-- Used for complaining about duplicates
-				local memberSourceDefinition = {}
-
-				-- (b) fields
-				local fields = {}
-				for _, field in ipairs(definition.fields) do
-					-- Check that a named hasn't already been defined
-					if memberSourceDefinition[field.name] then
-						local previousField =
-							memberSourceDefinition[field.name]
-						quit("In `", fullName, "` a field named `",
-							field.name, "` is defined twice.\n",
-							"The first definition is ",
-							previousField.location,
-							"The second definition is ",
-							field.location)
-					end
-					memberSourceDefinition[field.name] = field
-
-					-- Add the field
-					table.insert(fields, {
-						name = field.name,
-						type = normalizeTypePackage(field.type, genericScope),
-						location = field.location,
-					})
+				-- Check for duplicates
+				if map[parameter.name] then
+					Report.GENERIC_DEFINED_TWICE {
+						name = parameter.name,
+						firstLocation = generics.location,
+						secondLocation = generics.location,
+					}
 				end
+				map[parameter.name] = parameter
+			end
+
+			for _, constraintAST in ipairs(generics.constraints) do
+				local constraint = {
+					constraint = typeFinder(constraintAST.constraint),
+					location = constraintAST.location,
+				}
+
+				-- Add this constraint to the associated generic parameter
+				local parameter = map[constraintAST.parameter]
+				if not parameter then
+					Report.UNKNOWN_GENERIC_USED(constraintAST.parameter)
+				end
+				table.insert(parameter.constraints, constraint)
+			end
+			return list
+		end
+
+		-- RETURNS a class+/union+
+		local function compiledStruct(definition)
+			-- name, fields, generics, implements, signatures
+
+			-- Create the full-name of the package
+			local name = package .. ":" .. definition.name
+
+			-- Compile the set of generics introduced by this class
+			local generics = compiledGenerics(definition.generics)
+
+			local memberLocationMap = {}
+
+			-- Compile the set of fields this class has
+			local fields = {}
+			for _, field in ipairs(definition.fields) do
+				-- Check for duplicate members
+				if memberLocationMap[field.name] then
+					Report.MEMBER_DEFINED_TWICE {
+						name = field.name,
+						firstLocation = memberLocationMap[field.name],
+						secondLocation = field.location,
+					}
+				end
+				memberLocationMap[field.name] = field.location
+
+				table.insert(fields, {
+					name = field.name,
+					type = typeFinder(field.type),
+
+					location = field.location,
+				})
+			end
+
+			-- Collect the list of methods/statics this class provides
+			local signatures = {}
+			for _, method in ipairs(definition.methods) do
+				-- Check for duplicate members
+				local name = method.signature.name
+				if memberLocationMap[name] then
+					Report.MEMBER_DEFINED_TWICE {
+						name = name,
+						firstLocation = memberLocationMap[name],
+						secondLocation = method.location,
+					}
+				end
+				memberLocationMap[name] = method.location
 				
-				-- (c) methods and static functions
-				local statics = {}
-				local methods = {}
-				for _, method in ipairs(definition.methods) do
-					-- Normalize the member's signature
-					local signature = normalizeSignaturePackage(
-						method.signature, genericScope)
+				local signature = compiledSignature(method.signature)
+				signature = table.with(signature, "body", method.body)
+				table.insert(signatures, signature)
+			end
 
-					-- Include NOT-NORMALIZED body
-					local m = withkv(
-						signature, "body", method.body
-					)
+			-- Compile the set of interfaces this class claims to implement
+			local implements = table.map(typeFinder, definition.implements)
 
-					if m.modifier == "static" then
-						table.insert(statics, m)
-					else
-						table.insert(methods, m)
-					end
-				end
+			return freeze {
+				name = name,
+				generics = generics,
+				fields = fields,
+				signatures = signatures,
+				implements = implements,
+			}
+		end
 
-				-- (d) interface implementations
-				local implements = {}
-				for _, interface in ipairs(definition.implements) do
-					table.insert(implements,
-						normalizeTypePackage(interface, genericScope))
-				end
+		local function compiledInterface(definition)
+			-- Create the fully qualified name
+			local name = package .. ":" .. definition.name
 
-				-- Record this class's signature
-				table.insert(classSignatures, freeze {
-					name = fullName,
+			-- Create the generics
+			local generics = compiledGenerics(definition.generics)
 
-					implements = implements,
-					generics = generics,
+			local signatures = table.map(
+				compiledSignature, definition.signatures)
 
-					fields = fields,
-					statics = statics,
-					methods = methods,
+			return freeze {
+				name = name,
+				generics = generics,
+				signatures = signatures,
+			}
+		end
 
-					source = definition,
-					location = definition.location,
-
-					normalizeTypePackage = normalizeTypePackage,
-				})
+		-- Create an IR representation of each definition
+		for _, definition in ipairs(source.definitions) do
+			if definition.tag == "class-definition" then
+				table.insert(structDefinitions, compiledStruct(definition))
 			elseif definition.tag == "interface-definition" then
-				-- Get in-scope generics
-				local generics, genericScope = normalizeGenericsPackage(
-					definition.generics, "interface " .. fullName)
-
-				-- Add all members
-				local statics = {}
-				local methods = {}
-				for _, signature in ipairs(definition.signatures) do
-					local m = normalizeSignaturePackage(signature, genericScope)
-					if m.modifier == "static" then
-						table.insert(statics, m)
-					else
-						table.insert(methods, m)
-					end
-				end
-
-				-- Record this interface's signature
-				table.insert(interfaceSignatures, freeze {
-					name = fullName,
-					generics = generics,
-					statics = statics,
-					methods = methods,
-
-					source = definition,
-					location = definition.location,
-
-					normalizeTypePackage = normalizeTypePackage,
-				})
+				table.insert(interfaceDefinitions,
+					compiledInterface(definition))
 			elseif definition.tag == "union-definition" then
-				-- (a) type parameters / type constraints
-				local generics, genericScope = normalizeGenericsPackage(
-					definition.generics, "interface " .. fullName)
-				assert(genericScope)
-
-				-- map[string]source
-				-- Used for complaining about duplicates
-				local memberSourceDefinition = {}
-
-				-- (b) fields
-				local fields = {}
-				for _, field in ipairs(definition.fields) do
-					-- Check that a named hasn't already been defined
-					if memberSourceDefinition[field.name] then
-						local previousField =
-							memberSourceDefinition[field.name]
-						quit("In `", fullName, "` a field named `",
-							field.name, "` is defined twice.\n",
-							"The first definition is ",
-							previousField.location,
-							"The second definition is ",
-							field.location)
-					end
-					memberSourceDefinition[field.name] = field
-
-					-- Add the field
-					table.insert(fields, freeze {
-						name = field.name,
-						type = normalizeTypePackage(field.type, genericScope),
-						location = field.location,
-					})
-				end
-
-				-- (c) methods and static functions
-				local statics = {}
-				local methods = {}
-				for _, method in ipairs(definition.methods) do
-					-- Normalize signature
-					local signature = normalizeSignaturePackage(
-						method.signature, genericScope)
-
-					-- Include NOT-NORMALIZED body
-					local m = withkv(signature, "body", method.body)
-
-					if m.modifier == "static" then
-						table.insert(statics, m)
-					else
-						table.insert(methods, m)
-					end
-				end
-
-				-- Record the union's signature
-				table.insert(unionSignatures, freeze {
-					name = fullName,
-					fields = fields,
-					generics = generics,
-
-					methods = methods,
-					statics = statics,
-
-					source = definition,
-					location = definition.location,
-
-					normalizeTypePackage = normalizeTypePackage,					
-				})
+				table.insert(unionDefinitions, compiledStruct(definition))
 			else
 				error("unknown definition tag `" .. definition.tag .. "`")
 			end
 		end
 	end
 
-	local function getDefinition(name)
-		assert(isstring(name), "name must be a string")
-		for _, class in ipairs(classSignatures) do
-			if class.name == name then
-				return class, "class"
-			end
-		end
-		for _, interface in ipairs(interfaceSignatures) do
-			if interface.name == name then
-				return interface, "interface"
-			end
-		end
-		for _, union in ipairs(unionSignatures) do
-			if union.name == name then
-				return union, "union"
-			end
-		end
-		error("attempt to get the definition for a non-existant type")
-	end
+	assertis(structDefinitions, listType "StructIR")
+	assertis(interfaceDefinitions, listType "InterfaceIR")
+	assertis(unionDefinitions, listType "UnionIR")
+	structDefinitions = freeze(structDefinitions)
+	interfaceDefinitions = freeze(interfaceDefinitions)
+	unionDefinitions = freeze(unionDefinitions)
 
-	-- RETURNS whether or not the types 'a' and 'b' are exactly equal
-	local function areEqualTypes(a, b)
-		a, b = freeze(a), freeze(b)
+	-- (3) Verify and record all interfaces
 
-		if a.tag ~= b.tag then
-			return false
-		end
-		if a.tag == "generic" then
-			return a.name == b.name
-		elseif a.tag == "concrete-type" then
-			-- Check the base name is the same
-			if a.name ~= b.name then
-				return false
-			end
-			-- Check the arguments are the same
-			assert(#a.arguments == #b.arguments)
-			for i in ipairs(a.arguments) do
-				if not areEqualTypes(a.arguments[i], b.arguments[i]) then
-					return false
-				end
-			end
-			return true
-		elseif a.tag == "type-keyword" then
-			return a.keyword == b.keyword
-		end
-		error("unknown type tag `" .. a.tag .. "`")
-	end
+	-- (4) Compile all code bodies
 
-	-- RETURNS string which is smol code representing type
-	local function typeDescribe(t)
-		t = freeze(t)
-		if t.tag == "generic" then
-			return "#" .. t.name
-		elseif t.tag == "concrete-type" then
-			local out = t.name
-			if #t.arguments > 0 then
-				for i, argument in ipairs(t.arguments) do
-					if i == 1 then
-						out = out .. "["
-					else
-						out = out .. ", "
-					end
-					out = out .. typeDescribe(argument)
-				end
-				out = out .. "]"
-			end
-			return out
-		elseif t.tag == "type-keyword" then
-			return t.keyword
-		end
-		error("unknown type tag `" .. t.tag .. "`")
-	end
-
-	-- RETURNS a type with generics substituted
-	-- genericMap: [string] => type
-	local function instantiateGenerics(t, genericMap)
-		assert(isobject(t), "t must be an object")
-		assert(isstring(t.tag), "type must have a string tag")
-		assert(isobject(genericMap))
-
-		local function recursive(u)
-			return instantiateGenerics(u, genericMap)
-		end
-
-		if t.tag == "concrete-type" then
-			return freeze {
-				tag = "concrete-type",
-				name = t.name,
-				arguments = map(recursive, t.arguments),
-				location = t.location, -- XXX: is this the right location?
-			}
-		elseif t.tag == "generic" then
-			local match = genericMap[t.name]
-			assert(match)
-			return match
-		elseif t.tag == "type-keyword" then
-			return t
-		end
-		error("unknown type tag `" .. tostring(t.tag) .. "`")
-	end
-
-	-- RETURNS NOTHING
-	local function checkClassImplements(class, implements, interface)
-		-- RETURNS a type from `interface` with implement arguments substituted
-		local genericMap = {}
-		for i, generic in ipairs(interface.generics) do
-			genericMap[generic.name] = implements.arguments[i]
-		end
-
-		local function parameterSubstituted(t)
-			return instantiateGenerics(t, genericMap)
-		end
-
-		-- Check that each static and each method in the interface is
-		-- implemented with the correct signature
-		local memberRepositories = {
-			{r="statics", k="static function"},
-			{r="methods", k="method"},
-		}
-		for _, rk in pairs(memberRepositories) do
-			local REPOSITORY = rk.r
-			local KIND = rk.k
-			for _, signature in ipairs(interface[REPOSITORY]) do
-				assert(isstring(signature.name))
-
-				local CLAIM = "class " .. class.name .. " claims to implement"
-						.. " interface " .. interface.name .. ".\n"
-
-				local impl = findwith(class[REPOSITORY], "name", signature.name)
-				if not impl then
-					quit(CLAIM,
-						"However, it does not implement a ", KIND, " called ",
-						signature.name)
-				end
-
-				local HOWEVER = "However, "
-					.. KIND .. " `" .. signature.name .. "`"
-				local LOCATION = "\n\nThe interface's function signature"
-					.. " is defined " .. signature.location
-					.. "\nThe " .. KIND .. " is implemented at "
-					.. impl.location
-
-				-- Check that parameter types are the same
-				if #signature.parameters ~= #impl.parameters then
-					quit(CLAIM, HOWEVER, " takes ", #impl.parameters,
-						" parameter(s), rather than ", #signature.parameters,
-						" parameter(s).", LOCATION)
-				end
-				for i, generalExpected in ipairs(signature.parameters) do
-					local expected = parameterSubstituted(generalExpected.type)
-					local got = impl.parameters[i].type
-					if not areEqualTypes(expected, got) then
-						quit(CLAIM, HOWEVER, " takes `", typeDescribe(got), "`",
-							" rather than `", typeDescribe(expected), "`",
-							" as the ", string.ordinal(i), " parameter.",
-							LOCATION)
-					end
-				end
-
-				-- Check that return types are the same
-				if #signature.returnTypes ~= #impl.returnTypes then
-					quit(CLAIM, HOWEVER, " returns ",
-						#impl.returnTypes, " rather than ",
-						#signature.returnTypes, " values.",
-						LOCATION)
-				end
-				for i, generalExpected in ipairs(signature.returnTypes) do
-					local expected = parameterSubstituted(generalExpected)
-					if not areEqualTypes(expected, impl.returnTypes[i]) then
-						quit(CLAIM, HOWEVER, " returns ",
-							"`", typeDescribe(impl.returnTypes[i]), "`",
-							" rather than `", typeDescribe(expected), "`",
-							LOCATION)
-					end
-				end
-			end
-		end
-
-		-- All methods are implemented as expected!
-	end
-
-	-- (3) Check that each class actually implements each interface that it
-	-- claims to
-	for _, class in ipairs(classSignatures) do
-		for _, impl in ipairs(class.implements) do
-			local definition, definitionType = getDefinition(impl.name)
-			assert(definition)
-			if definitionType ~= "interface" then
-				quit("The type `", impl.name, "` is a ", definitionType,
-					" rather than an interface, so class " .. class.name,
-					" cannot implement it.",
-					"\nHowever, class " .. class.name,
-					" claims to implement it ", impl.location)
-			end
-			checkClassImplements(class, impl, definition)
-		end
-	end
-
-	-- RETURNS nothing
-	local function checkTypeImplements(t, constraint, genericScope)
-		assert(isobject(genericScope), "genericScope must be an object")
-
-		if t.tag == "generic" then
-			error "TODO: lookup genericScope"
-		elseif t.tag == "type-keyword" then
-			local map = nil
-			if t.keyword == "Number" then
-				map = {
-					["core:Showable"] = true,
-					["core:Readable[Number]"] = true,
-				}
-			elseif t.keyword == "String" then
-				map = {
-					["core:Showable"] = true,
-					["core:Readable[String]"] = true,
-				}
-			elseif t.keyword == "Boolean" then
-				map = {
-					["core:Showable"] = true,
-					["core:Readable[Boolean]"] = true,
-				}
-			end
-			assert(map)
-			return map[typeDescribe(t)] or false
-		elseif t.tag == "concrete-type" then
-			error "TODO: refer to definition"
-		end
-		error("unknown type tag `" .. t.tag .. "`")
-	end
-
-	-- (4) Check that all type bounds are satisfied; compile!
-	local function normalizeType(un, generics, normalizeTypePackage)
-		assert(isobject(un), "generics must be an object")
-		assert(isobject(generics), "generics must be an object")
-		assert(isfunction(normalizeTypePackage),
-			"normalizeTypePackage must be a function")
-
-		-- (a) Do package normalization
-		local scope = {}
-		for _, generic in ipairs(generics) do
-			scope[generic.name] = generic
-		end
-		local t = normalizeTypePackage(un, scope)
-
-		-- (b) Check that all implementation requirements are satisfied
-		if t.tag == "generic" then
-			return t
-		elseif t.tag == "type-keyword" then
-			return t
-		elseif t.tag == "concrete-type" then
-			local definition = getDefinition(t.name)
-
-			-- Normalize and validate type arguments;
-			-- Collect the assignment of generic variables
-			local genericMap = {}
-			for i, argument in ipairs(t.arguments) do
-				genericMap[definition.generics[i].name] =
-					normalizeType(argument, generics, normalizeTypePackage)
-			end
-			
-			-- ex.: definition: `class Box[#T | #T is Readable[#T]]`
-			-- ex.: t: `Box[Number]`
-			-- ex.: genericMap: {`#T` => `Number`}
-			-- Verify that each constraint is satisfied
-			for i, argument in ipairs(t.arguments) do
-				local genericConstraints = definition.generics[i].constraints
-				for _, genericConstraint in ipairs(genericConstraints) do
-					-- ex.: genericConstraint.interface: `Readable[#T]`
-					local constraintType = instantiateGenerics(
-						genericConstraint.interface,
-						genericMap)
-					-- ex.: constraintType: `Readable[Number]`
-					checkTypeImplements(argument, constraintType, generics)
-				end
-			end
-
-			return t
-		end
-		error("unknown type tag `" .. t.tag .. "`")
-	end
-
-	-- Defines the Number type and its members
-	local TYPE_NUMBER = {
-		tag = "type-keyword",
-		keyword = "Number",
-
-		-- XXX: can we use this in getMembers?
-		fields = {},
-		methods = {},
-		statics = {},
-		generics = {},
-	}
-
-	local function getMembers(t, context)
-		assert(isobject(t), "type must be an object")
-		assert(isobject(context), "context must be an object")
-		assert(isobject(context.generics), "context.generics must be an object")
-
-		if t.tag == "generic" then
-			-- Look up generic context to get a list of available
-			-- statics/methods based on interfaces
-			error("TODO: getMembers(generic)")
-		elseif t.tag == "concrete-type" then
-			-- Look up type with getDefinition
-			local definition, definitionKind = getDefinition(t.name)
-			if definitionKind == "class" then
-				-- methods, statics, fields:
-				local methods = {}
-				
-				-- RETURNS a type
-				-- Instantiate a member type using the specified arguments
-				local function instantiateMember(u)
-					assert(isobject(u))
-
-					-- Build generic map
-					local genericMap = {}
-					for i, generic in ipairs(definition.generics) do
-						local name = generic.name
-						local argument = t.arguments[i]
-						genericMap[name] = argument
-					end
-
-					-- Use generic map for substitution
-					return instantiateGenerics(u, genericMap)
-				end
-
-				-- Instantiate all methods
-				local methods = {}
-				for _, method in ipairs(definition.methods) do
-					-- Instantiate return types and parameters
-					local returnTypes =
-						map(instantiateMember, method.returnTypes)
-					local parameters = map(function(x)
-						return {
-							name = x.name,
-							type = instantiateMember(x.type)
-						}
-					end, method.parameters)
-
-					table.insert(methods, freeze {
-						name = method.name,
-						returnTypes = returnTypes,
-						parameters = parameters,
-					})
-				end
-
-				-- Instantiate all statics
-				local statics = {}
-				for _, static in ipairs(definition.statics) do
-					-- Instantiate return types and parameters
-					local returnTypes =
-						map(instantiateMember, static.returnTypes)
-					local parameters = map(function(x)
-						return {
-							name = x.name,
-							type = instantiateMember(x.type)
-						}
-					end, static.parameters)
-
-					table.insert(statics, freeze {
-						name = static.name,
-						returnTypes = returnTypes,
-						parameters = parameters,
-					})
-				end
-
-				local fields = {}
-				for _, field in ipairs(definition.fields) do
-					-- Instantiate field's type
-					table.insert(fields, freeze {
-						name = field.name,
-						type = instantiateMember(field.type),
-					})
-				end
-
-				return freeze {
-					methods = methods,
-					statics = statics,
-					fields = fields,
-					generics = definition.generics,
-				}
-			elseif definitionKind == "interface" then
-				-- (Used only as helper)
-				error("TODO")
-			elseif definitionKind == "union" then
-				error("TODO")
-			end
-		elseif t.tag == "type-keyword" then
-			-- Use static list
-			if t.keyword == "Number" then
-				return TYPE_NUMBER
-			end
-			error("unknown type keyword `" .. t.keyword .. "`")
-		end
-	
-		error("unknown type tag `" .. t.tag .. "`")
-	end
-
-	-- RETURNS (a list of IR-statements, expression info)
-	-- expression info: a list of {name = string, type = Type}
-	local function compileExpression(ast, normalizer, context)
-		assert(isobject(ast))
-		assert(isstring(ast.tag))
-		assert(isobject(context), "context must be an object")
-		assert(isinteger(context.unique))
-
-		local function recursive(e, ...)
-			assert(... == nil)
-			local a, b, c = compileExpression(e, normalizer, context)
-			assert(c == nil)
-			assert(isobject(a), "1st from compileExpression must be an object")
-			assert(isobject(b), "2nd from compileExpression must be an object")
-			return a, b
-		end
-
-		-- RETURNS an identifier unique to the current statement compilation
-		local function tmp(hint)
-			if not isstring(hint) then
-				assert(hint == nil)
-			end
-			local id = "_tmp_" .. tostring(context.unique)
-			if hint then
-				id = id .. "_" .. hint
-			end
-			context.unique = context.unique + 1
-			return id
-		end
-
-		if ast.tag == "integer-literal" then
-			local id = tmp("int")
-			local out = {
-				{tag = "var",
-					name = id,
-					type = "Number",
-				},
-				{tag = "number",
-					value = ast.value,
-					dst = id,
-				},
-			}
-			local info = {
-				{name = id, type = TYPE_NUMBER},
-			}
-			return out, info
-		elseif ast.tag == "identifier" then
-			local name = ast.name
-
-			-- (1) Look up the variable in scope
-			local type = nil
-			for _, scope in ipairs(context.scopes) do
-				if scope[name] then
-					type = scope[name].type
-					break
-				end
-			end
-
-			if not type then
-				quit("No variable called `", name, "` is in scope ",
-					ast.location) 
-			end
-
-			return {}, {{name = name, type = type}}
-		elseif ast.tag == "method-call" then
-			local out, baseInfo = recursive(ast.base)
-			if #baseInfo ~= 1 then
-				quit("You are trying to access a method/field on something with " .. #baseInfo .. " values (rather than 1) ", ast.location)
-			end
-			local baseType = baseInfo[1].type
-			local baseSrc = baseInfo[1].name
-
-			local members = getMembers(baseType, context)
-			local name = ast.func
-			assertis(name, "string")
-
-			local method = findwith(members.methods, "name", name)
-			if not method then
-				quit("The type `", typeDescribe(baseType), "` does not",
-					" define a method called `", name, "`.",
-					"\nHowever, you are trying to call it ",
-					ast.location)
-			end
-
-			local argumentsInfo = {}
-			for i, argument in ipairs(ast.arguments) do
-				local irs, info = recursive(argument)
-				for _, ir in ipairs(irs) do
-					table.insert(out, ir)
-				end
-
-				-- Check the plurality of the argument
-				if #info ~= 1 then
-					quit("The ", string.ordinal(i), " argument to a method call is ", #info, " values (rather than 1) ", ast.access.location)
-				end
-
-				table.insert(argumentsInfo, info[1])
-			end
-
-			-- Verify the argument types match the parameter types
-			if #argumentsInfo ~= #method.parameters then
-				quit("Member function `",
-					typeDescribe(baseType) .. "." .. name,
-					"` expects ", #method.parameters, " arguments,",
-					" but it was given ", #argumentsInfo, " ",
-					ast.location)
-			end
-			for i, argument in ipairs(argumentsInfo) do
-				local expected = method.parameters[i].type
-				local got = argument.type
-
-				if not areEqualTypes(expected, got) then
-					quit("The ", string.ordinal(i), " argument to the",
-					" method `",
-					typeDescribe(baseType) .. "." .. name,
-					"` expects the type `", typeDescribe(expected), "`.",
-					"\nHowever, a value of type `", typeDescribe(got), "`",
-					" was passed ", ast.location)
-				end
-			end
-
-			error("TODO")
-		elseif ast.tag == "static-call" then
-			local out = {}
-			local name = ast.name
-			assert(isstring(name))
-			local baseType = normalizer(ast["base-type"])
-
-			local members = getMembers(baseType, context)
-
-			local static = findwith(members.statics, "name", name)
-			if not static then
-				quit("The type `", typeDescribe(baseType), "` does not define",
-					" a static function called `", name, "`.",
-					"\nHowever, you try to call it ", ast.location)
-			end
-			
-			-- Compile each argument
-			local argumentsInfo = {}
-			for i, argument in ipairs(ast.arguments) do
-				local irs, info = recursive(argument)
-				for _, ir in ipairs(irs) do
-					table.insert(out, ir)
-				end
-				if #info ~= 1 then
-					quit("The ", string.ordinal(i), " argument to a",
-						" static function ", argument.location,
-						" returns ", #info, " values rather than 1, so it",
-						" cannot be used as a function argument.")
-				end
-				table.insert(argumentsInfo, info[1])
-			end
-
-			-- Validate the arguments
-			if #static.parameters ~= #ast.arguments then
-				quit("static function expected ", #static.parameters, " parameters but ", #ast.arguments, " were given ", ast.location)
-			end
-			for i, argument in ipairs(argumentsInfo) do
-				local expected = static.parameters[i].type
-				local got = argument.type
-				if not areEqualTypes(expected, got) then
-					quit("The ", string.ordinal(i),
-						" argument to the static function `",
-						typeDescribe(baseType), ".", name,
-						"` expects the type `", typeDescribe(expected), "`.",
-						"\nHowever, a value of type `", typeDescribe(got), "`",
-						" is used ", ast.location)
-				end
-			end
-
-			-- Create variables for each return
-			local outputInfo = {}
-			for _, returnType in ipairs(static.returnTypes) do
-				local name = tmp()
-				table.insert(outputInfo, {
-					name = name,
-					type = returnType,
-				})
-				table.insert(out, {tag = "var",
-					name = name,
-					type = returnType,
-				})
-			end
-			
-			-- Execute the call
-			if baseType.tag == "generic" then
-				error("TODO: static interface call")
-			elseif baseType.tag == "concrete-type"
-			or baseType.tag == "type-keyword" then
-				-- Simple static function
-				local func = baseType.name .. ":" .. static.name
-
-				local arguments = map(getter "name", argumentsInfo)
-
-				-- Refer to the class's generics to get constraints:
-				local constraints = {}
-				for _, generic in ipairs(members.generics) do
-					for _, constraint in ipairs(generic.constraints) do
-						error("TODO!")
-					end
-				end
-				
-				table.insert(out, {tag = "call",
-					func = func,
-					arguments = arguments,
-					constraints = constraints,
-					dsts = map(function(x) return x.name end, outputInfo),
-				})
-			end
-
-			return out, outputInfo
-		end
-
-		error("unknown expression tag `" .. ast.tag .. "`")
-	end
-
-	-- RETURNS a list of IR-statements
-	-- MODIFIES funcOut.body to be a list
-	-- MODIFIES context
-	local function compileStatement(ast, normalizer, context)
-		local function recursive(x)
-			return compileStatement(x, normalizer, context)
-		end
-
-		if ast.tag == "block" then
-			-- Open a new variable scope
-			table.insert(context.scopes, {})
-
-			local statements = {}
-			for _, statement in ipairs(ast.statements) do
-				for _, ir in ipairs(recursive(statement)) do
-					table.insert(statements, ir)
-				end
-			end
-
-			local compiled = {tag = "block",
-				statements = statements,
-			}
-
-			-- Close variable scope
-			table.remove(context.scopes)
-			return {compiled}
-		elseif ast.tag == "var-statement" then
-			local out = {}
-
-			-- (1) Define variables
-			local variableTypes = {}
-			for _, variable in ipairs(ast.variables) do
-				-- (i) Normalize type
-				local variableType = normalizer(variable.type)
-				local name = variable.name.name
-				assert(isstring(name))
-
-				-- (ii) Check for shadowing
-				for _, scope in ipairs(context.scopes) do
-					if scope[name] then
-						quit("You tried to define the variable `",
-							name, "` ", variable.location,
-							"However, a variable called `", name, "`",
-							" that was defined ", scope[name].location,
-							" is still in-scope.")
-					end
-				end
-
-				-- (iii) Add variable to current scope
-				local currentScope = context.scopes[#context.scopes]
-				currentScope[name] = {
-					type = variableType,
-					location = variable.location,
-				}
-
-				-- (iv) Output var IR statement
-				table.insert(out, {tag = "var",
-					name = name,
-					type = variableType,
-				})
-				table.insert(variableTypes, variableType)
-			end
-
-			-- (2) Assign variables
-			-- (i) Compile expression and output IR statements
-			local irs, expressionInfo =
-				compileExpression(ast.value, normalizer, context)
-			for _, ir in ipairs(irs) do
-				table.insert(out, ir)
-			end
-
-			-- (ii) Verify that types match
-			if #expressionInfo ~= #ast.variables then
-				quit("You try to define " .. #ast.variables .. " variable(s) ",
-					ast.location, "However, the initial expression provides ",
-					#expressionInfo, " values instead of ", #ast.variables)
-			end
-			for i, variableType in ipairs(variableTypes) do
-				if not areEqualTypes(expressionInfo[i].type, variableType) then
-					quit("Variable `", ast.variables[i].name, "` is declared",
-						" with type `", typeDescribe(variableType), "`.",
-						"\nHowever, its initial value is of type `",
-						typeDescribe(expressionInfo[i].type), "`")
-				end
-			end
-
-			-- (iii) Output each assignment
-			for i, info in ipairs(expressionInfo) do
-				table.insert(out, {tag = "assign",
-					source = expressionInfo[i].name,
-					dst = ast.variables[i].name,
-				})
-			end
-
-			return out
-		end
-		error("unknown statement type `" .. ast.tag .. "`")
-	end
-
-	local compiled = {
-		structs = {},
-		functions = {},
-	}
-
-	-- (a) Classes
-	for _, class in ipairs(classSignatures) do
-		local function typeNormalizer(t, ...)
-			assert(... == nil)
-
-			return normalizeType(t, class.generics, class.normalizeTypePackage)
-		end
-
-		local structOut = {}
-		structOut.name = class.name
-
-		-- TODO: Validate generic constraints
-
-		-- Validate all fields
-		structOut.fields = {}
-		for _, field in ipairs(class.fields) do
-			table.insert(structOut.fields, {
-				name = field.name,
-				type = typeNormalizer(field.type)
-			})
-		end
-
-		-- Validate and compile statics
-		for _, static in ipairs(class.statics) do
-			local funcOut = {
-				modifier = "static",
-				class = class,
-			}
-
-			funcOut.name = static.name
-
-			funcOut.parameters = {}
-			local parameterScope = {}
-			for _, parameter in ipairs(static.parameters) do
-				local parameterType = typeNormalizer(parameter.type)
-				table.insert(funcOut.parameters, {
-					name = parameter.name,
-					type = parameterType,
-				})
-				parameterScope[parameter.name] = {
-					type = parameterType,
-					location = parameter.location,
-				}
-			end
-
-			funcOut.returnTypes = {}
-			for _, returnType in ipairs(static.returnTypes) do
-				table.insert(funcOut.returnTypes, typeNormalizer(returnType))
-			end
-
-			local scopes = {parameterScope}
-			funcOut.body = compileStatement(static.body, typeNormalizer, {
-				unique = 0,
-				scopes = scopes,
-				generics = class.generics,
-			})
-			table.insert(compiled.functions, funcOut)
-		end
-	end
-
-	-- TODO
-	return nil
 end
 
 -- Transpilation ---------------------------------------------------------------
