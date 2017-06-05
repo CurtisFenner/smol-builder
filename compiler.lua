@@ -438,7 +438,7 @@ local function getter(key)
 	end
 end
 
-local function findwith(list, property, value)
+function table.findwith(list, property, value)
 	for _, element in ipairs(list) do
 		if element[property] == value then
 			return element
@@ -473,7 +473,7 @@ local function TYPE_PREDICATE(name)
 	assert(isstring(name),
 		"name must be a string but instead it's a " .. type(name))
 
-	local found = findwith(_TYPE_SPECS, "name", name)
+	local found = table.findwith(_TYPE_SPECS, "name", name)
 	assert(found, "No type called `" .. name .. "` has been registered")
 	return found.predicate
 end
@@ -493,8 +493,8 @@ local function assertis(value, t)
 	local spec = TYPE_PREDICATE(t)
 
 	if not spec(value) then
-		error("value must be a `" .. t .. "`, however it is a `"
-			.. typefull(value) .. "`", 2)
+		error("value must be a `" .. tostring(t) .. "`, however it is a `"
+			.. typefull(value) .. "`:\n" .. show(value), 2)
 	end
 end
 
@@ -576,7 +576,7 @@ local function choiceType(...)
 
 	local function predicate(object)
 		for _, p in ipairs(choices) do
-			if p(object) then
+			if TYPE_PREDICATE(p)(object) then
 				return true
 			end
 		end
@@ -1653,7 +1653,7 @@ REGISTER_TYPE("KeywordType+", recordType {
 })
 
 REGISTER_TYPE("GenericType+", recordType {
-	tag = constantType "GenericType+",
+	tag = constantType "generic+",
 	
 	name = "string", -- e.g., "Foo" for `#Foo`
 
@@ -1772,6 +1772,74 @@ function Report.UNKNOWN_LOCAL_TYPE_USED(p)
 		"\nHowever, you are trying to use it ", p.location)
 end
 
+function Report.INTERFACE_REQUIRES_MEMBER(p)
+	quit("The class/union `", p.class, "` claims to implement interface",
+		" `", p.interface, "` ", p.implementsLocation,
+		"\nHowever, `" .. p.class .. "` does not implement the required",
+		" member `" .. p.memberName .. "` which is defined ",
+		p.memberLocation)
+end
+
+function Report.WRONG_ARITY(p)
+	quit("The type `", p.name, "` was defined ", p.definitionLocation,
+		"to take exactly ", p.expectedArity, " type arguments.",
+		"\nHowever, it is provided with ", p.givenArity, " ",
+		p.location)
+end
+
+function Report.INTERFACE_REQUIRES_MODIFIER(p)
+	quit("The class/union `", p.class, "` claims to implement interface",
+		" `", p.interface, "`.",
+		"\nThe interface `", p.interface, "` defines a ", p.interfaceModifier,
+		" member called `", p.name, "` ", p.interfaceLocation,
+		"\nHowever, `", p.class, "` defines `", p.name, "` to be a ",
+		p.classModifier, " ", p.classLocation)
+end
+
+function Report.INTERFACE_PARAMETER_COUNT_MISMATCH(p)
+	quit("The class/union `", p.class, "` claims to implement interface",
+		" `", p.interface, "`.",
+		"\nThe interface `", p.interface, "` defines a member called `",
+		p.name, "` with ", p.interfaceCount, " parameter(s) ",
+		p.interfaceLocation,
+		"\nHowever, `", p.class, "` defines `", p.name, "` with ",
+		p.classCount, " parameter(s)", p.classLocation)
+end
+
+function Report.INTERFACE_PARAMETER_TYPE_MISMATCH(p)
+	quit("The class/union `", p.class, "` claims to implement interface",
+		" `", p.interface, "`.",
+		"\nThe interface `", p.interface, "` defines a member called `",
+		p.name, "` with the ", string.ordinal(p.index),
+		" parameter of type `", p.interfaceType, "` ",
+		p.interfaceLocation,
+		"\nHowever, `", p.class, "` defines `", p.name, "` with the ",
+		string.ordinal(p.index), " parameter of type `",
+		p.classType, "` ", p.classLocation)
+end
+
+function Report.INTERFACE_RETURN_COUNT_MISMATCH(p)
+	quit("The class/union `", p.class, "` claims to implement interface",
+		" `", p.interface, "`.",
+		"\nThe interface `", p.interface, "` defines a member called `",
+		p.member, "` with ", p.interfaceCount, " return value(s) ",
+		p.interfaceLocation,
+		"\nHowever, `", p.class, "` defines `", p.member, "` with ",
+		p.classCount, " return values(s) ", p.classLocation)
+end
+
+function Report.INTERFACE_RETURN_TYPE_MISMATCH(p)
+	quit("The class/union `", p.class, "` claims to implement interface",
+		" `", p.interface, "`.",
+		"\nThe interface `", p.interface, "` defines a member called `",
+		p.member, "` with the ", string.ordinal(p.index),
+		" return-value of type `", p.interfaceType, "` ",
+		p.interfaceLocation,
+		"\nHowever, `", p.class, "` defines `", p.member, "` with the ",
+		string.ordinal(p.index), " return-value of type `",
+		p.classType, "` ", p.classLocation)
+end
+
 --------------------------------------------------------------------------------
 
 -- RETURNS an IR description of the program
@@ -1887,7 +1955,7 @@ local function semanticsSmol(sources, main)
 					location = t.location,
 				}
 			elseif t.tag == "generic" then
-				return {tag = "generic-type+",
+				return {tag = "generic+",
 					name = t.name,
 					location = t.location,
 				}
@@ -1904,12 +1972,13 @@ local function semanticsSmol(sources, main)
 		local function compiledSignature(signature)
 			return {
 				foreign = signature.foreign,
-				modifier = signature.modifier,
+				modifier = signature.modifier.keyword,
 				name = signature.name,
 				returnTypes = table.map(typeFinder, signature.returnTypes),
 				parameters = table.map(function(p)
 					return {name = p.name, type = typeFinder(p.type)}
 				end, signature.parameters),
+				location = signature.location,
 			}
 		end
 
@@ -2012,6 +2081,8 @@ local function semanticsSmol(sources, main)
 				fields = fields,
 				signatures = signatures,
 				implements = implements,
+
+				location = definition.location,
 			}
 		end
 
@@ -2029,6 +2100,8 @@ local function semanticsSmol(sources, main)
 				name = name,
 				generics = generics,
 				signatures = signatures,
+
+				location = definition.location,
 			}
 		end
 
@@ -2054,7 +2127,195 @@ local function semanticsSmol(sources, main)
 	interfaceDefinitions = freeze(interfaceDefinitions)
 	unionDefinitions = freeze(unionDefinitions)
 
-	-- (3) Verify and record all interfaces
+	-- (3) Verify and record all interfaces implementation
+
+	-- RETURNS whether or not a and b are the same type
+	-- REQUIRES that type names cannot be shadowed and
+	-- that a and b come from the same (type) scope
+	local function areTypesEqual(a, b)
+		if a.tag ~= b.tag then
+			return false
+		elseif a.tag == "concrete-type+" then
+			if a.name ~= b.name then
+				return false
+			elseif #a.arguments ~= #b.arguments then
+				-- XXX: should this be fixed before here?
+				return false
+			end
+			for k in ipairs(a.arguments) do
+				if not areTypesEqual(a.arguments[k], b.arguments[k]) then
+					return false
+				end
+			end
+			return true
+		elseif a.tag == "keyword-type+" then
+			return a.name == b.name
+		elseif a.tag == "generic+" then
+			return a.name == b.name
+		end
+		error("unknown type tag `" .. a.tag .. "`")
+	end
+
+	-- RETURNS a string of smol representing the given type
+	local function showType(t)
+		if t.tag == "concrete-type+" then
+			if #t.arguments == 0 then
+				return t.name
+			end
+			local arguments = table.map(showType, t.arguments)
+			return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
+		elseif t.tag == "keyword-type+" then
+			return t.name
+		elseif t.tag == "generic+" then
+			return "#" .. t.name
+		end
+		error("unknown Type+ tag `" .. t.tag .. "`")
+	end
+
+	-- assignments: map string -> Type+
+	-- RETURNS a function Type+ -> Type+ that substitutes the indicated
+	-- types for generic variables.
+	local function genericSubstituter(assignments)
+		assertis(assignments, mapType("string", "Type+"))
+
+		local function subs(t)
+			if t.tag == "concrete-type+" then
+				return {tag = "concrete-type+",
+					name = t.name,
+					arguments = table.map(subs, t.arguments),
+					location = t.location,
+				}
+			elseif t.tag == "keyword-type+" then
+				return t
+			elseif t.tag == "generic+" then
+				if not assignments[t.name] then
+					Report.UNKNOWN_GENERIC_USED(t)
+				end
+				return assignments[t.name]
+			end
+			error("unknown Type+ tag `" .. t.tag .. "`")
+		end
+		return subs
+	end
+
+	local function verifyClassImplements(class)
+		for _, int in ipairs(class.implements) do
+			local interfaceName = int.name
+			local interface = table.findwith(
+				interfaceDefinitions, "name", interfaceName)
+			assert(interface)
+
+			-- Instantiate each of the interface's type parameters with the
+			-- argument specified in the "implements"
+			local assignments = {}
+			if #int.arguments ~= #interface.generics then
+				Report.WRONG_ARITY {
+					name = interface.name,
+					givenArity = #int.arguments,
+					expectedArity = #interface.generics,
+					location = int.location,
+					definitionLocation = interface.location,
+				}
+			end
+			for i, argument in ipairs(int.arguments) do
+				assignments[interface.generics[i].name] = argument
+			end
+			local subs = genericSubstituter(assignments)
+
+			-- Check that each signature matches
+			for _, iSignature in ipairs(interface.signatures) do
+				-- Search for a method/static with the same name, if any
+				local cSignature = table.findwith(
+					class.signatures, "name", iSignature.name)
+				if not cSignature then
+					Report.INTERFACE_REQUIRES_MEMBER {
+						class = class.name,
+						interface = showType(int),
+						implementsLocation = int.location,
+						memberLocation = iSignature.location,
+						memberName = iSignature.name,
+					}
+				end
+
+				-- Check that the modifier matches
+				if cSignature.modifier ~= iSignature.modifier then
+					Report.INTERFACE_REQUIRES_MODIFIER {
+						name = cSignature.name,
+						class = class.name,
+						interface = showType(int),
+						classModifier = cSignature.modifier,
+						interfaceModifier = iSignature.modifier,
+						classLocation = cSignature.location,
+						interfaceLocation = iSignature.location,
+					}
+				end
+
+				-- Check that the parameters match
+				if #cSignature.parameters ~= #iSignature.parameters then
+					Report.INTERFACE_PARAMETER_COUNT_MISMATCH {
+						class = class.name,
+						classLocation = cSignature.location,
+						classCount = #cSignature.parameters,
+						interface = showType(int),
+						interfaceLocation = iSignature.location,
+						interfaceCount = #iSignature.parameters,
+					}
+				end
+				for k, iParameter in ipairs(iSignature.parameters) do
+					local iType = subs(iParameter.type)
+					local cParameter = cSignature.parameters[k]
+					local cType = cParameter.type
+					if not areTypesEqual(iType, cType) then
+						Report.INTERFACE_PARAMETER_TYPE_MISMATCH {
+							class = class.name,
+							classLocation = cParameter.location,
+							classType = showType(cType),
+							interface = showType(int),
+							interfaceLocation = iParameter.location,
+							interfaceType = showType(iType),
+							index = k,
+						}
+					end
+				end
+
+				-- Check that the return types match
+				if #cSignature.returnTypes ~= #iSignature.returnTypes then
+					Report.INTERFACE_RETURN_COUNT_MISMATCH {
+						class = class.name,
+						interface = showType(int),
+						classLocation = cSignature.location,
+						interfaceLocation = iSignature.location,
+						classCount = #cSignature.returnTypes,
+						interfaceCount = #iSignature.returnTypes,
+						member = cSignature.name,
+					}
+				end
+				for k, cType in ipairs(cSignature.returnTypes) do
+					local iType = subs(iSignature.returnTypes[k])
+					if not areTypesEqual(iType, cType) then
+						Report.INTERFACE_RETURN_TYPE_MISMATCH {
+							class = class.name,
+							interface = showType(int),
+							classLocation = cType.location,
+							interfaceLocation = iType.location,
+							classType = showType(cType),
+							interfaceType = showType(iType),
+							index = k,
+							member = cSignature.name,
+						}
+					end
+				end
+			end
+		end
+	end
+
+	-- Verify all implementation claims
+	for _, class in ipairs(structDefinitions) do
+		verifyClassImplements(class)
+	end
+	for _, union in ipairs(unionDefinitions) do
+		verifyClassImplements(union)
+	end
 
 	-- (4) Compile all code bodies
 
