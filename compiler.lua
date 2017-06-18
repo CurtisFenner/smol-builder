@@ -165,10 +165,11 @@ local show;
 local function quit(first, ...)
 	if not first:match("^[A-Z]+:\n$") then
 		print(table.concat{"ERROR:\n", first, ...})
+		os.exit(405)
 	else
 		print(table.concat{first, ...})
+		os.exit(400)
 	end
-	os.exit(1)
 end
 
 local debugPrint = function() end
@@ -420,12 +421,12 @@ function table.with(object, key, newValue)
 end
 
 -- RETURNS a list produced by mapping each element of `list` through `f`
-function table.map(f, list)
+function table.map(f, list, ...)
 	assert(type(f) == "function",
 		"the first argument to table.map must be a function")
 	local out = {}
 	for k, v in ipairs(list) do
-		out[k] = f(v)
+		out[k] = f(v, ...)
 	end
 	return out
 end
@@ -516,6 +517,10 @@ local function recordType(record)
 	end
 
 	local function predicate(object)
+		if not isobject(object) then
+			return false
+		end
+
 		for key, predicate in pairs(record) do
 			if not TYPE_PREDICATE(predicate)(object[key]) then
 				return false
@@ -747,7 +752,7 @@ local function lexSmol(source, filename)
 					if not SPECIAL[c] then
 						quit("The compiler found an unknown escape sequence",
 							" `\\", c, "`",
-							" in a string literal that begins", location)
+							" in a string literal that begins ", location)
 					end
 					content = content .. SPECIAL[c]
 					escaped = not escaped
@@ -1191,7 +1196,7 @@ local function parseSmol(tokens)
 			{"package", T_IDENTIFIER, "an imported package name"},
 			{"class", optional(parserExtractor(composite { -- string | false
 				tag = "***type name",
-				{"_", K_DOT},
+				{"_", K_SCOPE},
 				{"class", T_TYPENAME, "a type name"},
 			}, "class"))},
 			{"_", K_SEMICOLON, "`;` after import"},
@@ -1930,8 +1935,11 @@ local function semanticsSmol(sources, main)
 		assertis(packageIsInScope, mapType("string", constantType(true)))
 
 		-- RETURNS a Type+ with a fully-qualified name
-		local function typeFinder(t)
+		local function typeFinder(t, scope)
+			assertis(scope, listType("TypeParameterIR"))
+
 			if t.tag == "concrete-type" then
+				-- Search for the type in `type`
 				local package = t.package
 				if not package then
 					package = packageScopeMap[t.base]
@@ -1949,12 +1957,18 @@ local function semanticsSmol(sources, main)
 					}
 				end
 				assertis(package, "string")
+
 				return {tag = "concrete-type+",
 					name = package .. ":" .. t.base,
-					arguments = table.map(typeFinder, t.arguments),
+					arguments = table.map(typeFinder, t.arguments, scope),
 					location = t.location,
 				}
 			elseif t.tag == "generic" then
+				-- Search for the name in `scope`
+				if not table.findwith(scope, "name", t.name) then
+					Report.UNKNOWN_GENERIC_USED(t)
+				end
+
 				return {tag = "generic+",
 					name = t.name,
 					location = t.location,
@@ -1969,14 +1983,16 @@ local function semanticsSmol(sources, main)
 		end
 
 		-- RETURNS a signature
-		local function compiledSignature(signature)
+		local function compiledSignature(signature, scope)
+			assertis(scope, listType("TypeParameterIR"))
+
 			return {
 				foreign = signature.foreign,
 				modifier = signature.modifier.keyword,
 				name = signature.name,
-				returnTypes = table.map(typeFinder, signature.returnTypes),
+				returnTypes = table.map(typeFinder, signature.returnTypes, scope),
 				parameters = table.map(function(p)
-					return {name = p.name, type = typeFinder(p.type)}
+					return {name = p.name, type = typeFinder(p.type, scope)}
 				end, signature.parameters),
 				location = signature.location,
 			}
@@ -2006,7 +2022,11 @@ local function semanticsSmol(sources, main)
 
 			for _, constraintAST in ipairs(generics.constraints) do
 				local constraint = {
-					constraint = typeFinder(constraintAST.constraint),
+					-- The syntactic generics.parameters is used here, since
+					-- it represents the final set of names,
+					-- which is all that typeFinder needs.
+					constraint = typeFinder(
+						constraintAST.constraint, generics.parameters),
 					location = constraintAST.location,
 				}
 
@@ -2047,7 +2067,7 @@ local function semanticsSmol(sources, main)
 
 				table.insert(fields, {
 					name = field.name,
-					type = typeFinder(field.type),
+					type = typeFinder(field.type, generics),
 
 					location = field.location,
 				})
@@ -2067,13 +2087,14 @@ local function semanticsSmol(sources, main)
 				end
 				memberLocationMap[name] = method.location
 				
-				local signature = compiledSignature(method.signature)
+				local signature = compiledSignature(method.signature, generics)
 				signature = table.with(signature, "body", method.body)
 				table.insert(signatures, signature)
 			end
 
 			-- Compile the set of interfaces this class claims to implement
-			local implements = table.map(typeFinder, definition.implements)
+			local implements = table.map(
+				typeFinder, definition.implements, generics)
 
 			return freeze {
 				name = name,
@@ -2094,7 +2115,7 @@ local function semanticsSmol(sources, main)
 			local generics = compiledGenerics(definition.generics)
 
 			local signatures = table.map(
-				compiledSignature, definition.signatures)
+				compiledSignature, definition.signatures, generics)
 
 			return freeze {
 				name = name,
