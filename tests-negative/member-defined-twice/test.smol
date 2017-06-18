@@ -1,0 +1,14 @@
+package test;
+
+class Foo {
+	var foo Boolean;
+	static foo() Boolean {
+		return true;
+	}
+}
+
+class Test {
+	static main() Unit {
+		var x String = "foo";
+	}
+}

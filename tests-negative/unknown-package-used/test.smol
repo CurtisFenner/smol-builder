@@ -1,0 +1,8 @@
+package test;
+
+class Test {
+	var foo alpha:Foo;
+
+	static main() Unit {
+	}
+}

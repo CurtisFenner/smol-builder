@@ -1,0 +1,10 @@
+package test;
+
+class Test {
+	static main() Unit {
+		var x String = "foo";
+	}
+
+	static bar(t #T) Unit {
+	}
+}

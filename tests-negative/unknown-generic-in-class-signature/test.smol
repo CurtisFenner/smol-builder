@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+	static main() Unit {
+		var x String = "foo";
+	}
+}
+
+
+interface IFace {
+	static foo() #T;
+}
