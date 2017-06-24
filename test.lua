@@ -71,8 +71,8 @@ for test in io.popen("ls tests-negative", "r"):lines() do
 	if test:find(filter, 1, true) then
 		printHeader("TEST " .. test)
 		local status = compiler("tests-negative/" .. test, "test:Test")
-		if status ~= 405 then
-			FAIL {name = test, expected = 405, got = status}
+		if status ~= 45 and status ~= 45*256 then
+			FAIL {name = test, expected = 45, got = status}
 		else
 			PASS {name = test}
 		end

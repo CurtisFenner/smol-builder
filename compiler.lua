@@ -7,6 +7,23 @@ local INVOKATION = arg[0] .. " " .. table.concat(arg, ", ")
 
 --------------------------------------------------------------------------------
 
+local color = {}
+color.enabled = true or package.config:sub(1, 1) == "/"
+
+function color.blue(text)
+	if not color.enabled then
+		return text
+	end
+	return "\27[34m\27[1m" .. text .. "\27[0m"
+end
+function color.red(text)
+	if not color.enabled then
+		return text
+	end
+	return "\27[31m\27[1m" .. text .. "\27[0m"
+end
+
+
 if arg[#arg] == "--profile" then
 	-- Enable profiling
 	table.remove(arg)
@@ -165,10 +182,10 @@ local show;
 local function quit(first, ...)
 	if not first:match("^[A-Z]+:\n$") then
 		print(table.concat{"ERROR:\n", first, ...})
-		os.exit(405)
+		os.exit(45)
 	else
 		print(table.concat{first, ...})
-		os.exit(400)
+		os.exit(40)
 	end
 end
 
@@ -696,6 +713,14 @@ local function lexSmol(source, filename)
 	local QUOTE = "\""
 	local BACKSLASH = "\\"
 
+	-- Create a list of the lines in the program, for location messages
+	local sourceLines = {}
+	for line in (source .. "\n"):gmatch("(.-)\n") do
+		line = line:gsub("\r", "")
+		line = line:gsub("\t", "    ") -- TODO: this should be aligned
+		table.insert(sourceLines, line)
+	end
+
 	local tokens = {}
 
 	-- Track the location into the source file each token is
@@ -723,12 +748,12 @@ local function lexSmol(source, filename)
 
 	while #source > 0 do
 		-- Compute human-readable description of location
-		local sourceContext = source:gsub("%s+", " ")
-		if #sourceContext > 35 then
-			sourceContext = sourceContext:sub(1, 35-3) .. "..."
-		end
+
+		local sourceContext = "\t" .. line .. ":\t" .. sourceLines[line]
+			.. "\n\t\t" .. string.rep(" ", column-1) .. color.red("^")
+
 		local location = "at " .. filename .. ":" .. line .. ":" .. column
-			.. "\n\t(at `" .. sourceContext .. "`)\n"
+			.. "\n" .. sourceContext .. "\n"
 
 		-- Tokenize string literals
 		if source:sub(1, 1) == QUOTE then
