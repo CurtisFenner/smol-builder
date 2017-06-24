@@ -1,0 +1,50 @@
+package core;
+
+union Option[#T] {
+	var value #T;
+	var none Unit;
+
+	static makeValue(value #T) Option[#T] {
+		return new(value = value);
+	}
+
+	static makeNone() Option[#T] {
+		return new(none = Unit.make());
+	}
+}
+
+interface Showable {
+	method show() String;
+
+	static showType() String;
+}
+
+interface Readable[#T] {
+	static read(str String) #T, String;
+}
+
+
+class NumberBacking is core:Readable[Number], Showable {
+	foreign static read(str String) Number, String {}
+
+	foreign method show() String {}
+	foreign static showType() String {}
+}
+
+class StringBacking is core:Readable[Number], Showable {
+	foreign static read(str String) Number, String {}
+
+	foreign method show() String {}
+	foreign static showType() String {}
+}
+
+interface Function[#From, #To] {
+	method apply(from #From) #To;
+}
+
+foreign class Integer {
+}
+
+foreign class Array[#T] {
+
+}

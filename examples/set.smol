@@ -1,0 +1,55 @@
+package set;
+
+import pair:Pair;
+import core:Array;
+import core:Integer;
+import core:Function;
+
+class Set[#T] {
+	var elements Array[#T];
+
+	static empty() Set[#T] {
+		return new(elements = Array[#T].empty());
+	}
+
+	static fromArray(array Array[#T]) Set[#T] {
+		return new(elements = array);
+	}
+
+	method separate() Set[Pair[#T, Set[#T]]] {
+		var mapper Mapper[Integer, #T, SetSplicer[#T]] = Mapper[Integer, #T, SetSplicer[#T]].make(SetSplicer[#T].make(this.elements));
+		var result Array[Pair[#T, Set[#T]]] = ArrayFromFunc[Pair[#T, Set[#T]], Mapper[Integer, Pair[#T, Set[#T], SetSplicer[#T]]]].make(elements.length(), mapper);
+	}
+}
+
+class SetSplicer[#T] is Function[Integer, Pair[#T, Array[#T]]] {
+	var array Array[#T];
+
+	static make(array Array[#T]) SetSplicer[#T] {
+		return new(array = array);
+	}
+
+	method others(n Integer) Array[#T] {
+		return Array[#T].make(this.array.length()-1, ArrayOthersGetter[#T].make(n));
+	}
+
+	method apply(n Integer) Pair[#T, Array[#T]] {
+		return Pair.make(array.get(n), this.others(this.array, n));
+	}
+}
+
+class ArrayOthersGetter[#T] is Function[Integer, #T] {
+	var array Array[#T];
+	var index Integer;
+
+	static make(array Array[#T], index Integer) ArrayOthersGetter[#T] {
+		return new(array = array, index = index);
+	}
+
+	method apply(n Integer) #T {
+		///if n < this.index {
+			return this.array.get(n);
+		///}
+		return this.array.get(n - 1);
+	}
+}

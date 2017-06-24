@@ -1,0 +1,16 @@
+package test;
+
+interface IFoo[#A, #B] {
+	method bar() #A;
+}
+
+class Foo is IFoo[Boolean, String] {
+	method bar() String {
+		return "foobar";
+	}
+}
+
+class Test {
+	static main() Unit {
+	}
+}

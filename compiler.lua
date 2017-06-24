@@ -2219,6 +2219,8 @@ local function semanticsSmol(sources, main)
 		return subs
 	end
 
+	-- Verify that `class` actually implements each interface that it claims to
+	-- RETURNS nothing
 	local function verifyClassImplements(class)
 		for _, int in ipairs(class.implements) do
 			local interfaceName = int.name

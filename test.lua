@@ -1,5 +1,7 @@
 -- Test script for the Lua smol compiler
 
+local filter = arg[1] or ""
+
 --------------------------------------------------------------------------------
 
 local function printHeader(text)
@@ -66,23 +68,27 @@ end
 
 -- (1) Run all negative tests
 for test in io.popen("ls tests-negative", "r"):lines() do
-	printHeader("TEST " .. test)
-	local status = compiler("tests-negative/" .. test, "test:Test")
-	if status ~= 405 then
-		FAIL {name = test, expected = 405, got = status}
-	else
-		PASS {name = test}
+	if test:find(filter, 1, true) then
+		printHeader("TEST " .. test)
+		local status = compiler("tests-negative/" .. test, "test:Test")
+		if status ~= 405 then
+			FAIL {name = test, expected = 405, got = status}
+		else
+			PASS {name = test}
+		end
 	end
 end
 
 -- (2) TODO: run all positive tests
 for test in io.popen("ls tests-positive", "r"):lines() do
-	printHeader("TEST " .. test)
-	local status = compiler("tests-positive/" .. test, "test:Test")
-	if status ~= 0 then
-		FAIL {name = test, expected = 0, got = status}
-	else
-		PASS {name = test}
+	if test:find(filter, 1, true) then
+		printHeader("TEST " .. test)
+		local status = compiler("tests-positive/" .. test, "test:Test")
+		if status ~= 0 then
+			FAIL {name = test, expected = 0, got = status}
+		else
+			PASS {name = test}
+		end
 	end
 end
 

@@ -1,0 +1,34 @@
+package foo;
+
+import core:Option;
+import pair:Pair;
+import pair;
+
+
+import system;
+
+class Main {
+	static main() Number {
+		var pair Pair[Number, Number] = pair:PairBoth[Number].make(1);
+		var shown String = pair.show();
+		do system:Out.println(shown);
+
+		shown = "pair:Pair[?,?].pair(17, 19)";
+		pair, shown = Pair[Number, Number].read(shown);
+		return 0;
+	}
+}
+
+
+interface IFoo[#A, #B] {
+	static one() #A, #B;
+	method two() #B;
+}
+
+class Alpha {}
+class Beta {}
+
+class Bar is IFoo[Alpha, Beta] {
+	static one() Alpha, Alpha {}
+	method two() Beta {}
+}
