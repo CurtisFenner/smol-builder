@@ -1,0 +1,23 @@
+package test;
+
+interface IOne {
+}
+
+interface ITwo {
+}
+
+class OnableThing is IOne {
+}
+class TwoableThing is ITwo {
+}
+
+interface Oneable[#A | #A is IOne] {
+}
+
+class Impl is Oneable[TwoableThing] {
+}
+
+class Test {
+	static main() Unit {
+	}
+}

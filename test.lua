@@ -63,7 +63,11 @@ local function compiler(sources, main)
 		" ", main,
 	}
 
-	return os.execute(command)
+	local status = os.execute(command)
+	while status > 255 do
+		status = status / 256
+	end
+	return status
 end
 
 -- (1) Run all negative tests
@@ -71,7 +75,7 @@ for test in io.popen("ls tests-negative", "r"):lines() do
 	if test:find(filter, 1, true) then
 		printHeader("TEST " .. test)
 		local status = compiler("tests-negative/" .. test, "test:Test")
-		if status ~= 45 and status ~= 45*256 then
+		if status ~= 45 then
 			FAIL {name = test, expected = 45, got = status}
 		else
 			PASS {name = test}
