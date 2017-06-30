@@ -83,7 +83,7 @@ for test in io.popen("ls tests-negative", "r"):lines() do
 	end
 end
 
--- (2) TODO: run all positive tests
+-- (2) Run all positive tests
 for test in io.popen("ls tests-positive", "r"):lines() do
 	if test:find(filter, 1, true) then
 		printHeader("TEST " .. test)

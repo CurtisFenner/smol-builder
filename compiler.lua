@@ -9,18 +9,20 @@ local INVOKATION = arg[0] .. " " .. table.concat(arg, ", ")
 
 local color = {}
 color.enabled = true or package.config:sub(1, 1) == "/"
-
-function color.blue(text)
+function color.format(text, format)
 	if not color.enabled then
 		return text
 	end
-	return "\27[34m\27[1m" .. text .. "\27[0m"
+	return format:gsub("%[", "\27[") .. text .. "\27[0m"
+end
+function color.blue(text)
+	return color.format(text, "[34m[1m")
 end
 function color.red(text)
-	if not color.enabled then
-		return text
-	end
-	return "\27[31m\27[1m" .. text .. "\27[0m"
+	return color.format(text, "[31m[1m")
+end
+function color.cyan(text)
+	return color.format(text, "[36m[1m")
 end
 
 
@@ -181,10 +183,10 @@ local show;
 -- DOES NOT RETURN.
 local function quit(first, ...)
 	if not first:match("^[A-Z]+:\n$") then
-		print(table.concat{"ERROR:\n", first, ...})
+		print(table.concat{color.red("ERROR"), ":\n", first, ...})
 		os.exit(45)
 	else
-		print(table.concat{first, ...})
+		print(table.concat{color.cyan(first), ...})
 		os.exit(40)
 	end
 end
