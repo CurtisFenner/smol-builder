@@ -8,6 +8,25 @@ local function printHeader(text)
 	print("\n-- " .. text .. " " .. string.rep("-", 80 - #text - 4) .. "\n")
 end
 
+function string.spaces(s)
+	return (s:gsub("\t", "    ")) -- TODO
+end
+
+local function printBox(lines)
+	local WIDTH = 80
+	local bar = "+" .. string.rep("-", WIDTH-2) .. "+"
+	local out = {bar}
+	for _, line in ipairs(lines) do
+		local row = string.spaces("|\t" .. line)
+		row = row .. string.rep(" ", WIDTH - 1 - #row) .. "|"
+		table.insert(out, row)
+	end
+	table.insert(out, bar)
+	print(table.concat(out, "\n"))
+end
+
+--------------------------------------------------------------------------------
+
 local passes = {}
 local fails = {}
 
@@ -33,9 +52,11 @@ function REPORT()
 	end
 
 	for _, fail in ipairs(fails) do
-		print("FAIL: " .. fail.name)
-		print("\tExpected: " .. fail.expected)
-		print("\tBut got:  " .. fail.got)
+		printBox {
+			"FAIL: " .. fail.name,
+			"\tExpected: " .. fail.expected,
+			"\tBut got:  " .. fail.got,
+		}
 		print()
 	end
 
