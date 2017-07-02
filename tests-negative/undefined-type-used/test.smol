@@ -1,0 +1,9 @@
+package test;
+
+class Test {
+	static foo(argument test:Nonexistent) Unit {
+	}
+
+	static main() Unit {
+	}
+}

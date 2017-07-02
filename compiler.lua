@@ -25,6 +25,7 @@ function color.cyan(text)
 	return color.format(text, "[36m[1m")
 end
 
+--------------------------------------------------------------------------------
 
 if arg[#arg] == "--profile" then
 	-- Enable profiling
@@ -2248,7 +2249,7 @@ local function semanticsSmol(sources, main)
 
 	-- Verify that `class` actually implements each interface that it claims to
 	-- RETURNS nothing
-	local function verifyClassImplements(class)
+	local function checkStructImplementsClaims(class)
 		for _, int in ipairs(class.implements) do
 			local interfaceName = int.name
 			local interface = table.findwith(
@@ -2361,10 +2362,10 @@ local function semanticsSmol(sources, main)
 
 	-- Verify all implementation claims
 	for _, class in ipairs(structDefinitions) do
-		verifyClassImplements(class)
+		checkStructImplementsClaims(class)
 	end
 	for _, union in ipairs(unionDefinitions) do
-		verifyClassImplements(union)
+		checkStructImplementsClaims(union)
 	end
 
 	-- (4) Compile all code bodies

@@ -29,6 +29,6 @@ class Alpha {}
 class Beta {}
 
 class Bar is IFoo[Alpha, Beta] {
-	static one() Alpha, Alpha {}
+	static one() Alpha, Beta {}
 	method two() Beta {}
 }
