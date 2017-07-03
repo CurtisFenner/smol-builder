@@ -1779,6 +1779,11 @@ function Report.UNKNOWN_GENERIC_USED(p)
 		"\nHowever, you are trying to use it ", p.location)
 end
 
+function Report.UNKNOWN_TYPE_USED(p)
+	quit("No type called `" .. p.name .. "` has been defined.",
+		"\nHowever, you are trying to use it ", p.location)
+end
+
 function Report.UNKNOWN_LOCAL_TYPE_USED(p)
 	quit("There is no type called `" .. p.name .. "` in scope.",
 		"\nHowever, you are trying to use it ", p.location)
@@ -1963,8 +1968,16 @@ local function semanticsSmol(sources, main)
 				end
 				assertis(package, "string")
 
+				local fullName = package .. ":" .. t.base
+				if not definitionSourceByFullName[fullName] then
+					Report.UNKNOWN_TYPE_USED {
+						name = fullName,
+						location = t.location,
+					}
+				end
+
 				return {tag = "concrete-type+",
-					name = package .. ":" .. t.base,
+					name = fullName,
 					arguments = table.map(typeFinder, t.arguments, scope),
 					location = t.location,
 				}
