@@ -258,20 +258,14 @@ function string.ordinal(n)
 	return n .. "th"
 end
 
+-- RETURNS a string of length at least `length` that is formed by concatenating
+-- a prefix with `str`. The prefix is made up of repetitions of `with`.
 function string.prepad(str, with, length)
 	assert(isstring(with), "with must be a string")
 	assert(isinteger(length), "length must be an integer")
 	assert(#with == 1, "TODO: support #with > 1")
 
 	return string.rep(with, length - #str) .. str
-end
-
-function string.postpad(str, with, length)
-	assert(isstring(with), "with must be a string")
-	assert(isinteger(length), "length must be an integer")
-	assert(#with == 1, "TODO: support #with > 1")
-
-	return str .. string.rep(with, length - #str)
 end
 
 -- RETURNS a list of keys into the given table
@@ -737,7 +731,6 @@ local function lexSmol(source, filename)
 
 	while #source > 0 do
 		-- Compute human-readable description of location
-
 		local sourceContext = "\t" .. line .. ":\t" .. sourceLines[line]
 			.. "\n\t\t" .. string.rep(" ", column-1) .. color.red("^")
 
@@ -1861,7 +1854,7 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS an IR description of the program
+-- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
 	assertis(main, "string")
 
@@ -1892,9 +1885,7 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- (2) Fully qualify all local type names
-	local structDefinitions = {}
-	local interfaceDefinitions = {}
-	local unionDefinitions = {}
+	local allDefinitions = {}
 
 	for _, source in ipairs(sources) do
 		local package = source.package
@@ -2055,7 +2046,9 @@ local function semanticsSmol(sources, main)
 		end
 
 		-- RETURNS a class+/union+
-		local function compiledStruct(definition)
+		local function compiledStruct(definition, tag)
+			assertis(tag, "string")
+
 			-- name, fields, generics, implements, signatures
 
 			-- Create the full-name of the package
@@ -2111,6 +2104,8 @@ local function semanticsSmol(sources, main)
 				typeFinder, definition.implements, generics)
 
 			return freeze {
+				tag = tag,
+
 				name = name,
 				generics = generics,
 				fields = fields,
@@ -2132,6 +2127,8 @@ local function semanticsSmol(sources, main)
 				compiledSignature, definition.signatures, generics)
 
 			return freeze {
+				tag = "interface",
+
 				name = name,
 				generics = generics,
 				signatures = signatures,
@@ -2143,24 +2140,21 @@ local function semanticsSmol(sources, main)
 		-- Create an IR representation of each definition
 		for _, definition in ipairs(source.definitions) do
 			if definition.tag == "class-definition" then
-				table.insert(structDefinitions, compiledStruct(definition))
+				table.insert(allDefinitions,
+					compiledStruct(definition, "class"))
 			elseif definition.tag == "interface-definition" then
-				table.insert(interfaceDefinitions,
-					compiledInterface(definition))
+				table.insert(allDefinitions, compiledInterface(definition))
 			elseif definition.tag == "union-definition" then
-				table.insert(unionDefinitions, compiledStruct(definition))
+				-- TODO: distinguish this as a union
+				table.insert(allDefinitions,
+					compiledStruct(definition, "union"))
 			else
 				error("unknown definition tag `" .. definition.tag .. "`")
 			end
 		end
 	end
 
-	assertis(structDefinitions, listType "StructIR")
-	assertis(interfaceDefinitions, listType "InterfaceIR")
-	assertis(unionDefinitions, listType "UnionIR")
-	structDefinitions = freeze(structDefinitions)
-	interfaceDefinitions = freeze(interfaceDefinitions)
-	unionDefinitions = freeze(unionDefinitions)
+	-- TODO: assertis(allDefinitions, listType(optionType("StructIR", "InterfaceIR", "UnionIR")))
 
 	-- (3) Verify and record all interfaces implementation
 
@@ -2239,7 +2233,8 @@ local function semanticsSmol(sources, main)
 		for _, int in ipairs(class.implements) do
 			local interfaceName = int.name
 			local interface = table.findwith(
-				interfaceDefinitions, "name", interfaceName)
+				allDefinitions, "name", interfaceName)
+			-- TODO: check that it is an interface
 			assert(interface)
 
 			-- Instantiate each of the interface's type parameters with the
@@ -2347,11 +2342,11 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- Verify all implementation claims
-	for _, class in ipairs(structDefinitions) do
-		checkStructImplementsClaims(class)
-	end
-	for _, union in ipairs(unionDefinitions) do
-		checkStructImplementsClaims(union)
+	for _, class in ipairs(allDefinitions) do
+		-- TODO: check that `tag` is right
+		if class.tag == "class" or class.tag == "union" then
+			checkStructImplementsClaims(class)
+		end
 	end
 
 	-- (4) Compile all code bodies
