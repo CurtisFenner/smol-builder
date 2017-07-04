@@ -614,7 +614,7 @@ end
 -- RETURNS a type-predicate
 local function choiceType(...)
 	local choices = {...}
-	assert(#choices >= 1)
+	assert(#choices >= 2)
 
 	local function predicate(object)
 		for _, p in ipairs(choices) do
@@ -638,6 +638,34 @@ local function choiceType(...)
 	return {predicate = predicate, describe = describe}
 end
 
+-- RETURNS a type-predicate
+local function intersectType(...)
+	local types = {...}
+	assert(#types >= 2)
+
+	local function predicate(object)
+		for _, p in ipairs(types) do
+			if not TYPE_PREDICATE(p)(object) then
+				return false
+			end
+		end
+		return true
+	end
+
+	local function describe()
+		local c = {}
+		for _, type in ipairs(types) do
+			table.insert(c, TYPE_DESCRIPTION(type))
+		end
+		table.sort(c)
+
+		return "(" .. table.concat(c, " & ") .. ")"
+	end
+
+	return {predicate = predicate, describe = describe}
+end
+
+-- RETURNS a type-predicate
 local function predicateType(f)
 	assert(isfunction(f), "f must be a function")
 
@@ -652,6 +680,7 @@ REGISTER_TYPE("string", predicateType(isstring))
 REGISTER_TYPE("function", predicateType(isfunction))
 REGISTER_TYPE("boolean", predicateType(isboolean))
 REGISTER_TYPE("nil", constantType(nil))
+REGISTER_TYPE("any", predicateType(function() return true end))
 
 -- Lexer -----------------------------------------------------------------------
 
