@@ -4,8 +4,28 @@ local filter = arg[1] or ""
 
 --------------------------------------------------------------------------------
 
-local function printHeader(text)
-	print("\n-- " .. text .. " " .. string.rep("-", 80 - #text - 4) .. "\n")
+local function printHeader(text, symbol, align)
+	symbol = symbol or "-"
+	align = align or "left"
+
+	local middle = " " .. text .. " "
+	local remaining = 80 - #middle
+	local left, right
+
+	if align == "left" then
+		left = 2
+		right = remaining - left
+	elseif align == "center" then
+		left = math.floor(remaining / 2) - 1
+		right = remaining - left
+	else
+		error "unknown alignment"
+	end
+
+	assert(left + #middle + right == 80 or #middle+4 >= 80)
+	print("")
+	print(symbol:rep(left) .. middle .. symbol:rep(right))
+	print("")
 end
 
 function string.spaces(s)
@@ -45,7 +65,7 @@ function FAIL(p)
 end
 
 function REPORT()
-	printHeader("Detailed Results")
+	printHeader("Detailed Results", "@", "center")
 
 	for _, pass in ipairs(passes) do
 		print("PASS: " .. pass.name)
@@ -60,7 +80,7 @@ function REPORT()
 		print()
 	end
 
-	printHeader("Summary Results")
+	printHeader("Summary Results", "@", "center")
 	print("Passed: " .. #passes)
 	print("Failed: " .. #fails)
 	if #fails == 0 and #passes > 0 then
