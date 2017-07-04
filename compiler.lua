@@ -456,37 +456,38 @@ end
 local _TYPE_SPECS = {}
 
 -- RETURNS nothing
-local function REGISTER_TYPE(name, predicate)
+local function REGISTER_TYPE(name, t)
 	assert(isstring(name), "name must be a string")
-	assert(isfunction(predicate))
-	assert(not _TYPE_SPECS[name],
+	assert(not table.findwith(_TYPE_SPECS, "name", name),
 		"Type `" .. name .. "` has already been defined")
+	assert(isobject(t))
 
-	table.insert(_TYPE_SPECS, {name = name, predicate = predicate})
+	table.insert(_TYPE_SPECS, {
+		name = name, predicate = t.predicate, description = name
+	})
 end
 
 -- RETURNS a type predicate
-local function TYPE_PREDICATE(name)
-	if isfunction(name) then
-		return name
+local function TYPE_PREDICATE(t)
+	if type(t) == "string" then
+		local found = table.findwith(_TYPE_SPECS, "name", t)
+		assert(found, "No type called `" .. t .. "` has been registered")
+		return found.predicate
 	end
-
-	assert(isstring(name),
-		"name must be a string but instead it's a " .. type(name))
-
-	local found = table.findwith(_TYPE_SPECS, "name", name)
-	assert(found, "No type called `" .. name .. "` has been registered")
-	return found.predicate
+	return t.predicate
 end
 
--- RETURNS a string representing the type of an object
-local function typefull(object)
-	for i = #_TYPE_SPECS, 1, -1 do
-		if _TYPE_SPECS[i].predicate(object) then
-			return _TYPE_SPECS[i].name
-		end
+local function TYPE_DESCRIPTION(t)
+	if type(t) == "string" then
+		assert(table.findwith(_TYPE_SPECS, "name", t))
+		return t
 	end
-	error("unregistered primitive `" .. type(object) .. "`")
+
+	if not t.description then
+		t.description = t.describe()
+		assert(type(t.description) == "string")
+	end
+	return t.description
 end
 
 -- ASSERTS that `value` is of the specified type `t`
@@ -494,16 +495,17 @@ local function assertis(value, t)
 	local spec = TYPE_PREDICATE(t)
 
 	if not spec(value) then
-		error("value must be a `" .. tostring(t) .. "`, however it is a `"
-			.. typefull(value) .. "`:\n" .. show(value), 2)
+		error("value must be a `" .. TYPE_DESCRIPTION(t) .. "`."
+			.. "\nHowever it is not:\n" .. show(value), 2)
 	end
 end
 
 -- RETURNS a type-predicate
 local function constantType(value)
-	return function(object)
-		return object == value
-	end
+	return {
+		predicate = function(object) return object == value end,
+		describe = function() return show(value) end,
+	}
 end
 
 -- RETURNS a type-predicate
@@ -512,8 +514,6 @@ local function recordType(record)
 
 	for key, value in pairs(record) do
 		assert(isstring(key), "record key must be string")
-		assert(isstring(value) or isfunction(value),
-			"record value must be string or predicate")
 	end
 
 	local function predicate(object)
@@ -521,42 +521,74 @@ local function recordType(record)
 			return false
 		end
 
-		for key, predicate in pairs(record) do
-			if not TYPE_PREDICATE(predicate)(object[key]) then
-				return false
+		-- Collect the set of relevant keys
+		local relevant = {}
+		for key in pairs(record) do
+			relevant[key] = true
+		end
+
+		-- Validate all relevant keys
+		for key, value in pairs(object) do
+			if relevant[key] then
+				local predicate = TYPE_PREDICATE(record[key])
+				if not predicate(value) then
+					return false
+				end
 			end
 		end
-		-- TODO: what if it has EXTRA fields?
+
 		return true
 	end
 
-	return predicate
+	local function describe(object)
+		local kv = {}
+		for key, value in pairs(record) do
+			table.insert(kv, key .. " = " .. TYPE_DESCRIPTION(value))
+		end
+		table.sort(kv)
+
+		return "{" .. table.concat(kv, ", ") .. "}"
+	end
+
+	return {predicate = predicate, describe = describe}
 end
 
 -- RETURNS a type-predicate
-local function listType(element)
-	assert(isstring(element) or isfunction(element),
-		"listType element must be a type name (string) or a type-predicate")
-	
+local function listType(elementType)
+	assert(elementType)
+
 	local function predicate(object)
 		if not isobject(object) then
 			return false
 		end
+
 		for key, value in pairs(object) do
 			if not isinteger(key) then
 				return false
 			elseif key ~= 1 and object[key-1] == nil then
 				return false
 			end
+
+			if not TYPE_PREDICATE(elementType)(value) then
+				return false
+			end
 		end
+
 		return true
 	end
 
-	return predicate
+	local function describe()
+		return "[" .. TYPE_DESCRIPTION(elementType) .. "]"
+	end
+
+	return {predicate = predicate, describe = describe}
 end
 
 -- RETURNS a type-predicate
 local function mapType(from, to)
+	assert(from)
+	assert(to)
+
 	local function predicate(object)
 		local from = TYPE_PREDICATE(from)
 		local to = TYPE_PREDICATE(to)
@@ -571,7 +603,12 @@ local function mapType(from, to)
 		return true
 	end
 
-	return predicate
+	local function describe()
+		local map = TYPE_DESCRIPTION(from) .. " => " .. TYPE_DESCRIPTION(to)
+		return "{" .. map .. "}"
+	end
+
+	return {predicate = predicate, describe = describe}
 end
 
 -- RETURNS a type-predicate
@@ -588,16 +625,32 @@ local function choiceType(...)
 		return false
 	end
 
-	return predicate
+	local function describe()
+		local c = {}
+		for _, choice in ipairs(choices) do
+			table.insert(c, TYPE_DESCRIPTION(choice))
+		end
+		table.sort(c)
+
+		return "(" .. table.concat(c, " | ") .. ")"
+	end
+
+	return {predicate = predicate, describe = describe}
+end
+
+local function predicateType(f)
+	assert(isfunction(f), "f must be a function")
+
+	return {predicate = f, description = "<predicate>"}
 end
 
 -- Register the primitive types
-REGISTER_TYPE("object", isobject)
-REGISTER_TYPE("number", isnumber)
-REGISTER_TYPE("integer", isinteger)
-REGISTER_TYPE("string", isstring)
-REGISTER_TYPE("function", isfunction)
-REGISTER_TYPE("boolean", isboolean)
+REGISTER_TYPE("object", predicateType(isobject))
+REGISTER_TYPE("number", predicateType(isnumber))
+REGISTER_TYPE("integer", predicateType(isinteger))
+REGISTER_TYPE("string", predicateType(isstring))
+REGISTER_TYPE("function", predicateType(isfunction))
+REGISTER_TYPE("boolean", predicateType(isboolean))
 REGISTER_TYPE("nil", constantType(nil))
 
 -- Lexer -----------------------------------------------------------------------
@@ -1946,7 +1999,7 @@ local function semanticsSmol(sources, main)
 
 		-- RETURNS a Type+ with a fully-qualified name
 		local function typeFinder(t, scope)
-			assertis(scope, listType("TypeParameterIR"))
+			assertis(scope, listType(recordType {name = "string"}))
 
 			if t.tag == "concrete-type" then
 				-- Search for the type in `type`
@@ -2038,23 +2091,29 @@ local function semanticsSmol(sources, main)
 				map[parameter.name] = parameter
 			end
 
+			-- Create a type-scope
+			local typeScope = table.map(
+				function(x) return {name = x} end,
+				generics.parameters)
+			
+			-- Associate each constraint with a generic parameter
 			for _, constraintAST in ipairs(generics.constraints) do
-				local constraint = {
-					-- The syntactic generics.parameters is used here, since
-					-- it represents the final set of names,
-					-- which is all that typeFinder needs.
-					constraint = typeFinder(
-						constraintAST.constraint, generics.parameters),
-					location = constraintAST.location,
-				}
+				local constraint = typeFinder(
+					constraintAST.constraint, typeScope)
 
-				-- Add this constraint to the associated generic parameter
+				-- Check that the named parameter exists
 				local parameter = map[constraintAST.parameter]
 				if not parameter then
 					Report.UNKNOWN_GENERIC_USED(constraintAST.parameter)
 				end
-				table.insert(parameter.constraints, constraint)
+
+				-- Add this constraint to the associated generic parameter
+				table.insert(parameter.constraints, {
+					constraint = constraint,
+					location = constraintAST.location,
+				})
 			end
+
 			return list
 		end
 
