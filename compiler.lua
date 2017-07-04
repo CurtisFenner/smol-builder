@@ -862,8 +862,7 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				quit("The compiler could not recognize any token ", location,
-					" (near `" .. source:sub(1, 15) .. "...`)")
+				quit("The compiler could not recognize any token ", location)
 			end
 		end
 	end
