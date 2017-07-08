@@ -9,20 +9,20 @@ local INVOKATION = arg[0] .. " " .. table.concat(arg, ", ")
 
 local color = {}
 color.enabled = true or package.config:sub(1, 1) == "/"
-function color.format(text, format)
+function color._format(text, format)
 	if not color.enabled then
 		return text
 	end
 	return format:gsub("%[", "\27[") .. text .. "\27[0m"
 end
 function color.blue(text)
-	return color.format(text, "[34m[1m")
+	return color._format(text, "[34m[1m")
 end
 function color.red(text)
-	return color.format(text, "[31m[1m")
+	return color._format(text, "[31m[1m")
 end
 function color.cyan(text)
-	return color.format(text, "[36m[1m")
+	return color._format(text, "[36m[1m")
 end
 
 --------------------------------------------------------------------------------
@@ -190,8 +190,6 @@ local function quit(first, ...)
 	end
 end
 
-local debugPrint = function() end
-
 -- Prevent the use of global variables
 setmetatable(_G, {
 	__index = function(_, key)
@@ -284,6 +282,77 @@ function table.keys(t)
 		end
 	end
 	return out
+end
+
+-- RETURNS a new table with weak keys
+function table.weak()
+	return setmetatable({}, {__mode = "k"})
+end
+
+-- A map from immutable objects to booleans
+-- REQUIRES that all keys are immutable
+local IMMUTABLE_OBJECTS = table.weak()
+
+-- RETURNS (conservatively) whether or not `x` is immutable
+local function isImmutable(x)
+	-- Not-a-number does not count as immutable
+	if x ~= x then
+		return false
+	end
+
+	-- These core types are immutable
+	if type(x) == "number" or type(x) == "string" then
+		return true
+	elseif type(x) == "boolean" then
+		return true
+	end
+
+	-- Consult the set of immutable objects
+	return IMMUTABLE_OBJECTS[x] or false
+end
+
+-- RETURNS a function that behaves like `f`, 
+-- REQUIRES `f` take exactly `count` non-nil arguments
+-- REQUIRES `f` return only immutable objects
+local function memoized(count, f)
+	assert(isinteger(count), "count must be an integer")
+	assert(count >= 0, "count must be non-negative")
+	assert(isfunction(f), "f must be a function")
+
+	-- TODO: address leaking of saved return-values
+	local cache = table.weak()
+
+	return function(...)
+		local arguments = {...}
+
+		-- Check that the arguments are immutable
+		for i = 1, count do
+			if not isImmutable(arguments[i]) then
+				return f(...)
+			end
+		end
+
+		-- Search for the arguments in the cache
+		local c = cache
+		for i = 1, count-1 do
+			if c[arguments[i]] == nil then
+				c[arguments[i]] = table.weak()
+			end
+			c = c[arguments[i]]
+		end
+
+		-- Check the cache
+		local key = arguments[count]
+		local saved = c[key]
+		if saved then
+			return unpack(saved)
+		end
+
+		-- Add to the cache
+		saved = {f(...)}
+		c[key] = saved
+		return unpack(saved)
+	end
 end
 
 -- Redefine `pairs` to use `__pairs` metamethod
@@ -415,6 +484,7 @@ local function freeze(object)
 		return #object
 	end
 
+	IMMUTABLE_OBJECTS[out] = true
 	return out
 end
 
@@ -453,33 +523,38 @@ end
 
 -- Lua Type Specifications -----------------------------------------------------
 
-local _TYPE_SPECS = {}
+local _TYPE_SPEC_BY_NAME = {}
 
 -- RETURNS nothing
 local function REGISTER_TYPE(name, t)
 	assert(isstring(name), "name must be a string")
-	assert(not table.findwith(_TYPE_SPECS, "name", name),
+	assert(not _TYPE_SPEC_BY_NAME[name],
 		"Type `" .. name .. "` has already been defined")
 	assert(isobject(t))
 
-	table.insert(_TYPE_SPECS, {
-		name = name, predicate = t.predicate, description = name
-	})
+	_TYPE_SPEC_BY_NAME[name] = {predicate = t.predicate, description = name}
 end
 
 -- RETURNS a type predicate
-local function TYPE_PREDICATE(t)
-	if type(t) == "string" then
-		local found = table.findwith(_TYPE_SPECS, "name", t)
-		assert(found, "No type called `" .. t .. "` has been registered")
-		return found.predicate
+local function TYPE_PREDICATE(t)	
+	-- Search for the saved predicate
+	local p
+	local found = _TYPE_SPEC_BY_NAME[t]
+	if found then
+		p = found.predicate
+	else
+		assert(type(p) ~= "string", "unknown type name")
+		p = t.predicate
 	end
-	return t.predicate
-end
 
+	return memoized(1, p)
+end
+TYPE_PREDICATE = memoized(1, TYPE_PREDICATE)
+
+-- RETURNS a string representing the type `t`
 local function TYPE_DESCRIPTION(t)
 	if type(t) == "string" then
-		assert(table.findwith(_TYPE_SPECS, "name", t))
+		assert(_TYPE_SPEC_BY_NAME[t])
 		return t
 	end
 
@@ -896,7 +971,7 @@ local function lexSmol(source, filename)
 		end
 	end
 
-	return tokens
+	return freeze(tokens)
 end
 
 -- Stream ----------------------------------------------------------------------
@@ -910,7 +985,6 @@ REGISTER_TYPE("Token", recordType {
 -- REPRESENTS a streamable sequence of tokens
 local function Stream(list, offset)
 	offset = offset or 0
-	assert(type(list) == "table", "list must be table")
 	assert(isinteger(offset), "offset must be an integer")
 	assertis(list, listType "Token")
 
@@ -1133,7 +1207,6 @@ local function parseSmol(tokens)
 				return nil
 			end
 			if stream:head().lexeme == lexeme then
-				debugPrint("LEXEME", lexeme, stream:location())
 				return stream:head(), stream:rest()
 			end
 			return nil
