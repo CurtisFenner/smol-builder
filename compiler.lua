@@ -392,7 +392,7 @@ end
 -- (excluding references and non-serializable objects like functions)
 local show;
 do
-	local specialCharacterRepresentation = {
+	local specialRepresentation = {
 		["\a"] = [[\a]],
 		["\b"] = [[\b]],
 		["\f"] = [[\f]],
@@ -406,12 +406,12 @@ do
 	}
 	for i = 0, 31 do
 		local c = string.char(i)
-		if not specialCharacterRepresentation[c] then
-			specialCharacterRepresentation[c] = "\\" .. tostring(i):prepad("0", 3)
+		if not specialRepresentation[c] then
+			specialRepresentation[c] = "\\" .. tostring(i):prepad("0", 3)
 		end
 	end
 	for i = 128, 255 do
-		specialCharacterRepresentation[string.char(i)] = "\\" .. tostring(i)
+		specialRepresentation[string.char(i)] = "\\" .. tostring(i)
 	end
 
 	-- RETURNS nothing
@@ -421,17 +421,16 @@ do
 			-- Turn into a string literal
 			table.insert(out, [["]])
 			for character in object:gmatch "." do
-				table.insert(out,
-					specialCharacterRepresentation[character] or character)
+				table.insert(out, specialRepresentation[character] or character)
 			end
 			table.insert(out, [["]])
 		elseif isobject(object) then
 			table.insert(out, "{")
 			for key, value in pairs(object) do
-				table.insert(out, "\n" .. indent .. "\t[")
-				showAdd(key, indent .. "\t", out)
+				table.insert(out, "\n" .. string.rep("\t", indent) .. "\t[")
+				showAdd(key, indent + 1, out)
 				table.insert(out, "] = ")
-				showAdd(value, indent .. "\t", out)
+				showAdd(value, indent + 1, out)
 				table.insert(out, ",")
 			end
 			table.insert(out, "\n" .. indent .. "}")
@@ -444,15 +443,18 @@ do
 	-- (acyclic) Lua value
 	show = function(value)
 		local out = {}
-		showAdd(value, "", out)
+		showAdd(value, 0, out)
 		return table.concat(out)
 	end
 end
 
--- RETURNS a copy of `object` that cannot be modified, and that errors
--- when a non-existent key is read.
+-- RETURNS an immutable copy of `object` that errors when a non-existent key
+-- is read.
+-- REQUIRES all components are immutable, including functions
 local function freeze(object)
-	assert(isobject(object))
+	if not isobject(object) then
+		return object
+	end
 
 	local out = newproxy(true)
 	local metatable = getmetatable(out)
@@ -494,6 +496,11 @@ end
 
 -- Generic Helpers -------------------------------------------------------------
 
+-- RETURNS a function that accesses `property`
+function table.getter(property)
+	return function(object) return object[property] end
+end
+
 -- RETURNS a frozen version of `object` such that accesses to key `key`
 -- produce `newValue` instead of referring to `object`'s definition
 function table.with(object, key, newValue)
@@ -517,6 +524,7 @@ function table.map(f, list, ...)
 	return out
 end
 
+-- RETURNS an element of `list` such that `return[property] == value`
 function table.findwith(list, property, value)
 	for _, element in ipairs(list) do
 		if element[property] == value then
@@ -765,6 +773,47 @@ local function predicateType(f)
 	return freeze {predicate = f, describe = describe}
 end
 predicateType = memoized(1, predicateType)
+
+-- RETURNS a type-predicate
+local function nullableType(t)
+	assert(t)
+
+	return choiceType(constantType(nil), t)
+end
+nullableType = memoized(1, nullableType)
+
+-- RETURNS a type-predicate
+local function tupleType(...)
+	local ts = {...}
+
+	local function predicate(value)
+		if not isobject(value) then
+			return false
+		end
+
+		if #value ~= #ts then
+			return false
+		end
+		
+		for i = 1, #ts do
+			if not TYPE_PREDICATE(ts[i])(value[i]) then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	local function describe()
+		local s = {}
+		for _, t in ipairs(ts) do
+			table.insert(s, TYPE_DESCRIPTION(t))
+		end
+		return "(" .. table.concat(s, ", ") .. ")"
+	end
+
+	return freeze {predicate = predicate, describe = describe}
+end
 
 --------------------------------------------------------------------------------
 
@@ -1035,187 +1084,192 @@ end
 
 -- Parser ----------------------------------------------------------------------
 
-local function parseSmol(tokens)
-	local stream = Stream(tokens)
+REGISTER_TYPE("Parser", predicateType(isfunction))
 
-	-- PARSER for a sequence of 0 or more `object`s separated by nothing
-	local function zeroOrMore(object)
-		assert(type(object) == "function")
+local parser = {}
 
-		return function(stream, parsers)
-			assert(parsers)
+-- RETURNS a parser for a sequence of 0 or more `object`s
+-- REQUIRES `object` is a parser
+function parser.zeroOrMore(object)
+	assertis(object, "Parser")
 
-			local list = {}
-			while true do
-				local element, rest = object(stream, parsers)
-				if not rest then
-					-- no more elements can be parsed
-					return list, stream
-				end
+	return function(stream, grammar)
+		assert(grammar)
 
-				-- add the element to the list
-				table.insert(list, element)
-				stream = rest
-			end
-		end
-	end
-
-	-- PARSER for `parser` but applying `f` to the returned object
-	local function parserMap(parser, f)
-		assert(type(parser) == "function")
-		assert(type(f) == "function")
-		return function(stream, parsers)
-			assert(parsers)
-			local object, rest = parser(stream, parsers)
+		local list = {}
+		while true do
+			local element, rest = object(stream, grammar)
 			if not rest then
-				return nil
+				return list, stream
 			end
-
-			local out = f(object)
-			assert(out ~= nil)
-			if isobject(out) then
-				out = table.with(out, "location", stream:location())
-			end
-			return out, rest
+			
+			table.insert(list, element)
+			stream = rest
 		end
 	end
+end
 
-	-- PARSER for `parser` but only extracting `field`
-	local function parserExtractor(parser, ...)
-		local fields = {...}
-		assertis(fields, listType "string")
-		assert(1 <= #fields)
+-- RETURNS a parser of Bs
+-- REQUIRES `p` is a parser of As
+-- REQUIRES `f` is a map from As to Bs
+function parser.map(parser, f)
+	assertis(parser, "Parser")
+	assertis(f, "function")
 
-		return parserMap(parser, function(x)
-			for _, field in ipairs(fields) do
-				x = x[field]
-			end
-			return x
-		end)
-	end
+	return function(stream, grammar)
+		assert(grammar)
 
-	-- PARSER for trying each option in order upon failure
-	local function choice(options)
-		assert(type(options) == "table")
-		assert(#options >= 1)
-		for i = 1, #options do
-			assert(type(options[i]) == "function",
-				"option " .. i .. " must be a parser")
-		end
-
-		return function(stream, parsers)
-			assert(parsers)
-
-			for _, option in ipairs(options) do
-				local element, rest = option(stream, parsers)
-				if rest then
-					return element, rest
-				end
-			end
+		local object, rest = parser(stream, grammar)
+		if not rest then
 			return nil
 		end
+
+		local out = f(object)
+		assert(out ~= nil)
+
+		if isobject(out) then
+			out = table.with(out, "location", stream:location())
+		end
+		return out, rest
 	end
+end
 
-	-- PARSERS a sequence of members into a dictionary
-	-- INVALIDATES `components` input table
-	local function composite(components)
-		-- validate input
-		assert(type(components) == "table")
-		assert(isstring(components.tag), "components.tag must be string")
+-- RETURNS a parser
+function parser.choice(options)
+	assertis(options, listType "Parser")
+	assert(#options >= 1)
 
-		-- A human readable context of the fields
-		local contextMiddle = " in " .. components.tag
-		local contextBegin = " to begin " .. components.tag
-		local contextFinish = " to finish " .. components.tag
+	return function(stream, grammar)
+		assert(grammar)
 
-		for i = 1, #components do
-			assert(#components[i] >= 2)
-			assert(isstring(components[i][1]),
-				"component must provide key as string")
-			assert(components[i][1] ~= "tag",
-				"component cannot use key 'tag'")
-			assert(components[i][1] ~= "location",
-				"component cannot use key 'location'")
-
-			assert(type(components[i][2]) == "function",
-				"component must provide member as parser"
-				.. " (key `" .. components[i][1] .. "`"
-				.. "; " .. i .. " of " .. #components ..  ")")
-
-			assert(#components[i] <= 3)
-			assert(components[i][3] == nil or isstring(components[i][3]))
+		for _, option in ipairs(options) do
+			local element, rest = option(stream, grammar)
+			if rest then
+				return element, rest
+			end
 		end
 
-		return function(stream, parsers)
-			-- Annotate metadata
-			local object = {
-				tag = components.tag,
-				location = stream:location(),
-			}
+		return nil
+	end
+end
 
-			-- Parse fields in sequence
-			for i, component in ipairs(components) do
-				-- Attempt to parse one field
-				local key = component[1]
-				local memberParser = component[2]
-				local required = component[3]
+-- CONVENIENCE This is implemented in terms of sequence, option, and map
+-- RETURNS a parser for a record type
+function parser.composite(components)
+	-- validate input
+	assertis(components, "object")
+	assertis(components.tag, "string")
 
-				local member, rest = memberParser(stream, parsers)
+	-- A human readable context of the fields
+	local contextMiddle = " in " .. components.tag
+	local contextBegin = " to begin " .. components.tag
+	local contextFinish = " to finish " .. components.tag
 
-				if rest then
-					-- Attach (non-underscore) field to object
-					if key ~= "_" then
-						object[key] = member
-					end
-					stream = rest
-				elseif required then
-					-- This member was a required cut; report an error with
-					-- the input
-					local context = contextMiddle
-					if i == 1 then
-						context = contextBegin
-					elseif i == #components then
-						context = contextFinish
-					end
-					quit("The compiler expected ", required, context,
-						" ", stream:location())
-				else
-					-- This failed to parse
-					return nil
+	for i = 1, #components do
+		assert(#components[i] >= 2)
+		assert(isstring(components[i][1]),
+			"component must provide key as string")
+		assert(components[i][1] ~= "tag",
+			"component cannot use key 'tag'")
+		assert(components[i][1] ~= "location",
+			"component cannot use key 'location'")
+
+		assert(type(components[i][2]) == "function",
+			"component must provide member as parser"
+			.. " (key `" .. components[i][1] .. "`"
+			.. "; " .. i .. " of " .. #components ..  ")")
+
+		assert(#components[i] <= 3)
+		assert(components[i][3] == nil or isstring(components[i][3]))
+	end
+
+	return function(stream, parsers)
+		-- Annotate metadata
+		local object = {
+			tag = components.tag,
+			location = stream:location(),
+		}
+
+		local extracts = {}
+
+		-- Parse fields in sequence
+		for i, component in ipairs(components) do
+			-- Attempt to parse one field
+			local key = component[1]
+			local memberParser = component[2]
+			local required = component[3]
+
+			if key:sub(1, 1) == "#" then
+				table.insert(extracts, key)
+			end
+
+			local member, rest = memberParser(stream, parsers)
+
+			if rest then
+				-- Attach (non-underscore) field to object
+				if key ~= "_" then
+					object[key] = member
 				end
+				stream = rest
+			elseif required then
+				-- This member was a required cut; report an error with
+				-- the input
+				local context = contextMiddle
+				if i == 1 then
+					context = contextBegin
+				elseif i == #components then
+					context = contextFinish
+				end
+				quit("The compiler expected ", required, context,
+					" ", stream:location())
+			else
+				-- This failed to parse
+				return nil
 			end
-
-			-- Successfully parsed all components
-			return freeze(object), stream
 		end
-	end
 
-	-- PARSER for `object` or <nothing>
-	local function optional(object)
-		assert(type(object) == "function")
-
-		return function(stream, parsers)
-			assert(parsers)
-
-			local element, rest = object(stream, parsers)
-			if not rest then
-				return false, stream
-			end
-			return element, rest
+		assert(#extracts <= 1)
+		if #extracts == 1 then
+			object = object[extracts[1]]
 		end
+
+		-- Successfully parsed all components
+		return freeze(object), stream
 	end
+end
 
-	-- PARSER for `name` grammar
-	local function G(name)
-		assert(type(name) == "string", "name must be string")
+-- RETURNS a parser for `object` or false
+function parser.optional(object)
+	assertis(object, "Parser")
 
-		return function(stream, parsers)
-			assert(parsers)
-			assert(parsers[name], "parser for `" .. name .. "` must be defined")
+	return function(stream, grammar)
+		assert(grammar)
 
-			return parsers[name](stream, parsers)
+		local element, rest = object(stream, grammar)
+		if not rest then
+			return false, stream
 		end
+
+		return element, rest
 	end
+end
+
+-- RETURNS a parser for the type named `name`
+function parser.named(name)
+	assertis(name, "string")
+
+	return function(stream, grammar)
+		assert(grammar)
+		assert(grammar[name], "a parser for `" .. name .. "` must be defined")
+
+		return grammar[name](stream, grammar)
+	end
+end
+
+-- Parsing Smol ----------------------------------------------------------------
+
+local function parseSmol(tokens)
+	local stream = Stream(tokens)
 
 	-- PARSER for literal lexeme (keywords, punctuation, etc.)
 	local function LEXEME(lexeme)
@@ -1350,106 +1404,109 @@ local function parseSmol(tokens)
 
 	local function parserOtherwise(p, value)
 		assert(type(p) == "function")
-		return parserMap(p, function(x) return x or value end)
+		return parser.map(p, function(x) return x or value end)
 	end
 
 	-- DEFINES the grammar for the language
 	local parsers = {
 		-- Represents an entire source file
-		["source"] = composite {
+		["source"] = parser.composite {
 			tag = "source",
-			{"package", G "package", "a package definition"}, --: string
-			{"imports", zeroOrMore(G "import")},
-			{"definitions", zeroOrMore(G "definition")},
+			{"package", parser.named "package", "a package definition"}, --: string
+			{"imports", parser.zeroOrMore(parser.named "import")},
+			{"definitions", parser.zeroOrMore(parser.named "definition")},
 		},
 
 		-- Represents a package declaration
-		["package"] = parserExtractor(composite {
+		["package"] = parser.composite {
 			tag = "***package",
 			{"_", K_PACKAGE},
-			{"name", T_IDENTIFIER, "an identifier"},
+			{"#name", T_IDENTIFIER, "an identifier"},
 			{"_", K_SEMICOLON, "`;` to finish package declaration"},
-		}, "name"),
+		},
 
 		-- Represents an import
-		["import"] = composite {
+		["import"] = parser.composite {
 			tag = "import",
 			{"_", K_IMPORT},
 			{"package", T_IDENTIFIER, "an imported package name"},
-			{"class", optional(parserExtractor(composite { -- string | false
-				tag = "***type name",
-				{"_", K_SCOPE},
-				{"class", T_TYPENAME, "a type name"},
-			}, "class"))},
+			{
+				"class", -- string | false
+				parser.optional(parser.composite {
+					tag = "***type name",
+					{"_", K_SCOPE},
+					{"#class", T_TYPENAME, "a type name"},
+				})
+			},
 			{"_", K_SEMICOLON, "`;` after import"},
 		},
 
 		-- Represents a top-level definition
-		["definition"] = choice {
-			G "class-definition",
-			G "union-definition",
-			G "interface-definition",
+		["definition"] = parser.choice {
+			parser.named "class-definition",
+			parser.named "union-definition",
+			parser.named "interface-definition",
 		},
 
 		-- Represents a class
-		["class-definition"] = composite {
+		["class-definition"] = parser.composite {
 			tag = "class-definition",
-			{"foreign", optional(K_FOREIGN)},
+			{"foreign", parser.optional(K_FOREIGN)},
 			{"_", K_CLASS},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(optional(G "generics"), {
+			{"generics", parserOtherwise(parser.optional(parser.named "generics"), {
 				parameters = {},
 				constraints = {},
 			})},
-			{"implements", parserOtherwise(optional(G "implements"), {})},
+			{"implements", parserOtherwise(parser.optional(parser.named "implements"), {})},
 			{"_", K_CURLY_OPEN, "`{` to begin class body"},
-			{"fields", zeroOrMore(G "field-definition")},
-			{"methods", zeroOrMore(G "method-definition")},
+			{"fields", parser.zeroOrMore(parser.named "field-definition")},
+			{"methods", parser.zeroOrMore(parser.named "method-definition")},
 			{"_", K_CURLY_CLOSE, "`}`"},
 		},
-		["implements"] = parserExtractor(composite {
+		["implements"] = parser.composite {
 			tag = "***implements",
 			{"_", K_IS},
 			{
-				"interfaces",
-				commad(G "concrete-type", "1+", "an interface name"),
+				"#interfaces",
+				commad(parser.named "concrete-type", "1+", "an interface name"),
 				"one or more interface names",
 			},
-		}, "interfaces"),
+		},
 
 		-- Represents a union
-		["union-definition"] = composite {
+		["union-definition"] = parser.composite {
 			tag = "union-definition",
 			{"_", K_UNION},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(optional(G "generics"), {
+			{"generics", parserOtherwise(parser.optional(parser.named "generics"), {
 				parameters = {},
 				constraints = {},
 			})},
 			-- TODO: do unions actually allow implements?
-			{"implements", parserOtherwise(optional(G "implements"), {})},
+			{"implements", parserOtherwise(parser.optional(parser.named "implements"), {})},
 			{"_", K_CURLY_OPEN, "`{` to begin union body"},
-			{"fields", zeroOrMore(G "field-definition")},
-			{"methods", zeroOrMore(G "method-definition")},
+			{"fields", parser.zeroOrMore(parser.named "field-definition")},
+			{"methods", parser.zeroOrMore(parser.named "method-definition")},
 			{"_", K_CURLY_CLOSE, "`}`"},
 		},
 
 		-- Represents an interface
-		["interface-definition"] = composite {
+		["interface-definition"] = parser.composite {
 			tag = "interface-definition",
 			{"_", K_INTERFACE},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(optional(G "generics"), {
+			{"generics", parserOtherwise(parser.optional(parser.named "generics"), {
 				parameters = {},
 				constraints = {},
 			})},
 			{"_", K_CURLY_OPEN, "`{` to begin interface body"},
-			{"signatures", zeroOrMore(G "interface-signature")},
+			{"signatures", parser.zeroOrMore(parser.named "interface-signature")},
 			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
 		},
 
 		-- Represents a generics definition
-		["generics"] = composite {
+		["generics"] = parser.composite {
 			tag = "generics",
 			{"_", K_SQUARE_OPEN},
 			{
@@ -1459,30 +1516,30 @@ local function parseSmol(tokens)
 			},
 			{
 				"constraints",
-				parserOtherwise(optional(G "generic-constraints"), {})
+				parserOtherwise(parser.optional(parser.named "generic-constraints"), {})
 			},
 			{"_", K_SQUARE_CLOSE, "`]` to end list of generics"},
 		},
 
-		["generic-constraints"] = parserExtractor(composite {
+		["generic-constraints"] = parser.composite {
 			tag = "***",
 			{"_", K_PIPE},
 			{
-				"constraints",
-				commad(G "generic-constraint", "1+", "generic constraint"),
+				"#constraints",
+				commad(parser.named "generic-constraint", "1+", "generic constraint"),
 				"generic constraints"
 			},
-		}, "constraints"),
+		},
 
-		["generic-constraint"] = composite {
+		["generic-constraint"] = parser.composite {
 			tag = "constraint",
 			{"parameter", T_GENERIC},
 			{"_", K_IS, "`is` after generic parameter"},
-			{"constraint", G "concrete-type", "a type constrain after `is`"},
+			{"constraint", parser.named "concrete-type", "a type constrain after `is`"},
 		},
 
 		-- Represents a smol Type
-		["type"] = choice {
+		["type"] = parser.choice {
 			-- Built in special types
 			K_STRING,
 			K_NUMBER,
@@ -1490,149 +1547,149 @@ local function parseSmol(tokens)
 			K_UNIT,
 			K_NEVER,
 			-- User defined types
-			parserMap(T_GENERIC, function(x)
+			parser.map(T_GENERIC, function(x)
 				return {tag = "generic", name = x, location = "???"}
 			end),
-			G "concrete-type",
+			parser.named "concrete-type",
 		},
 
-		["concrete-type"] = composite {
+		["concrete-type"] = parser.composite {
 			tag = "concrete-type",
 			{
 				"package", --: string | false
-				optional(G "package-scope"),
+				parser.optional(parser.named "package-scope"),
 			},
 			{"base", T_TYPENAME}, --: string
 			{
 				"arguments",
-				parserOtherwise(optional(G "type-arguments"), freeze {})
+				parserOtherwise(parser.optional(parser.named "type-arguments"), freeze {})
 			}, --: [ Type ]
 		},
 
-		["package-scope"] = parserExtractor(composite {
+		["package-scope"] = parser.composite {
 			tag = "***package-scope",
-			{"name", T_IDENTIFIER},
+			{"#name", T_IDENTIFIER},
 			{"_", K_SCOPE},
-		}, "name"),
+		},
 
-		["type-arguments"] = parserExtractor(composite {
+		["type-arguments"] = parser.composite {
 			tag = "***",
 			{"_", K_SQUARE_OPEN},
 			{
-				"arguments",
-				commad(G "type", "1+", "type argument"),
+				"#arguments",
+				commad(parser.named "type", "1+", "type argument"),
 				"type arguments"
 			},
 			{"_", K_SQUARE_CLOSE, "`]`"},
-		}, "arguments"),
+		},
 
-		["field-definition"] = composite {
+		["field-definition"] = parser.composite {
 			tag = "field-definition",
 			{"_", K_VAR},
 			{"name", T_IDENTIFIER, "the field's name after `var`"},
-			{"type", G "type", "the field's type after field name"},
+			{"type", parser.named "type", "the field's type after field name"},
 			{"_", K_SEMICOLON, "`;` after field type"},
 		},
 
-		["method-definition"] = composite {
+		["method-definition"] = parser.composite {
 			tag = "method-definition",
-			{"signature", G "signature"},
-			{"body", G "block", "a method body"},
+			{"signature", parser.named "signature"},
+			{"body", parser.named "block", "a method body"},
 		},
 
-		["interface-signature"] = parserExtractor(composite {
+		["interface-signature"] = parser.composite {
 			tag = "***signature",
-			{"signature", G "signature"},
+			{"#signature", parser.named "signature"},
 			{"_", K_SEMICOLON, "`;` after interface method"},
-		}, "signature"),
+		},
 
 		-- Represents a function signature, including name, scope,
 		-- parameters, and return type.
-		["signature"] = composite {
+		["signature"] = parser.composite {
 			tag = "signature",
-			{"foreign", optional(K_FOREIGN)},
-			{"modifier", G "method-modifier"},
+			{"foreign", parser.optional(K_FOREIGN)},
+			{"modifier", parser.named "method-modifier"},
 			{"name", T_IDENTIFIER, "a method name"},
 			{"_", K_ROUND_OPEN, "`(` after method name"},
-			{"parameters", commad(G "variable", "0+", "a parameter")},
+			{"parameters", commad(parser.named "variable", "0+", "a parameter")},
 			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
 			{
 				"returnTypes",
-				commad(G "type", "1+", "a return type"),
+				commad(parser.named "type", "1+", "a return type"),
 				"a return type"
 			},
 		},
 
-		["method-modifier"] = choice {
+		["method-modifier"] = parser.choice {
 			K_METHOD,
 			K_STATIC,
 		},
 
 		-- Represents a smol statement / control structure
-		["statement"] = choice {
-			G "return-statement",
-			G "do-statement",
-			G "var-statement",
-			G "assign-statement",
+		["statement"] = parser.choice {
+			parser.named "return-statement",
+			parser.named "do-statement",
+			parser.named "var-statement",
+			parser.named "assign-statement",
 		},
 
-		["block"] = composite {
+		["block"] = parser.composite {
 			tag = "block",
 			{"_", K_CURLY_OPEN},
-			{"statements", zeroOrMore(G "statement")},
+			{"statements", parser.zeroOrMore(parser.named "statement")},
 			{"_", K_CURLY_CLOSE, "`}` to end statement block"},
 		},
 
-		["variable"] = composite {
+		["variable"] = parser.composite {
 			tag = "variable",
 			{"name", T_IDENTIFIER},
-			{"type", G "type", "a type after variable name"},
+			{"type", parser.named "type", "a type after variable name"},
 		},
 
-		["return-statement"] = composite {
+		["return-statement"] = parser.composite {
 			tag = "return-statement",
 			{"_", K_RETURN},
-			{"values", commad(G "expression", "0+", "an expression to return")},
+			{"values", commad(parser.named "expression", "0+", "an expression to return")},
 			{"_", K_SEMICOLON, "`;` to end return-statement"},
 		},
 
-		["do-statement"] = composite {
+		["do-statement"] = parser.composite {
 			tag = "do-statement",
 			{"_", K_DO},
 			{
 				"expression",
-				G "expression",
+				parser.named "expression",
 				"an expression to execute after `do`"
 			},
 			{"_", K_SEMICOLON, "`;` to end do-statement"},
 		},
 
-		["assign-statement"] = composite {
+		["assign-statement"] = parser.composite {
 			tag = "assign-statement",
-			{"variables", commad(G "expression", "1+", "a variable")},
+			{"variables", commad(parser.named "expression", "1+", "a variable")},
 			{"_", K_EQUAL, "`=` after variable"},
-			{"value", G "expression", "an expression after `=`"},
+			{"value", parser.named "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end assign-statement"},
 		},
 
-		["var-statement"] = composite {
+		["var-statement"] = parser.composite {
 			tag = "var-statement",
 			{"_", K_VAR},
 			{
 				"variables",
-				commad(G "variable", "1+", "a variable"),
+				commad(parser.named "variable", "1+", "a variable"),
 				"one or more variables",
 			},
 			{"_", K_EQUAL, "`=` after the variable in the var-statement"},
-			{"value", G "expression", "an expression after `=`"},
+			{"value", parser.named "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end var-statement"},
 		},
 
 		-- Expressions!
-		["expression"] = parserMap(composite {
+		["expression"] = parser.map(parser.composite {
 			tag = "***expression",
-			{"base", G "atom"},
-			{"operations", zeroOrMore(G "operation")},
+			{"base", parser.named "atom"},
+			{"operations", parser.zeroOrMore(parser.named "operation")},
 		}, function(x)
 			-- XXX: no precedence yet; assume left-associative
 			local out = x.base
@@ -1655,34 +1712,34 @@ local function parseSmol(tokens)
 			return out
 		end),
 
-		["operation"] = composite {
+		["operation"] = parser.composite {
 			tag = "***operation",
 			{"operator", T_OPERATOR},
-			{"operand", G "atom", "atom after operator"},
+			{"operand", parser.named "atom", "atom after operator"},
 		},
 
-		["new-expression"] = composite {
+		["new-expression"] = parser.composite {
 			tag = "new-expression",
 			{"_", K_NEW},
 			{"_", K_ROUND_OPEN, "`(` after `new`"},
 			{
 				"arguments",
-				commad(G "named-argument", "0+", "a constructor argument")
+				commad(parser.named "named-argument", "0+", "a constructor argument")
 			},
 			{"_", K_ROUND_CLOSE, "`)` to end `new` expression"},
 		},
 
-		["named-argument"] = composite {
+		["named-argument"] = parser.composite {
 			tag = "named-argument",
 			{"name", T_IDENTIFIER},
 			{"_", K_EQUAL},
-			{"value", G "expression", "an expression after `=`"},
+			{"value", parser.named "expression", "an expression after `=`"},
 		},
 
-		["atom"] = parserMap(composite {
+		["atom"] = parser.map(parser.composite {
 			tag = "***atom",
-			{"base", G "atom-base"},
-			{"accesses", zeroOrMore(G "access")},
+			{"base", parser.named "atom-base"},
+			{"accesses", parser.zeroOrMore(parser.named "access")},
 		}, function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
@@ -1691,22 +1748,22 @@ local function parseSmol(tokens)
 			return out
 		end),
 
-		["access"] = parserMap(composite {
+		["access"] = parser.map(parser.composite {
 			tag = "***access",
 			{"_", K_DOT},
 			{"name", T_IDENTIFIER, "a method/field name"},
 			-- N.B.: Optional, since a field access is also possible...
-			{"call", optional(composite{
+			{"arguments", parser.optional(parser.composite{
 				tag = "***arguments",
 				{"_", K_ROUND_OPEN},
-				{"arguments", commad(G "expression", "0+", "an expression")},
+				{"#arguments", commad(parser.named "expression", "0+", "an expression")},
 				{"_", K_ROUND_CLOSE, "`)` to end"},
 			})},
 		}, function(x)
-			if x.call then
+			if x.arguments then
 				return {
 					tag = "method-call",
-					arguments = x.call.arguments,
+					arguments = x.arguments,
 					func = x.name, --: string
 					location = x.location,
 				}
@@ -1718,33 +1775,33 @@ local function parseSmol(tokens)
 			}
 		end),
 
-		["atom-base"] = choice {
-			G "new-expression",
+		["atom-base"] = parser.choice {
+			parser.named "new-expression",
 			K_THIS,
-			parserMap(T_STRING_LITERAL, function(v)
+			parser.map(T_STRING_LITERAL, function(v)
 				return {tag = "string-literal", value = v}
 			end),
-			parserMap(T_INTEGER_LITERAL, function(v)
+			parser.map(T_INTEGER_LITERAL, function(v)
 				return {tag = "number-literal", value = v}
 			end),
-			composite { -- static method call
+			parser.composite { -- static method call
 				tag = "static-call",
-				{"base-type", G "type"},
+				{"base-type", parser.named "type"},
 				{"_", K_DOT, "`.` after type name"},
 				{"name", T_IDENTIFIER, "a static method's name"},
 				{"_", K_ROUND_OPEN, "`(` after static method name"},
-				{"arguments", commad(G "expression", "0+", "an expression")},
+				{"arguments", commad(parser.named "expression", "0+", "an expression")},
 				{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 			},
-			parserMap(T_IDENTIFIER, function(n)
+			parser.map(T_IDENTIFIER, function(n)
 				return {tag = "identifier", name = n}
 			end),
-			parserExtractor(composite {
+			parser.composite {
 				tag = "***parenthesized expression",
 				{"_", K_ROUND_OPEN},
-				{"expression", G "expression", "expression"},
+				{"#expression", parser.named "expression", "expression"},
 				{"_", K_ROUND_CLOSE, "`)`"},
-			}, "expression"),
+			},
 		},
 	}
 
