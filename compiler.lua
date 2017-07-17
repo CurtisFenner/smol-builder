@@ -496,6 +496,11 @@ end
 
 -- Generic Helpers -------------------------------------------------------------
 
+-- RETURNS the last element of a list
+function table.last(list)
+	return list[#list]
+end
+
 -- RETURNS a function that accesses `property`
 function table.getter(property)
 	return function(object) return object[property] end
@@ -1352,7 +1357,7 @@ end
 
 -- CONVENIENCE METHOD in terms of the other parsers
 -- RETURNS a parser
-function parser.query(query)
+function parser.query(query, tag)
 	local function describe(query)
 		-- TODO
 		return "(" .. query .. ")"
@@ -1386,10 +1391,80 @@ function parser.query(query)
 			return parser.token(function(token)
 				return token.type == query:lower()
 			end)
+		end
+		error("unrecognized parser-query `" .. query .. "`")
+	end
+
+	-- Separate into (whitespace separated) tokens
+	local sequence = {}
+	for token in query:gmatch("%S+") do
+		if token:sub(1, 1) == "(" then
+			local tag = token:sub(2)
+			assert(tag ~= "")
+			table.insert(sequence, {parent = sequence, tag = tag})
+			sequence = table.last(sequence)
+		elseif token == ")" then
+			sequence = sequence.parent
+			assert(sequence, "too many `)`")
 		else
-			error("unrecognized parser-query `" .. query .. "`")
+			table.insert(sequence, token)
 		end
 	end
+	assert(not sequence.parent, "too many `(`")
+
+	-- Parse individual tokens
+	local stack = {}
+	local modifierStack = {}
+	for _, element in ipairs(sequence) do
+		assert(#stack == #modifierStack)
+
+		if type(element) == "string" then
+			local modifiers = table.last(modifierStack)
+
+			-- Process special modifiers
+			if element:sub(1, 1) == "." then
+				-- Extract a field
+				local accessor = table.getter(element:sub(2))
+				table.insert(stack, parser.map(table.remove(stack), accessor))
+			elseif element:sub(1, 1) == "=" then
+				-- Name a field
+				modifiers["="] = element:sub(2)
+			elseif element:sub(1, 1) == "!" then
+				-- Require a field
+				modifiers["!"] = element:sub(2):gsub("_", " ")
+			else
+				local newModifiers = {}
+				if element:sub(1, 1) == "`" then
+					newModifiers["="] = "_"
+				end
+				table.insert(stack, parser.query(element))
+				table.insert(modifierStack, newModifiers)
+			end
+		else
+			assert(#element >= 2, "unnecessary parenthesis")
+
+			local serialized = table.concat(element, " ")
+			table.insert(stack, parser.query(serialized, element.tag))
+			table.insert(modifierStack, {})
+		end
+	end
+
+	if #stack == 1 then
+		return stack[1]
+	end
+
+	assertis(tag, "string")
+	local components = {tag = tag}
+	for i = 1, #stack do
+		local field = modifierStack[i]["="]
+		table.insert(components, {
+			modifierStack[i]["="],
+			stack[i],
+			modifierStack[i]["!"],
+		})
+	end
+
+	return parser.composite(components)
 end
 
 -- Parsing Smol ----------------------------------------------------------------
@@ -1476,12 +1551,11 @@ local function parseSmol(tokens)
 	-- DEFINES the grammar for the language
 	local parsers = {
 		-- Represents an entire source file
-		["source"] = parser.composite {
-			tag = "source",
-			{"package", parser.named "package", "a package definition"}, --: string
-			{"imports", parser.query "import*"},
-			{"definitions", parser.query "definition*"},
-		},
+		["source"] = parser.query [[(source
+			package =package !a_package_definition
+			import* =imports
+			definition* =definitions
+		)]],
 
 		-- Represents a package declaration
 		["package"] = parser.composite {
