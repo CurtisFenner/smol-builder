@@ -1254,6 +1254,70 @@ function parser.optional(object)
 	end
 end
 
+-- HELPER parsing `object` repeated several times, delimited by `delimiter`
+-- count: "N+" means "N or more things", N >= 0.
+function parser.delimited(object, count, delimiter, expected)
+	assert(type(object) == "function", "object must be function")
+	assert(type(expected) == "string", "expected must be string")
+	assert(type(count) == "string", "count format must be string")
+	assert(type(count) == "string", "count format must be string")
+	local minCount = 0
+	local maxCount = math.huge
+	local matchAtLeast = count:match "^(%d+)%+$"
+	if matchAtLeast then
+		minCount = tonumber(matchAtLeast)
+	else
+		error("unknown delimited'd count pattern `" .. count .. "`")
+	end
+
+	local delimiterParser = parser.token(function(token)
+		if token.lexeme == delimiter then
+			return token
+		end
+	end)
+
+	return function(stream, grammar)
+		assert(grammar)
+
+		-- Consume the first element of the list
+		local first, rest = object(stream, grammar)
+		if not rest then
+			if minCount <= 0 and 0 <= maxCount then
+				return {}, stream
+			end
+			return nil
+		end
+		stream = rest
+
+		local list = {first}
+		while true do
+			-- Consume a delimiter
+			local _, rest = delimiterParser(stream, grammar)
+			if not rest then
+				if minCount <= #list and #list <= maxCount then
+					return list, stream
+				end
+				return nil
+			end
+
+			stream = rest
+
+			-- Consume an object
+			local element, rest = object(stream, grammar)
+			if not rest then
+				-- After a delimiter, an object of the proper
+				-- type must follow
+				quit("The compiler expected ", expected,
+					" after `" .. delimiter .. "` ",
+					stream:location())
+			end
+
+			table.insert(list, element)
+			stream = rest
+		end
+	end
+end
+
 -- RETURNS a parser for the type named `name`
 function parser.named(name)
 	assertis(name, "string")
@@ -1266,6 +1330,68 @@ function parser.named(name)
 	end
 end
 
+-- RETURNS a Parser[T]
+-- predicate: Token => T
+function parser.token(predicate)
+	assertis(predicate, "function")
+
+	return function(stream, grammar)
+		assert(stream)
+		assert(grammar)
+
+		if stream:size() == 0 then
+			return nil
+		end
+
+		local object = predicate(stream:head())
+		if object ~= nil then
+			return object, stream:rest()
+		end
+	end
+end
+
+-- CONVENIENCE METHOD in terms of the other parsers
+-- RETURNS a parser
+function parser.query(query)
+	local function describe(query)
+		-- TODO
+		return "(" .. query .. ")"
+	end
+
+	if not query:find("%s") then
+		if query:sub(-1) == "`" then
+			-- Lexeme literal
+			assert(query:sub(1, 1) == "`")
+			return parser.token(function(token)
+				if token.lexeme == query:sub(2, -2) then
+					return token
+				end
+			end)
+		elseif query:sub(-1) == "?" then
+			-- Optional
+			return parser.optional(parser.query(query:sub(1, -2)))
+		elseif query:sub(-1) == "*" then
+			-- Kleene star
+			return parser.zeroOrMore(parser.query(query:sub(1, -2)))
+		elseif query:match "%A%d%+$" then
+			-- Delimited
+			local before, delimiter, count = query:match "^(.+)(%A+)(%d+%+)$"
+			return parser.delimited(parser.query(before), count, delimiter,
+				describe(before))
+		elseif query == query:lower() then
+			-- Named
+			return parser.named(query)
+		elseif query == query:upper() then
+			-- Token type
+			return parser.token(function(token)
+				return token.type == query:lower()
+			end)
+		else
+			error("unrecognized parser-query `" .. query .. "`")
+		end
+	end
+end
+
 -- Parsing Smol ----------------------------------------------------------------
 
 local function parseSmol(tokens)
@@ -1275,18 +1401,14 @@ local function parseSmol(tokens)
 	local function LEXEME(lexeme)
 		assert(type(lexeme) == "string", "lexeme must be string")
 
-		return function(stream, parsers)
-			assert(stream, "stream!")
-			assert(parsers, "parsers!")
-			if stream:size() == 0 then
-				return nil
+		return parser.token(function(token)
+			assert(type(token.lexeme) == "string")
+			if token.lexeme == lexeme then
+				return token
 			end
-			if stream:head().lexeme == lexeme then
-				return stream:head(), stream:rest()
-			end
-			return nil
-		end
+		end)
 	end
+
 	local K_COMMA = LEXEME ","
 	local K_SEMICOLON = LEXEME ";"
 	local K_PIPE = LEXEME "|"
@@ -1346,62 +1468,6 @@ local function parseSmol(tokens)
 	local T_STRING_LITERAL = TOKEN("string-literal", "value")
 	local T_OPERATOR = TOKEN("operator", "lexeme")
 
-	-- HELPER meaning object repeated several times,
-	-- separated by commas.
-	-- count: "N+" means "N or more things", N >= 0.
-	local function commad(object, count, expected)
-		assert(type(object) == "function", "object must be function")
-		assert(type(expected) == "string", "expected must be string")
-		assert(type(count) == "string", "count format must be string")
-		assert(type(count) == "string", "count format must be string")
-		local minCount = 0
-		local maxCount = math.huge
-		local matchAtLeast = count:match("^(%d+)%+$")
-		if matchAtLeast then
-			minCount = tonumber(matchAtLeast)
-		else
-			error("unknown comma'd count pattern `" .. count .. "`")
-		end
-
-		return function(stream, parsers)
-			assert(parsers)
-
-			-- Consume the first element of the list
-			local first, rest = object(stream, parsers)
-			if not rest then
-				if minCount <= 0 and 0 <= maxCount then
-					return {}, stream
-				end
-				return nil
-			end
-			stream = rest
-
-			local list = {first}
-			while true do
-				-- Consume a comma
-				local _, rest = K_COMMA(stream, parsers)
-				if not rest then
-					if minCount <= #list and #list <= maxCount then
-						return list, stream
-					end
-					return nil
-				end
-				stream = rest
-
-				-- Consume an object
-				local element, rest = object(stream, parsers)
-				if not rest then
-					-- After a comma, an object of the proper
-					-- type must follow
-					quit("The compiler expected ", expected, " after `,` ",
-						stream:location())
-				end
-				table.insert(list, element)
-				stream = rest
-			end
-		end
-	end
-
 	local function parserOtherwise(p, value)
 		assert(type(p) == "function")
 		return parser.map(p, function(x) return x or value end)
@@ -1413,8 +1479,8 @@ local function parseSmol(tokens)
 		["source"] = parser.composite {
 			tag = "source",
 			{"package", parser.named "package", "a package definition"}, --: string
-			{"imports", parser.zeroOrMore(parser.named "import")},
-			{"definitions", parser.zeroOrMore(parser.named "definition")},
+			{"imports", parser.query "import*"},
+			{"definitions", parser.query "definition*"},
 		},
 
 		-- Represents a package declaration
@@ -1451,17 +1517,17 @@ local function parseSmol(tokens)
 		-- Represents a class
 		["class-definition"] = parser.composite {
 			tag = "class-definition",
-			{"foreign", parser.optional(K_FOREIGN)},
+			{"foreign", parser.query "`foreign`?"},
 			{"_", K_CLASS},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(parser.optional(parser.named "generics"), {
+			{"generics", parserOtherwise(parser.query "generics?", {
 				parameters = {},
 				constraints = {},
 			})},
-			{"implements", parserOtherwise(parser.optional(parser.named "implements"), {})},
+			{"implements", parserOtherwise(parser.query "implements?", {})},
 			{"_", K_CURLY_OPEN, "`{` to begin class body"},
-			{"fields", parser.zeroOrMore(parser.named "field-definition")},
-			{"methods", parser.zeroOrMore(parser.named "method-definition")},
+			{"fields", parser.query "field-definition*"},
+			{"methods", parser.query "method-definition*"},
 			{"_", K_CURLY_CLOSE, "`}`"},
 		},
 		["implements"] = parser.composite {
@@ -1469,7 +1535,7 @@ local function parseSmol(tokens)
 			{"_", K_IS},
 			{
 				"#interfaces",
-				commad(parser.named "concrete-type", "1+", "an interface name"),
+				parser.query "concrete-type,1+",
 				"one or more interface names",
 			},
 		},
@@ -1479,15 +1545,15 @@ local function parseSmol(tokens)
 			tag = "union-definition",
 			{"_", K_UNION},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(parser.optional(parser.named "generics"), {
+			{"generics", parserOtherwise(parser.query "generics?", {
 				parameters = {},
 				constraints = {},
 			})},
 			-- TODO: do unions actually allow implements?
-			{"implements", parserOtherwise(parser.optional(parser.named "implements"), {})},
+			{"implements", parserOtherwise(parser.query "implements?", {})},
 			{"_", K_CURLY_OPEN, "`{` to begin union body"},
-			{"fields", parser.zeroOrMore(parser.named "field-definition")},
-			{"methods", parser.zeroOrMore(parser.named "method-definition")},
+			{"fields", parser.query "field-definition*"},
+			{"methods", parser.query "method-definition*"},
 			{"_", K_CURLY_CLOSE, "`}`"},
 		},
 
@@ -1496,12 +1562,12 @@ local function parseSmol(tokens)
 			tag = "interface-definition",
 			{"_", K_INTERFACE},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(parser.optional(parser.named "generics"), {
+			{"generics", parserOtherwise(parser.query "generics?", {
 				parameters = {},
 				constraints = {},
 			})},
 			{"_", K_CURLY_OPEN, "`{` to begin interface body"},
-			{"signatures", parser.zeroOrMore(parser.named "interface-signature")},
+			{"signatures", parser.query "interface-signature*"},
 			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
 		},
 
@@ -1511,12 +1577,12 @@ local function parseSmol(tokens)
 			{"_", K_SQUARE_OPEN},
 			{
 				"parameters",
-				commad(T_GENERIC, "1+", "generic parameter variable"),
+				parser.delimited(T_GENERIC, "1+", ",", "generic parameter"),
 				"generic parameter variables"
 			},
 			{
 				"constraints",
-				parserOtherwise(parser.optional(parser.named "generic-constraints"), {})
+				parserOtherwise(parser.query "generic-constraints?", {})
 			},
 			{"_", K_SQUARE_CLOSE, "`]` to end list of generics"},
 		},
@@ -1526,7 +1592,7 @@ local function parseSmol(tokens)
 			{"_", K_PIPE},
 			{
 				"#constraints",
-				commad(parser.named "generic-constraint", "1+", "generic constraint"),
+				parser.query "generic-constraint,1+",
 				"generic constraints"
 			},
 		},
@@ -1557,12 +1623,12 @@ local function parseSmol(tokens)
 			tag = "concrete-type",
 			{
 				"package", --: string | false
-				parser.optional(parser.named "package-scope"),
+				parser.query "package-scope?",
 			},
 			{"base", T_TYPENAME}, --: string
 			{
 				"arguments",
-				parserOtherwise(parser.optional(parser.named "type-arguments"), freeze {})
+				parserOtherwise(parser.query "type-arguments?", freeze {})
 			}, --: [ Type ]
 		},
 
@@ -1575,11 +1641,7 @@ local function parseSmol(tokens)
 		["type-arguments"] = parser.composite {
 			tag = "***",
 			{"_", K_SQUARE_OPEN},
-			{
-				"#arguments",
-				commad(parser.named "type", "1+", "type argument"),
-				"type arguments"
-			},
+			{"#arguments", parser.query "type,1+", "type arguments"},
 			{"_", K_SQUARE_CLOSE, "`]`"},
 		},
 
@@ -1607,15 +1669,15 @@ local function parseSmol(tokens)
 		-- parameters, and return type.
 		["signature"] = parser.composite {
 			tag = "signature",
-			{"foreign", parser.optional(K_FOREIGN)},
+			{"foreign", parser.query "`foreign`?"},
 			{"modifier", parser.named "method-modifier"},
 			{"name", T_IDENTIFIER, "a method name"},
 			{"_", K_ROUND_OPEN, "`(` after method name"},
-			{"parameters", commad(parser.named "variable", "0+", "a parameter")},
+			{"parameters", parser.query "variable,0+"},
 			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
 			{
 				"returnTypes",
-				commad(parser.named "type", "1+", "a return type"),
+				parser.query "type,1+",
 				"a return type"
 			},
 		},
@@ -1636,7 +1698,7 @@ local function parseSmol(tokens)
 		["block"] = parser.composite {
 			tag = "block",
 			{"_", K_CURLY_OPEN},
-			{"statements", parser.zeroOrMore(parser.named "statement")},
+			{"statements", parser.query "statement*"},
 			{"_", K_CURLY_CLOSE, "`}` to end statement block"},
 		},
 
@@ -1649,7 +1711,7 @@ local function parseSmol(tokens)
 		["return-statement"] = parser.composite {
 			tag = "return-statement",
 			{"_", K_RETURN},
-			{"values", commad(parser.named "expression", "0+", "an expression to return")},
+			{"values", parser.query "expression,0+"},
 			{"_", K_SEMICOLON, "`;` to end return-statement"},
 		},
 
@@ -1666,7 +1728,7 @@ local function parseSmol(tokens)
 
 		["assign-statement"] = parser.composite {
 			tag = "assign-statement",
-			{"variables", commad(parser.named "expression", "1+", "a variable")},
+			{"variables", parser.query "expression,1+"}, -- XXX: this should be a variable
 			{"_", K_EQUAL, "`=` after variable"},
 			{"value", parser.named "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end assign-statement"},
@@ -1677,7 +1739,7 @@ local function parseSmol(tokens)
 			{"_", K_VAR},
 			{
 				"variables",
-				commad(parser.named "variable", "1+", "a variable"),
+				parser.query "variable,1+",
 				"one or more variables",
 			},
 			{"_", K_EQUAL, "`=` after the variable in the var-statement"},
@@ -1689,7 +1751,7 @@ local function parseSmol(tokens)
 		["expression"] = parser.map(parser.composite {
 			tag = "***expression",
 			{"base", parser.named "atom"},
-			{"operations", parser.zeroOrMore(parser.named "operation")},
+			{"operations", parser.query "operation*"},
 		}, function(x)
 			-- XXX: no precedence yet; assume left-associative
 			local out = x.base
@@ -1722,10 +1784,7 @@ local function parseSmol(tokens)
 			tag = "new-expression",
 			{"_", K_NEW},
 			{"_", K_ROUND_OPEN, "`(` after `new`"},
-			{
-				"arguments",
-				commad(parser.named "named-argument", "0+", "a constructor argument")
-			},
+			{"arguments", parser.query "named-argument,0+"},
 			{"_", K_ROUND_CLOSE, "`)` to end `new` expression"},
 		},
 
@@ -1739,7 +1798,7 @@ local function parseSmol(tokens)
 		["atom"] = parser.map(parser.composite {
 			tag = "***atom",
 			{"base", parser.named "atom-base"},
-			{"accesses", parser.zeroOrMore(parser.named "access")},
+			{"accesses", parser.query "access*"},
 		}, function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
@@ -1756,7 +1815,7 @@ local function parseSmol(tokens)
 			{"arguments", parser.optional(parser.composite{
 				tag = "***arguments",
 				{"_", K_ROUND_OPEN},
-				{"#arguments", commad(parser.named "expression", "0+", "an expression")},
+				{"#arguments", parser.query "expression,0+"},
 				{"_", K_ROUND_CLOSE, "`)` to end"},
 			})},
 		}, function(x)
@@ -1790,7 +1849,7 @@ local function parseSmol(tokens)
 				{"_", K_DOT, "`.` after type name"},
 				{"name", T_IDENTIFIER, "a static method's name"},
 				{"_", K_ROUND_OPEN, "`(` after static method name"},
-				{"arguments", commad(parser.named "expression", "0+", "an expression")},
+				{"arguments", parser.query "expression,0+"},
 				{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 			},
 			parser.map(T_IDENTIFIER, function(n)
