@@ -433,7 +433,7 @@ do
 				showAdd(value, indent + 1, out)
 				table.insert(out, ",")
 			end
-			table.insert(out, "\n" .. indent .. "}")
+			table.insert(out, "\n" .. string.rep("\t", indent) .. "}")
 		else
 			table.insert(out, tostring(object))
 		end
@@ -567,11 +567,18 @@ local function TYPE_PREDICATE(t)
 	if found then
 		p = found.predicate
 	else
-		assert(type(p) ~= "string", "unknown type name")
+		assert(type(t) ~= "string", "unknown type name `" .. tostring(t) .. "`")
 		p = t.predicate
 	end
 
-	return memoized(1, p)
+	return memoized(1, function(object)
+		local okay, reason = p(object)
+		if not okay and not reason then
+			error(show(t) .. " // " .. show(debug.getinfo(p)))
+		end
+
+		return okay, reason
+	end)
 end
 TYPE_PREDICATE = memoized(1, TYPE_PREDICATE)
 
@@ -588,11 +595,16 @@ TYPE_DESCRIPTION = memoized(1, TYPE_DESCRIPTION)
 
 -- ASSERTS that `value` is of the specified type `t`
 local function assertis(value, t)
-	local spec = TYPE_PREDICATE(t)
-
-	if not spec(value) then
+	local predicate = TYPE_PREDICATE(t)
+	local okay, reason = predicate(value)
+	if not okay then
+		if reason then
+			reason = "(because " .. reason .. ")"
+		else
+			reason = "<no reason from " .. tostring(t) .. ">"
+		end
 		error("value must be a `" .. TYPE_DESCRIPTION(t) .. "`."
-			.. "\nHowever it is not:\n" .. show(value), 2)
+			.. "\nHowever it is not: " .. reason .. "\n" .. show(value), 2)
 	end
 end
 
@@ -601,7 +613,9 @@ end
 -- RETURNS a type-predicate
 local function constantType(value)
 	return freeze {
-		predicate = function(object) return object == value end,
+		predicate = function(object)
+			return object == value, "value must be `" .. show(value) .. "`"
+		end,
 		describe = function() return show(value) end,
 	}
 end
@@ -617,22 +631,22 @@ local function recordType(record)
 
 	local function predicate(object)
 		if not isobject(object) then
-			return false
+			return false, "is not an object"
 		end
 
-		-- Collect the set of relevant keys
-		local relevant = {}
-		for key in pairs(record) do
-			relevant[key] = true
-		end
-
-		-- Validate all relevant keys
+		-- Make a shallow copy in order to avoid tripping freeze() asserts
+		local shallow = {}
 		for key, value in pairs(object) do
-			if relevant[key] then
-				local predicate = TYPE_PREDICATE(record[key])
-				if not predicate(value) then
-					return false
-				end
+			shallow[key] = value
+		end
+
+		-- Validate every key present in `record`
+		for key, p in pairs(record) do
+			local predicate, reason = TYPE_PREDICATE(p)
+
+			local okay, reason = predicate(shallow[key])
+			if not okay then
+				return false, reason .. " in key " .. show(key)
 			end
 		end
 
@@ -659,18 +673,23 @@ local function listType(elementType)
 
 	local function predicate(object)
 		if not isobject(object) then
-			return false
+			return false, "value is not an object"
 		end
 
 		for key, value in pairs(object) do
 			if not isinteger(key) then
-				return false
+				return false, "value has non-integer key " .. show(key)
 			elseif key ~= 1 and object[key-1] == nil then
-				return false
+				return false, "value is missing key " .. show(key-1)
 			end
 
-			if not TYPE_PREDICATE(elementType)(value) then
-				return false
+			local predicate = TYPE_PREDICATE(elementType)
+			local okay, reason = predicate(value)
+			if not okay then
+				if not reason then
+					return false, "bad value at index " .. show(key)
+				end
+				return false, reason .. " at index " .. show(key)
 			end
 		end
 
@@ -694,13 +713,15 @@ local function mapType(from, to)
 		local from = TYPE_PREDICATE(from)
 		local to = TYPE_PREDICATE(to)
 		if not isobject(object) then
-			return false
+			return false, "value is not an object"
 		end
+	
 		for key, value in pairs(object) do
 			if not from(key) or not to(value) then
-				return false
+				return false, "TODO"
 			end
 		end
+
 		return true
 	end
 
@@ -724,7 +745,7 @@ local function choiceType(...)
 				return true
 			end
 		end
-		return false
+		return false, "TODO"
 	end
 
 	local function describe()
@@ -747,8 +768,9 @@ local function intersectType(...)
 
 	local function predicate(object)
 		for _, p in ipairs(types) do
-			if not TYPE_PREDICATE(p)(object) then
-				return false
+			local okay, reason = TYPE_PREDICATE(p)(object)
+			if not okay then
+				return false, reason
 			end
 		end
 		return true
@@ -775,7 +797,17 @@ local function predicateType(f)
 		return "<predicate " .. tostring(f) .. ">"
 	end
 
-	return freeze {predicate = f, describe = describe}
+	local function predicate(object)
+		local okay = f(object)
+		if okay then
+			return true
+		end
+		
+		return false, "value does not satisfy predicate from line "
+			.. debug.getinfo(f).linedefined
+	end
+
+	return freeze {predicate = predicate, describe = describe}
 end
 predicateType = memoized(1, predicateType)
 
@@ -793,16 +825,17 @@ local function tupleType(...)
 
 	local function predicate(value)
 		if not isobject(value) then
-			return false
+			return false, "value is not an object"
 		end
 
 		if #value ~= #ts then
-			return false
+			return false, "value does not have length " .. #ts
 		end
 		
 		for i = 1, #ts do
-			if not TYPE_PREDICATE(ts[i])(value[i]) then
-				return false
+			local okay, reason = TYPE_PREDICATE(ts[i])(value[i])
+			if not okay then
+				return false, reason .. " in element " .. i
 			end
 		end
 
@@ -1951,32 +1984,38 @@ end
 -- Semantics / Verification ----------------------------------------------------
 
 REGISTER_TYPE("Semantics", recordType {
-	structs = listType "StructIR",
+	classes = listType "ClassIR",
 	unions = listType "UnionIR",
 	interfaces = listType "InterfaceIR",
 	functions = listType "FunctionIR",
 	main = "string",
 })
 
-REGISTER_TYPE("StructIR", recordType {
+REGISTER_TYPE("ClassIR", recordType {
+	tag = constantType "class",
 	name = "string",
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
 	implements = listType "ConcreteType+",
+	signatures = listType "Signature",
 })
 
 REGISTER_TYPE("UnionIR", recordType {
+	tag = constantType "union",
 	name = "string",
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
+	signatures = listType "Signature",	
 })
 
 REGISTER_TYPE("InterfaceIR", recordType {
+	tag = constantType "interface",
 	name = "string",
-	statics = listType("SignatureIR"),
-	methods = listType("SignatureIR"),
+	signatures = listType("SignatureIR"),
 	generics = listType("TypeParameterIR"),
 })
+
+REGISTER_TYPE("Definition", choiceType("ClassIR", "UnionIR", "InterfaceIR"))
 
 REGISTER_TYPE("TypeParameterIR", recordType {
 	name = "string", -- Type parameter name (e.g., "#Right")
@@ -2421,7 +2460,7 @@ local function semanticsSmol(sources, main)
 
 				-- Add this constraint to the associated generic parameter
 				table.insert(parameter.constraints, {
-					constraint = constraint,
+					interface = constraint,
 					location = constraintAST.location,
 				})
 			end
@@ -2524,21 +2563,27 @@ local function semanticsSmol(sources, main)
 		-- Create an IR representation of each definition
 		for _, definition in ipairs(source.definitions) do
 			if definition.tag == "class-definition" then
-				table.insert(allDefinitions,
-					compiledStruct(definition, "class"))
+				local compiled = compiledStruct(definition, "class")
+				assertis(compiled, "ClassIR")
+
+				table.insert(allDefinitions, compiled)
 			elseif definition.tag == "interface-definition" then
-				table.insert(allDefinitions, compiledInterface(definition))
+				local compiled = compiledInterface(definition)
+				assertis(compiled, "InterfaceIR")
+
+				table.insert(allDefinitions, compiled)
 			elseif definition.tag == "union-definition" then
-				-- TODO: distinguish this as a union
-				table.insert(allDefinitions,
-					compiledStruct(definition, "union"))
+				local compiled = compiledStruct(definition, "union")
+				assertis(compiled, "UnionIR")
+
+				table.insert(allDefinitions, compiled)
 			else
 				error("unknown definition tag `" .. definition.tag .. "`")
 			end
 		end
 	end
 
-	-- TODO: assertis(allDefinitions, listType(optionType("StructIR", "InterfaceIR", "UnionIR")))
+	assertis(allDefinitions, listType "Definition")
 
 	-- (3) Verify and record all interfaces implementation
 
@@ -2592,6 +2637,8 @@ local function semanticsSmol(sources, main)
 		assertis(assignments, mapType("string", "Type+"))
 
 		local function subs(t)
+			assertis(t, "Type+")
+
 			if t.tag == "concrete-type+" then
 				return {tag = "concrete-type+",
 					name = t.name,
@@ -2733,7 +2780,129 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	-- (4) Compile all code bodies
+	-- RETURNS a function Type+ -> Type+ to apply to types on the
+	-- class/struct/interface's definition to use the specific types
+	-- in this instance
+	local function getSubstituterFromConcreteType(type)
+		assertis(type, "ConcreteType+")
+
+		local definition = table.findwith(allDefinitions, "name", type.name)
+
+		local assignments = {}
+		for i, generic in ipairs(definition.generics) do
+			assignments[generic.name] = type.arguments[i]
+		end
+		return genericSubstituter(assignments)
+	end
+
+	-- RETURNS a list of constraints (as Type+) that the given type satisfies
+	local function getTypeConstraints(type, scope)
+		assertis(type, "Type+")
+		assertis(scope, listType "TypeParameterIR")
+
+		if type.tag == "concrete-type+" then
+			local definition = table.findWith(allDefinitions, "name", type.name)
+			if definition.tag ~= "union" and definition.tag ~= "class" then
+				Report.TODO()
+			end
+
+			-- TODO: Is arity already checked?
+			local substitute = getSubstituterFromConcreteType(type)
+
+			local constraints = table.map(substitute, definition.implements)
+			return constraints
+		elseif type.tag == "keyword-type+" then
+			-- TODO
+			return {}
+		elseif type.tag == "generic+" then
+			-- TODO
+			error "TODO"
+		end
+		error("unknown Type+ tag `" .. type.tag .. "`")
+	end
+
+	-- RETURNS nothing
+	-- VERIFIES that the type satisfies the required constraint
+	local function verifyTypeSatisfiesConstraint(type, constraint)
+		assertis(type, "Type+")
+		assertis(constraint, "ConcreteType+")
+
+		for _, c in ipairs(getTypeConstraints(type)) do
+			if areTypesEqual(c, constraint) then
+				return
+			end
+		end
+
+		-- The type `type` does not implement the constraint `constraint`
+		Report.TODO()
+	end
+
+	-- RETURNS nothing
+	-- VERIFIES that the type is entirely valid (in terms of scope, arity,
+	-- and constraints)
+	local function verifyTypeValid(type)
+		assertis(type, "Type+")
+
+		if type.tag == "concrete-type+" then
+			local definition = table.findwith(allDefinitions, "name", type.name)
+			for i, generic in ipairs(definition.generics) do
+				local argument = type.arguments[i]
+
+				-- Verify that the `i`th argument satisfies the constraints of
+				-- the `i`th parameter
+
+				local substitute = getSubstituterFromConcreteType(type)
+
+				print("generic:\n" .. show(generic) .. "\n")
+
+				for _, generalConstraint in ipairs(generic.constraints) do
+					assertis(generalConstraint, "TypeParameterIR")
+
+					local constraint = substitute(generalConstraint.interface)
+					verifyTypeSatisfiesConstraint(argument, constraint)
+				end
+
+				-- Verify recursively
+				verifyTypeValid(argument)
+			end
+		elseif type.tag == "keyword-type+" then
+			return -- All keyword types are valid
+		elseif type.tag == "generic+" then
+			return -- All generic literals are valid
+		else
+			error("unknown Type+ tag `" .. type.tag .. "`")
+		end
+	end
+
+	-- (4) Verify all existing Type+'s (from headers) are OKAY
+	for _, definition in ipairs(allDefinitions) do
+		assertis(definition, "Definition")
+
+		if definition.tag == "class" then
+			-- Verify each field
+			for _, field in ipairs(definition.fields) do
+				verifyTypeValid(field.type)
+			end
+
+			-- Verify each implements
+			for _, implements in ipairs(definition.implements) do
+				verifyTypeValid(implements)
+			end
+
+			-- Verify each signature
+			-- ... Verify each signature parameter type
+			-- ... Verify each signature return type
+			-- ... Verify the signature's body later
+		elseif definition.tag == "union" then
+			-- TODO
+		elseif definition.tag == "interface" then
+			-- TODO
+		else
+			error("unknown Definition tag `" .. definition.tag .. "`")
+		end
+	end
+
+	-- (5) Compile all code bodies
 	
 end
 
