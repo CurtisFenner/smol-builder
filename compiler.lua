@@ -2841,8 +2841,11 @@ local function semanticsSmol(sources, main)
 			-- TODO
 			return {}
 		elseif type.tag == "generic+" then
-			-- TODO
-			error "TODO"
+			local parameter = table.findwith(scope, "name", type.name)
+			-- TODO: Are generics guaranteed to be in scope here?
+			assert(parameter)
+
+			return table.map(table.getter "interface", parameter.constraints)
 		end
 		error("unknown Type+ tag `" .. type.tag .. "`")
 	end
@@ -2878,13 +2881,12 @@ local function semanticsSmol(sources, main)
 	-- RETURNS nothing
 	-- VERIFIES that the type is entirely valid (in terms of scope, arity,
 	-- and constraints)
-	local function verifyTypeValid(type)
+	local function verifyTypeValid(type, scope)
 		assertis(type, "Type+")
+		assertis(scope, listType "TypeParameterIR")
 
 		if type.tag == "concrete-type+" then
 			local definition = table.findwith(allDefinitions, "name", type.name)
-			local scope = definition.generics
-
 			local substitute = getSubstituterFromConcreteType(type)
 
 			-- Check each argument
@@ -2905,7 +2907,7 @@ local function semanticsSmol(sources, main)
 				end
 
 				-- Verify recursively
-				verifyTypeValid(argument)
+				verifyTypeValid(argument, scope)
 			end
 		elseif type.tag == "keyword-type+" then
 			return -- All keyword types are valid
@@ -2920,35 +2922,74 @@ local function semanticsSmol(sources, main)
 	for _, definition in ipairs(allDefinitions) do
 		assertis(definition, "Definition")
 
+		-- Verify that the generic constraints are valid
+		for _, parameter in ipairs(definition.generics) do
+			for _, constraint in ipairs(parameter.constraints) do
+				verifyTypeValid(constraint.interface, definition.generics)
+			end
+		end
+
 		if definition.tag == "class" then
 			-- Verify each field
 			for _, field in ipairs(definition.fields) do
-				verifyTypeValid(field.type)
+				verifyTypeValid(field.type, definition.generics)
 			end
 
 			-- Verify each implements
 			for _, implements in ipairs(definition.implements) do
-				verifyTypeValid(implements)
+				verifyTypeValid(implements, definition.generics)
 			end
 
 			-- Verify each signature
 			for _, signature in ipairs(definition.signatures) do
 				-- Verify each signature parameter type
 				for _, parameter in ipairs(signature.parameters) do
-					verifyTypeValid(parameter.type)
+					verifyTypeValid(parameter.type, definition.generics)
 				end
 
 				-- Verify each signature return type
 				for _, returnType in ipairs(signature.returnTypes) do
-					verifyTypeValid(returnType)
+					verifyTypeValid(returnType, definition.generics)
 				end
 
 				-- Verify the signature's body later
 			end
 		elseif definition.tag == "union" then
-			-- TODO
+			-- Verify each field
+			for _, field in ipairs(definition.fields) do
+				verifyTypeValid(field.type, definition.generics)
+			end
+
+			-- Verify each implements
+			for _, implements in ipairs(definition.implements) do
+				verifyTypeValid(implements, definition.generics)
+			end
+
+			-- Verify each signature
+			for _, signature in ipairs(definition.signatures) do
+				-- Verify each signature parameter type
+				for _, parameter in ipairs(signature.parameters) do
+					verifyTypeValid(parameter.type, definition.generics)
+				end
+
+				-- Verify each signatuer return type
+				for _, returnType in ipairs(signature.returnTypes) do
+					verifyTypeValid(returnType, definition.generics)
+				end
+			end
 		elseif definition.tag == "interface" then
-			-- TODO
+			-- Verify each signature
+			for _, signature in ipairs(definition.signatures) do
+				-- Verify each signature parameter type
+				for _, parameter in ipairs(signature.parameters) do
+					verifyTypeValid(parameter.type, definition.generics)
+				end
+
+				-- Verify each signatuer return type
+				for _, returnType in ipairs(signature.returnTypes) do
+					verifyTypeValid(returnType, definition.generics)
+				end
+			end
 		else
 			error("unknown Definition tag `" .. definition.tag .. "`")
 		end

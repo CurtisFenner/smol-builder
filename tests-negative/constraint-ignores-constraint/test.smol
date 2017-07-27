@@ -1,0 +1,14 @@
+package test;
+
+class RequiresIsFoo[#T | #T is IsFoo] {}
+
+interface IsFoo {}
+
+class Foo is IsFoo {}
+
+class Problematic[#T | #T is RequiresIsFoo[#T]] {}
+
+class Test {
+	static main() Unit {
+	}
+}
