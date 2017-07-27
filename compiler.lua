@@ -717,8 +717,14 @@ local function mapType(from, to)
 		end
 	
 		for key, value in pairs(object) do
-			if not from(key) or not to(value) then
-				return false, "TODO"
+			local okay, reason = from(key)
+			if not okay then
+				return false, reason .. " for key `" .. tostring(key) .. "`"
+			end
+
+			if not to(value) then
+				return false,
+					reason .. " for value at key `" .. tostring(key) .. "`"
 			end
 		end
 
@@ -740,12 +746,16 @@ local function choiceType(...)
 	assert(#choices >= 2)
 
 	local function predicate(object)
+		local reasons = {}
 		for _, p in ipairs(choices) do
-			if TYPE_PREDICATE(p)(object) then
+			local okay, reason = TYPE_PREDICATE(p)(object)
+			if okay then
 				return true
 			end
+
+			table.insert(reasons, reason)
 		end
-		return false, "TODO"
+		return false, "(" .. table.concat(reasons, ") nor (") .. ")"
 	end
 
 	local function describe()
@@ -2005,14 +2015,15 @@ REGISTER_TYPE("UnionIR", recordType {
 	name = "string",
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
+	implements = listType "ConcreteType+",
 	signatures = listType "Signature",	
 })
 
 REGISTER_TYPE("InterfaceIR", recordType {
 	tag = constantType "interface",
 	name = "string",
-	signatures = listType("SignatureIR"),
-	generics = listType("TypeParameterIR"),
+	signatures = listType "Signature",
+	generics = listType "TypeParameterIR",
 })
 
 REGISTER_TYPE("Definition", choiceType("ClassIR", "UnionIR", "InterfaceIR"))
@@ -2021,7 +2032,6 @@ REGISTER_TYPE("TypeParameterIR", recordType {
 	name = "string", -- Type parameter name (e.g., "#Right")
 	constraints = listType(recordType {
 		interface = "ConcreteType+",
-		name = "string", -- e.g., "#2"
 	}),
 })
 
@@ -2259,6 +2269,18 @@ function Report.INTERFACE_RETURN_TYPE_MISMATCH(p)
 		"\nHowever, `", p.class, "` defines `", p.member, "` with the ",
 		string.ordinal(p.index), " return-value of type `",
 		p.classType, "` ", p.classLocation)
+end
+
+function Report.CONSTRAINTS_MUST_BE_INTERFACES(p)
+	quit("Constraints must be interfaces.",
+		"\nHowever, the ", p.is, " `", p.typeShown, "` is used as a constraint",
+		p.location)
+end
+
+function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
+	quit("The type `", p.container, "` requires a constraint", p.cause,
+		"\nHowever, the type `", p.type, "` does not implement `",
+		p.constraint, "` ", p.location)
 end
 
 --------------------------------------------------------------------------------
@@ -2801,9 +2823,13 @@ local function semanticsSmol(sources, main)
 		assertis(scope, listType "TypeParameterIR")
 
 		if type.tag == "concrete-type+" then
-			local definition = table.findWith(allDefinitions, "name", type.name)
+			local definition = table.findwith(allDefinitions, "name", type.name)
 			if definition.tag ~= "union" and definition.tag ~= "class" then
-				Report.TODO()
+				Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
+					typeShown = showType(type),
+					is = definition.tag,
+					location = type.location,
+				}
 			end
 
 			-- TODO: Is arity already checked?
@@ -2823,18 +2849,30 @@ local function semanticsSmol(sources, main)
 
 	-- RETURNS nothing
 	-- VERIFIES that the type satisfies the required constraint
-	local function verifyTypeSatisfiesConstraint(type, constraint)
+	local function verifyTypeSatisfiesConstraint(type, constraint, scope, need)
 		assertis(type, "Type+")
 		assertis(constraint, "ConcreteType+")
+		assertis(scope, listType "TypeParameterIR")
+		assertis(need, recordType {
+			container = "Definition",
+			constraint = "Type+",
+		})
 
-		for _, c in ipairs(getTypeConstraints(type)) do
+		for _, c in ipairs(getTypeConstraints(type, scope)) do
 			if areTypesEqual(c, constraint) then
 				return
 			end
 		end
 
 		-- The type `type` does not implement the constraint `constraint`
-		Report.TODO()
+		Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
+			type = showType(type),
+			constraint = showType(constraint),
+			location = type.location,
+			
+			container = need.container.name,
+			cause = need.constraint.location,
+		}
 	end
 
 	-- RETURNS nothing
@@ -2845,21 +2883,25 @@ local function semanticsSmol(sources, main)
 
 		if type.tag == "concrete-type+" then
 			local definition = table.findwith(allDefinitions, "name", type.name)
+			local scope = definition.generics
+
+			local substitute = getSubstituterFromConcreteType(type)
+
+			-- Check each argument
 			for i, generic in ipairs(definition.generics) do
 				local argument = type.arguments[i]
 
 				-- Verify that the `i`th argument satisfies the constraints of
 				-- the `i`th parameter
-
-				local substitute = getSubstituterFromConcreteType(type)
-
-				print("generic:\n" .. show(generic) .. "\n")
-
 				for _, generalConstraint in ipairs(generic.constraints) do
-					assertis(generalConstraint, "TypeParameterIR")
-
 					local constraint = substitute(generalConstraint.interface)
-					verifyTypeSatisfiesConstraint(argument, constraint)
+
+					-- TODO: better explain context
+					verifyTypeSatisfiesConstraint(
+						argument, constraint, scope, {
+							container = definition,
+							constraint = generalConstraint.interface,
+						})
 				end
 
 				-- Verify recursively
@@ -2890,9 +2932,19 @@ local function semanticsSmol(sources, main)
 			end
 
 			-- Verify each signature
-			-- ... Verify each signature parameter type
-			-- ... Verify each signature return type
-			-- ... Verify the signature's body later
+			for _, signature in ipairs(definition.signatures) do
+				-- Verify each signature parameter type
+				for _, parameter in ipairs(signature.parameters) do
+					verifyTypeValid(parameter.type)
+				end
+
+				-- Verify each signature return type
+				for _, returnType in ipairs(signature.returnTypes) do
+					verifyTypeValid(returnType)
+				end
+
+				-- Verify the signature's body later
+			end
 		elseif definition.tag == "union" then
 			-- TODO
 		elseif definition.tag == "interface" then
