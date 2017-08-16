@@ -266,6 +266,17 @@ function string.prepad(str, with, length)
 	return string.rep(with, length - #str) .. str
 end
 
+-- RETURNS a list formed by the concatenation of the arguments
+function table.concatted(...)
+	local out = {}
+	for _, list in ipairs{...} do
+		for _, element in ipairs(list) do
+			table.insert(out, element)
+		end
+	end
+	return out
+end
+
 -- RETURNS a list of keys into the given table
 -- Indices of lists are guaranteed to be returned in order;
 -- Otherwise, the order is not specified
@@ -417,7 +428,9 @@ do
 	-- RETURNS nothing
 	-- MODIFIES out by appending strings to it
 	local function showAdd(object, indent, out)
-		if isstring(object) then
+		if indent > 10 then
+			table.insert(out, "...")
+		elseif isstring(object) then
 			-- Turn into a string literal
 			table.insert(out, [["]])
 			for character in object:gmatch "." do
@@ -577,6 +590,11 @@ local function TYPE_PREDICATE(t)
 			error(show(t) .. " // " .. show(debug.getinfo(p)))
 		end
 
+		-- Indicate type names when known
+		if reason and isstring(t) then
+			reason = reason .. " (/ " .. t .. ")"
+		end
+
 		return okay, reason
 	end)
 end
@@ -631,7 +649,7 @@ local function recordType(record)
 
 	local function predicate(object)
 		if not isobject(object) then
-			return false, "is not an object"
+			return false, "is not an object (for record type)"
 		end
 
 		-- Make a shallow copy in order to avoid tripping freeze() asserts
@@ -673,7 +691,7 @@ local function listType(elementType)
 
 	local function predicate(object)
 		if not isobject(object) then
-			return false, "value is not an object"
+			return false, "value is not an object (for list type)"
 		end
 
 		for key, value in pairs(object) do
@@ -713,7 +731,7 @@ local function mapType(from, to)
 		local from = TYPE_PREDICATE(from)
 		local to = TYPE_PREDICATE(to)
 		if not isobject(object) then
-			return false, "value is not an object"
+			return false, "value is not an object (for map type)"
 		end
 	
 		for key, value in pairs(object) do
@@ -743,7 +761,7 @@ mapType = memoized(2, mapType)
 -- RETURNS a type-predicate
 local function choiceType(...)
 	local choices = {...}
-	assert(#choices >= 2)
+	assert(#choices >= 2, "choiceType must be given at least 2 choices")
 
 	local function predicate(object)
 		local reasons = {}
@@ -755,7 +773,7 @@ local function choiceType(...)
 
 			table.insert(reasons, reason)
 		end
-		return false, "(" .. table.concat(reasons, ") nor (") .. ")"
+		return false, "(" .. table.concat(reasons, ") or (") .. ")"
 	end
 
 	local function describe()
@@ -799,6 +817,10 @@ local function intersectType(...)
 	return freeze {predicate = predicate, describe = describe}
 end
 
+local function EXTEND_TYPE(child, parent, definition)
+	REGISTER_TYPE(child, intersectType(parent, definition))
+end
+
 -- RETURNS a type-predicate
 local function predicateType(f)
 	assert(isfunction(f), "f must be a function")
@@ -835,7 +857,7 @@ local function tupleType(...)
 
 	local function predicate(value)
 		if not isobject(value) then
-			return false, "value is not an object"
+			return false, "value is not an object (for tuple type)"
 		end
 
 		if #value ~= #ts then
@@ -1666,7 +1688,6 @@ local function parseSmol(tokens)
 				parameters = {},
 				constraints = {},
 			})},
-			-- TODO: do unions actually allow implements?
 			{"implements", parserOtherwise(parser.query "implements?", {})},
 			{"_", K_CURLY_OPEN, "`{` to begin union body"},
 			{"fields", parser.query "field-definition*"},
@@ -1857,7 +1878,7 @@ local function parseSmol(tokens)
 			{
 				"variables",
 				parser.query "variable,1+",
-				"one or more variables",
+				"one or more comma-separated variables",
 			},
 			{"_", K_EQUAL, "`=` after the variable in the var-statement"},
 			{"value", parser.named "expression", "an expression after `=`"},
@@ -2040,7 +2061,71 @@ REGISTER_TYPE("FunctionIR", recordType {
 	parameters = listType "VariableIR",
 	generics = listType "TypeParameterIR",
 	returnTypes = listType "Type+",
-	body = "Body-IR",
+	body = "BlockSt",
+})
+
+REGISTER_TYPE("maybe", choiceType(
+	constantType "yes",
+	constantType "no",
+	constantType "maybe"
+))
+
+REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
+	"AssignSt",
+	"BlockSt",
+	"LocalSt",
+	"NumberLoadSt",
+	"ReturnSt",
+	"StringLoadSt",
+	"NothingSt"
+)))
+
+REGISTER_TYPE("AbstractStatementIR", recordType {
+	tag = "string",
+	returns = "maybe",
+})
+
+EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {
+	tag = constantType "block",
+	statements = listType "StatementIR",
+})
+
+EXTEND_TYPE("StringLoadSt", "AbstractStatementIR", recordType {
+	tag = constantType "string",
+	destination = "VariableIR",
+	string = "string",
+	returns = constantType "no",	
+})
+
+EXTEND_TYPE("LocalSt", "AbstractStatementIR", recordType {
+	tag = constantType "local",
+	variable = "VariableIR",
+	returns = constantType "no",	
+})
+
+EXTEND_TYPE("NothingSt", "AbstractStatementIR", recordType {
+	tag = constantType "nothing",
+	returns = constantType "no",	
+})
+
+EXTEND_TYPE("AssignSt", "AbstractStatementIR", recordType {
+	tag = constantType "assign",
+	source = "VariableIR",
+	destination = "VariableIR",
+	returns = constantType "no",
+})
+
+EXTEND_TYPE("ReturnSt", "AbstractStatementIR", recordType {
+	tag = constantType "return",
+	sources = listType "VariableIR",
+	returns = constantType "yes",
+})
+
+EXTEND_TYPE("NumberLoadSt", "AbstractStatementIR", recordType {
+	tag = constantType "number",
+	number = "number",
+	destination = "VariableIR",
+	returns = constantType "no",
 })
 
 REGISTER_TYPE("Signature", recordType {
@@ -2048,11 +2133,13 @@ REGISTER_TYPE("Signature", recordType {
 	parameters = listType "VariableIR",
 	returnTypes = listType "Type+",
 	modifier = choiceType(constantType "static", constantType "method"),
+	container = "string",
 })
 
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "Type+",
+	location = "string",
 })
 
 --------------------------------------------------------------------------------
@@ -2283,6 +2370,17 @@ function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 		p.constraint, "` ", p.location)
 end
 
+function Report.VARIABLE_DEFINITION_COUNT_MISMATCH(p)
+	quit(p.valueCount, " value(s) are provided but ", p.variableCount,
+		" variable(s) are defined ", p.location)
+end
+
+function Report.VARIABLE_DEFINED_TWICE(p)
+	quit("The variable `", p.name, "` is first defined ", p.first,
+		"While it is still in scope, you attempt to define another variable ",
+		"with the same name ", p.second)
+end
+
 --------------------------------------------------------------------------------
 
 -- RETURNS a Semantics, an IR description of the program
@@ -2436,7 +2534,11 @@ local function semanticsSmol(sources, main)
 				name = signature.name,
 				returnTypes = table.map(typeFinder, signature.returnTypes, scope),
 				parameters = table.map(function(p)
-					return {name = p.name, type = typeFinder(p.type, scope)}
+					return {
+						name = p.name,
+						type = typeFinder(p.type, scope),
+						location = p.location,
+					}
 				end, signature.parameters),
 				location = signature.location,
 			}
@@ -2497,7 +2599,7 @@ local function semanticsSmol(sources, main)
 			-- name, fields, generics, implements, signatures
 
 			-- Create the full-name of the package
-			local name = package .. ":" .. definition.name
+			local structName = package .. ":" .. definition.name
 
 			-- Compile the set of generics introduced by this class
 			local generics = compiledGenerics(definition.generics)
@@ -2520,7 +2622,6 @@ local function semanticsSmol(sources, main)
 				table.insert(fields, {
 					name = field.name,
 					type = typeFinder(field.type, generics),
-
 					location = field.location,
 				})
 			end
@@ -2541,6 +2642,8 @@ local function semanticsSmol(sources, main)
 				
 				local signature = compiledSignature(method.signature, generics)
 				signature = table.with(signature, "body", method.body)
+				signature = table.with(signature, "typeFinder", typeFinder)
+				signature = table.with(signature, "container", structName)
 				table.insert(signatures, signature)
 			end
 
@@ -2551,7 +2654,7 @@ local function semanticsSmol(sources, main)
 			return freeze {
 				tag = tag,
 
-				name = name,
+				name = structName,
 				generics = generics,
 				fields = fields,
 				signatures = signatures,
@@ -2568,8 +2671,10 @@ local function semanticsSmol(sources, main)
 			-- Create the generics
 			local generics = compiledGenerics(definition.generics)
 
-			local signatures = table.map(
-				compiledSignature, definition.signatures, generics)
+			local signatures = table.map(function(raw)
+					local compiled = compiledSignature(raw, generics)
+					return table.with(compiled, "container", name)
+				end, definition.signatures)
 
 			return freeze {
 				tag = "interface",
@@ -2796,7 +2901,6 @@ local function semanticsSmol(sources, main)
 
 	-- Verify all implementation claims
 	for _, class in ipairs(allDefinitions) do
-		-- TODO: check that `tag` is right
 		if class.tag == "class" or class.tag == "union" then
 			checkStructImplementsClaims(class)
 		end
@@ -2972,7 +3076,7 @@ local function semanticsSmol(sources, main)
 					verifyTypeValid(parameter.type, definition.generics)
 				end
 
-				-- Verify each signatuer return type
+				-- Verify each signature return type
 				for _, returnType in ipairs(signature.returnTypes) do
 					verifyTypeValid(returnType, definition.generics)
 				end
@@ -2985,7 +3089,7 @@ local function semanticsSmol(sources, main)
 					verifyTypeValid(parameter.type, definition.generics)
 				end
 
-				-- Verify each signatuer return type
+				-- Verify each signature return type
 				for _, returnType in ipairs(signature.returnTypes) do
 					verifyTypeValid(returnType, definition.generics)
 				end
@@ -2996,7 +3100,293 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- (5) Compile all code bodies
+	local function targetSignatureIdentifier(signature)
+		assertis(signature, "Signature")
+
+		return signature.container:gsub(":", "_") .. "_" .. signature.name
+	end
+
+	local STRING_TYPE = freeze {
+		tag = "keyword-type+",
+		name = "String",
+		location = "???",
+	}
+
+	local NUMBER_TYPE = freeze {
+		tag = "keyword-type+",
+		name = "Number",
+		location = "???",
+	}
+
+	local functions = {}
+
+	-- RETURNS a FunctionIR
+	local function compileFunctionFromStruct(definition, signature)
+		assertis(definition, choiceType("ClassIR", "UnionIR"))
+		assertis(signature, "Signature")
+
+		-- RETURNS a (verified) Type+
+		local function findType(parsedType)
+			local typeScope = definition.generics
+			local outType = signature.typeFinder(parsedType, typeScope)
+			verifyTypeValid(outType, definition.generics)
+			return outType
+		end
+
+		-- RETURNS a variable or false
+		local function getFromScope(scope, name)
+			assertis(scope, listType(mapType("string", "object")))
+			assertis(name, "string")
+
+			for i = #scope, 1, -1 do
+				if scope[i][name] then
+					return scope[i][name]
+				end
+			end
+			return nil
+		end
+
+		local idCount = 0
+		-- RETURNS a unique (to this struct) local variable name
+		local function generateLocalID()
+			idCount = idCount + 1
+			return "_local" .. tostring(idCount)
+		end
+
+		-- RETURNS a StatementIR representing the execution of statements in
+		-- sequence
+		local function buildBlock(statements)
+			assertis(statements, listType("StatementIR"))
+
+			local returned = "no"
+			for i, statement in ipairs(statements) do
+				if statement.returns == "yes" then
+					assert(i == #statements)
+					returned = "yes"
+				elseif statement.returns == "maybe" then
+					returned = "maybe"
+				end
+			end
+
+			return freeze {
+				tag = "block",
+				returns = returned,
+				statements = statements,
+				location = statements[1].location,
+			}
+		end
+
+		-- RETURNS StatementIR, [Variable]
+		local function compileExpression(pExpression, scope)
+			assertis(pExpression, recordType {
+				tag = "string"
+			})
+
+			if pExpression.tag == "string-literal" then
+				local out = {
+					name = generateLocalID(),
+					type = STRING_TYPE,
+					location = pExpression.location .. ">"
+				}
+				return buildBlock {{
+					tag = "string",
+					string = pExpression.value,
+					destination = out,
+					returns = "no",
+				}}, {out}
+			elseif pExpression.tag == "number-literal" then
+				local out = {
+					name = generateLocalID(),
+					type = NUMBER_TYPE,
+					location = pExpression.location .. ">"
+				}
+				return buildBlock {{
+					tag = "number",
+					number = pExpression.value,
+					destination = out,
+					returns = "no",
+				}}, {out}
+			end
+			error("TODO: " .. show(pExpression))
+		end
+
+		-- RETURNS a StatementIR
+		local function compileStatement(pStatement, scope)
+			assertis(scope, listType(mapType("string", "object")))
+
+			if pStatement.tag == "var-statement" then
+				-- Allocate space for each variable on the left hand side
+				local declarations = {}
+				for _, pVariable in ipairs(pStatement.variables) do
+					-- Verify that the variable name is not in scope
+					local previous = getFromScope(scope, pVariable.name)
+					if previous then
+						Report.VARIABLE_DEFINED_TWICE {
+							first = previous.location,
+							second = pVariable.location,
+							name = pVariable.name,
+						}
+					end
+
+					-- Add the variable to the current scope
+					local variable = {
+						name = pVariable.name,
+						type = findType(pVariable.type),
+						location = pVariable.location,
+					}
+					
+					scope[#scope][variable.name] = variable
+					table.insert(declarations, {
+						tag = "local",
+						variable = variable,
+						returns = "no",
+					})
+				end
+
+				-- Evaluate the right hand side
+				local evaluation, values =
+					compileExpression(pStatement.value, scope) 
+
+				-- Check the return types match the value types
+				if #values ~= #declarations then
+					Report.VARIABLE_DEFINITION_COUNT_MISMATCH {
+						location = pStatement.location,
+						expressionLocation = pStatement.value.location,
+						variableCount = #declarations,
+						valueCount = #values,
+					}
+				end
+
+				-- Move the evaluations into the destinations
+				local moves = {}
+				for i, declaration in ipairs(declarations) do
+					local variable = declaration.variable
+					if not areTypesEqual(variable.type, values[i].type) then
+						Report.VARIABLE_DEFINITION_TYPE_MISMATCH {
+
+						}
+					end
+
+					table.insert(moves, {
+						tag = "assign",
+						source = values[i],
+						destination = variable,
+						returns = "no",
+					})
+				end
+
+				assertis(declarations, listType "StatementIR")
+				assertis(evaluation, "StatementIR")
+				assertis(moves, listType "StatementIR")
+				
+				-- Combine the three steps into a single sequence statement
+				local sequence = table.concatted(
+					declarations, {evaluation}, moves
+				)
+				return buildBlock(sequence)
+			elseif pStatement.tag == "return-statement" then
+				if #pStatement.values == 1 then
+					local evaluation, sources = compileExpression(
+						pStatement.values[1], scope)
+					
+					if #sources ~= #signature.returnTypes then
+						Report.RETURN_COUNT_MISMATCH {
+							signatureCount = #signature.returnTypes,
+							returnCount = #sources,
+							location = pStatement.location,
+						}
+					end
+
+					return {
+						tag = "return",
+						sources = sources,
+						returns = "yes",
+					}
+				else
+					error("TODO")
+				end
+			end
+			error("TODO: compileStatement(" .. show(pStatement) .. ")")
+		end
+
+		-- RETURNS a BlockSt
+		local function compileBlock(pBlock, scope)
+			assertis(scope, listType(mapType("string", "object")))
+
+			-- Open a new scope
+			table.insert(scope, {})
+		
+			local statements = {}
+			local returned = "no"
+			for i, pStatement in ipairs(pBlock.statements) do
+				-- This statement is unreachable, because the previous
+				-- always returns
+				if returned == "yes" then
+					Report.UNREACHABLE_STATEMENT {
+						cause = statements[i-1].location,
+						reason = "always returns",
+						unreachable = pStatement.location,
+					}
+				end
+
+				local statement = compileStatement(pStatement, scope)
+				assertis(statement, "StatementIR")
+				
+				if statement.returns == "yes" then
+					returned = "yes"
+				elseif statement.returns == "maybe" then
+					returned = "maybe"
+				end
+				table.insert(statements, statement)
+			end
+			assertis(statements, listType "StatementIR")
+
+			-- Close the current scope
+			table.remove(scope)
+
+			return freeze {
+				tag = "block",
+				statements = statements,
+				returns = returned,
+				location = pBlock.location,
+			}
+		end
+
+		-- Collect static functions' type parameters from the containing class
+		local generics = {}
+		if signature.modifier == "static" then
+			generics = definition.generics
+		end
+
+		local body = compileBlock(signature.body, {})
+		assertis(body, "StatementIR")
+
+		return freeze {
+			name = targetSignatureIdentifier(signature),
+			
+			-- Function's generics exclude those on the `this` instance
+			generics = generics,
+			
+			parameters = signature.parameters,
+			returnTypes = signature.returnTypes,
+
+			body = body,
+		}
+	end
+
+	-- Scan the definitions for all function bodies
+	for _, definition in ipairs(allDefinitions) do
+		if definition.tag == "class" or definition.tag == "union" then
+			for _, signature in ipairs(definition.signatures) do
+				local func = compileFunctionFromStruct(definition, signature)
+				assertis(func, "FunctionIR")
+
+				table.insert(functions, func)
+			end
+		end
+	end
 	
+	assertis(functions, listType "FunctionIR")
 end
 
 -- Transpilation ---------------------------------------------------------------

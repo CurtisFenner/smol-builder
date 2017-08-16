@@ -1,0 +1,8 @@
+package test;
+
+class Test {
+	static main() Unit {
+		var v Number = 3;
+		var v Number = 4;
+	}
+}
