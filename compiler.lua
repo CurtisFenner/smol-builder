@@ -2073,6 +2073,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"AssignSt",
 	"BlockSt",
 	"LocalSt",
+	"NewSt",
 	"NumberLoadSt",
 	"ReturnSt",
 	"StringLoadSt",
@@ -2124,6 +2125,13 @@ EXTEND_TYPE("NumberLoadSt", "AbstractStatementIR", recordType {
 	tag = constantType "number",
 	number = "number",
 	destination = "VariableIR",
+	returns = constantType "no",
+})
+
+EXTEND_TYPE("NewSt", "AbstractStatementIR", recordType {
+	tag = constantType "new",
+	fields = mapType("string", "VariableIR"),
+	type = "ConcreteType+",
 	returns = constantType "no",
 })
 
@@ -2386,6 +2394,27 @@ function Report.UNINSTANTIABLE_USED(p)
 	quit("The type `", p.type, "` is not instantiable,",
 		" so you cannot use it as the type of a variable or value as you are ",
 		p.location)
+end
+
+function Report.WRONG_VALUE_COUNT(p)
+	quit("The ", p.purpose, " needs ", p.expectedCount, " value(s),",
+		" but was given ", p.givenCount, " ", p.location)
+end
+
+function Report.TYPES_DONT_MATCH(p)
+	quit("The ", p.purpose, " expects `", p.expectedType, "` as defined ",
+		p.expectedLocation,
+		"\nHowever, `", p.givenType, "` was provided at ", p.location)
+end
+
+function Report.NO_SUCH_FIELD(p)
+	quit("The type `", p.container, "` does not have a field called `",
+		p.name, "`",
+		"\nHowever, you try to access `", p.name, "` ", p.location)
+end
+
+function Report.NO_SUCH_VARIABLE(p)
+	quit("There is no variable named `", p.name, "` in scope ", p.location)
 end
 
 --------------------------------------------------------------------------------
@@ -2787,6 +2816,9 @@ local function semanticsSmol(sources, main)
 	-- REQUIRES that type names cannot be shadowed and
 	-- that a and b come from the same (type) scope
 	local function areTypesEqual(a, b)
+		assertis(a, "Type+")
+		assertis(b, "Type+")
+
 		if a.tag ~= b.tag then
 			return false
 		elseif a.tag == "concrete-type+" then
@@ -3177,6 +3209,19 @@ local function semanticsSmol(sources, main)
 		assertis(definition, choiceType("ClassIR", "UnionIR"))
 		assertis(signature, "Signature")
 
+		local containerType = freeze {
+			tag = "concrete-type+",
+			name = definition.name,
+			arguments = table.map(function(p)
+				return freeze {
+					tag = "generic+",
+					name = p.name,
+					location = definition.location,
+				}
+			end, definition.generics),
+			location = definition.location,
+		}
+
 		-- RETURNS a (verified) Type+
 		local function findType(parsedType)
 			local typeScope = definition.generics
@@ -3227,11 +3272,23 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
+		-- RETURNS a LocalSt
+		local function localSt(variable)
+			assertis(variable, "VariableIR")
+
+			return freeze {
+				tag = "local",
+				variable = variable,
+				returns = "no",
+			}
+		end
+
 		-- RETURNS StatementIR, [Variable]
 		local function compileExpression(pExpression, scope)
 			assertis(pExpression, recordType {
 				tag = "string"
 			})
+			assertis(scope, listType(mapType("string", "VariableIR")))
 
 			if pExpression.tag == "string-literal" then
 				local out = {
@@ -3239,32 +3296,111 @@ local function semanticsSmol(sources, main)
 					type = STRING_TYPE,
 					location = pExpression.location .. ">"
 				}
-				return buildBlock {{
-					tag = "string",
-					string = pExpression.value,
-					destination = out,
-					returns = "no",
-				}}, {out}
+
+				local block = buildBlock {
+					localSt(out),
+					{
+						tag = "string",
+						string = pExpression.value,
+						destination = out,
+						returns = "no",
+					}
+				}
+				return block, {out}
 			elseif pExpression.tag == "number-literal" then
 				local out = {
 					name = generateLocalID(),
 					type = NUMBER_TYPE,
 					location = pExpression.location .. ">"
 				}
-				return buildBlock {{
-					tag = "number",
-					number = pExpression.value,
-					destination = out,
+
+				local block = buildBlock {
+					localSt(out),
+					{
+						tag = "number",
+						number = pExpression.value,
+						destination = out,
+						returns = "no",
+					}
+				}
+				return block, {out}
+			elseif pExpression.tag == "new-expression" then
+				local out = {
+					name = generateLocalID(),
+					type = containerType,
+					location = pExpression.location .. ">"
+				}
+				assertis(out.type, "ConcreteType+")
+
+				local newSt = {
+					tag = "new",
+					type = containerType,
+					fields = {},
 					returns = "no",
-				}}, {out}
+				}
+
+				local evaluation = {}
+				for _, argument in ipairs(pExpression.arguments) do
+					local subEvaluation, subOut = compileExpression(
+						argument.value, scope)
+					if #subOut ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "field value",
+							expectedCount = 1,
+							givenCount = #subOut,
+							location = argument.location,
+						}
+					end
+					
+					table.insert(evaluation, subEvaluation)
+					local field = table.findwith(definition.fields,
+						"name", argument.name)
+
+					if not field then
+						Report.NO_SUCH_FIELD {
+							name = argument.name,
+							container = showType(containerType),
+							location = argument.location,
+						}
+					end
+					newSt.fields[argument.name] = subOut[1]
+
+					if not areTypesEqual(field.type, subOut[1].type) then
+						Report.TYPES_DONT_MATCH {
+							purpose = "field type",
+							expectedType = showType(field.type),
+							expectedLocation = field.location,
+							givenType = showType(subOut[1].type),
+							location = argument.location,
+						}
+					end
+				end
+
+				local block = buildBlock(table.concatted(
+					evaluation, {localSt(out), newSt}
+				))
+				return block, {out}
+			elseif pExpression.tag == "identifier" then
+				local block = buildBlock({})
+				local out = nil
+				for i = #scope, 1, -1 do
+					out = out or scope[i][pExpression.name]
+				end
+				if not out then
+					Report.NO_SUCH_VARIABLE {
+						name = pExpression.name,
+						location = pExpression.location,
+					}
+				end
+				return block, {out}
 			end
 
-			error("TODO: " .. show(pExpression))
+			error("TODO expression: " .. show(pExpression))
 		end
 
 		-- RETURNS a StatementIR
 		local function compileStatement(pStatement, scope)
-			assertis(scope, listType(mapType("string", "object")))
+			assertis(scope, listType(mapType("string", "VariableIR")))
 
 			if pStatement.tag == "var-statement" then
 				-- Allocate space for each variable on the left hand side
@@ -3364,7 +3500,7 @@ local function semanticsSmol(sources, main)
 
 		-- RETURNS a BlockSt
 		local function compileBlock(pBlock, scope)
-			assertis(scope, listType(mapType("string", "object")))
+			assertis(scope, listType(mapType("string", "VariableIR")))
 
 			-- Open a new scope
 			table.insert(scope, {})
@@ -3411,7 +3547,13 @@ local function semanticsSmol(sources, main)
 			generics = definition.generics
 		end
 
-		local body = compileBlock(signature.body, {})
+		-- Create the initial scope with the function's parameters
+		local functionScope = {{}}
+		for _, parameter in ipairs(signature.parameters) do
+			functionScope[1][parameter.name] = parameter
+		end
+
+		local body = compileBlock(signature.body, functionScope)
 		assertis(body, "StatementIR")
 
 		return freeze {
