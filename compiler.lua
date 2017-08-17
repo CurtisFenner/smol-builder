@@ -1521,7 +1521,6 @@ function parser.query(query, tag)
 	assertis(tag, "string")
 	local components = {tag = tag}
 	for i = 1, #stack do
-		local field = modifierStack[i]["="]
 		table.insert(components, {
 			modifierStack[i]["="],
 			stack[i],
@@ -2365,7 +2364,9 @@ function Report.CONSTRAINTS_MUST_BE_INTERFACES(p)
 end
 
 function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
-	quit("The type `", p.container, "` requires a constraint", p.cause,
+	quit("The type `", p.container, "` requires its ",
+		string.ordinal(p.nth), " type-parameter to implement ", p.constraint,
+		" ", p.cause,
 		"\nHowever, the type `", p.type, "` does not implement `",
 		p.constraint, "` ", p.location)
 end
@@ -2379,6 +2380,12 @@ function Report.VARIABLE_DEFINED_TWICE(p)
 	quit("The variable `", p.name, "` is first defined ", p.first,
 		"While it is still in scope, you attempt to define another variable ",
 		"with the same name ", p.second)
+end
+
+function Report.UNINSTANTIABLE_USED(p)
+	quit("The type `", p.type, "` is not instantiable,",
+		" so you cannot use it as the type of a variable or value as you are ",
+		p.location)
 end
 
 --------------------------------------------------------------------------------
@@ -2413,8 +2420,58 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
+	-- RETURNS a string of smol representing the given type
+	local function showType(t)
+		assertis(t, "Type+")
+
+		if t.tag == "concrete-type+" then
+			if #t.arguments == 0 then
+				return t.name
+			end
+			local arguments = table.map(showType, t.arguments)
+			return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
+		elseif t.tag == "keyword-type+" then
+			return t.name
+		elseif t.tag == "generic+" then
+			return "#" .. t.name
+		end
+		error("unknown Type+ tag `" .. t.tag .. "`")
+	end
+
 	-- (2) Fully qualify all local type names
 	local allDefinitions = {}
+
+	-- RETURNS whether or not the type is instantiable, meaning usable
+	-- as a variable type or method parameter type
+	local function isTypeInstantiable(t)
+		assertis(t, "Type+")
+
+		if t.tag == "concrete-type+" then
+			-- Find whether or not it is an interface
+			local definition = definitionSourceByFullName[t.name]
+			if definition.tag == "interface-definition" then
+				return false
+			end
+			return true
+		elseif t.tag == "keyword-type+" then
+			-- TODO: never type
+			return true
+		elseif t.tag == "generic+" then
+			return true
+		end
+		error("unknown type tag")
+	end
+
+	local function verifyInstantiable(t)
+		assertis(t, "Type+")
+
+		if not isTypeInstantiable(t) then
+			Report.UNINSTANTIABLE_USED {
+				location = t.location,
+				type = showType(t),
+			}
+		end
+	end
 
 	for _, source in ipairs(sources) do
 		local package = source.package
@@ -2528,7 +2585,7 @@ local function semanticsSmol(sources, main)
 		local function compiledSignature(signature, scope)
 			assertis(scope, listType("TypeParameterIR"))
 
-			return {
+			local signature = freeze {
 				foreign = signature.foreign,
 				modifier = signature.modifier.keyword,
 				name = signature.name,
@@ -2542,6 +2599,16 @@ local function semanticsSmol(sources, main)
 				end, signature.parameters),
 				location = signature.location,
 			}
+
+			-- Verify the signature only uses instantiable types
+			for _, returnType in ipairs(signature.returnTypes) do
+				verifyInstantiable(returnType)
+			end
+			for _, parameter in ipairs(signature.parameters) do
+				verifyInstantiable(parameter.type)
+			end
+
+			return signature
 		end
 
 		-- RETURNS a list[TypeParameterIR]
@@ -2624,6 +2691,8 @@ local function semanticsSmol(sources, main)
 					type = typeFinder(field.type, generics),
 					location = field.location,
 				})
+
+				verifyInstantiable(fields[#fields].type)
 			end
 
 			-- Collect the list of methods/statics this class provides
@@ -2739,22 +2808,6 @@ local function semanticsSmol(sources, main)
 			return a.name == b.name
 		end
 		error("unknown type tag `" .. a.tag .. "`")
-	end
-
-	-- RETURNS a string of smol representing the given type
-	local function showType(t)
-		if t.tag == "concrete-type+" then
-			if #t.arguments == 0 then
-				return t.name
-			end
-			local arguments = table.map(showType, t.arguments)
-			return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
-		elseif t.tag == "keyword-type+" then
-			return t.name
-		elseif t.tag == "generic+" then
-			return "#" .. t.name
-		end
-		error("unknown Type+ tag `" .. t.tag .. "`")
 	end
 
 	-- assignments: map string -> Type+
@@ -2929,11 +2982,7 @@ local function semanticsSmol(sources, main)
 		if type.tag == "concrete-type+" then
 			local definition = table.findwith(allDefinitions, "name", type.name)
 			if definition.tag ~= "union" and definition.tag ~= "class" then
-				Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
-					typeShown = showType(type),
-					is = definition.tag,
-					location = type.location,
-				}
+				error(string.rep("?", 8000))
 			end
 
 			-- TODO: Is arity already checked?
@@ -2963,6 +3012,7 @@ local function semanticsSmol(sources, main)
 		assertis(need, recordType {
 			container = "Definition",
 			constraint = "Type+",
+			nth = "integer",
 		})
 
 		for _, c in ipairs(getTypeConstraints(type, scope)) do
@@ -2977,6 +3027,7 @@ local function semanticsSmol(sources, main)
 			constraint = showType(constraint),
 			location = type.location,
 			
+			nth = need.nth,
 			container = need.container.name,
 			cause = need.constraint.location,
 		}
@@ -2996,6 +3047,7 @@ local function semanticsSmol(sources, main)
 			-- Check each argument
 			for i, generic in ipairs(definition.generics) do
 				local argument = type.arguments[i]
+				verifyInstantiable(argument)
 
 				-- Verify that the `i`th argument satisfies the constraints of
 				-- the `i`th parameter
@@ -3003,11 +3055,11 @@ local function semanticsSmol(sources, main)
 					local constraint = substitute(generalConstraint.interface)
 
 					-- TODO: better explain context
-					verifyTypeSatisfiesConstraint(
-						argument, constraint, scope, {
-							container = definition,
-							constraint = generalConstraint.interface,
-						})
+					verifyTypeSatisfiesConstraint(argument, constraint, scope, {
+						container = definition,
+						constraint = generalConstraint.interface,
+						nth = i,
+					})
 				end
 
 				-- Verify recursively
@@ -3172,7 +3224,6 @@ local function semanticsSmol(sources, main)
 				tag = "block",
 				returns = returned,
 				statements = statements,
-				location = statements[1].location,
 			}
 		end
 
@@ -3207,6 +3258,7 @@ local function semanticsSmol(sources, main)
 					returns = "no",
 				}}, {out}
 			end
+
 			error("TODO: " .. show(pExpression))
 		end
 
@@ -3234,6 +3286,7 @@ local function semanticsSmol(sources, main)
 						type = findType(pVariable.type),
 						location = pVariable.location,
 					}
+					verifyInstantiable(variable.type)
 					
 					scope[#scope][variable.name] = variable
 					table.insert(declarations, {
@@ -3297,11 +3350,11 @@ local function semanticsSmol(sources, main)
 						}
 					end
 
-					return {
+					return buildBlock(table.concatted({evaluation}, {
 						tag = "return",
 						sources = sources,
 						returns = "yes",
-					}
+					}))
 				else
 					error("TODO")
 				end

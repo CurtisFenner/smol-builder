@@ -45,6 +45,10 @@ interface Function[#From, #To] {
 foreign class Integer {
 }
 
-foreign class Array[#T] {
+foreign class Array[#T] is Showable {
+	method show() String {
+	}
 
+	static showType() String {
+	}
 }

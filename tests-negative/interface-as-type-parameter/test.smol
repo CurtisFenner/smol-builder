@@ -1,0 +1,15 @@
+package test;
+
+interface IFoo {
+}
+
+class Box[#T] {
+
+}
+
+class Test {
+	static main() Unit {
+	}
+
+	static foo(box Box[IFoo]) Unit {}
+}

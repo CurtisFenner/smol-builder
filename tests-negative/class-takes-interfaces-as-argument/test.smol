@@ -1,0 +1,11 @@
+package test;
+
+interface IFoo {
+}
+
+class Test {
+	static main() Unit {
+	}
+
+	static foo(foo IFoo) Unit {}
+}

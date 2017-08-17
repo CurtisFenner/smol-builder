@@ -29,7 +29,7 @@ class Pair[#A, #B | #A is Showable, #B is Showable] is Showable, Readable[Pair[#
 	}
 }
 
-class PairBoth[#A] {
+class PairBoth[#A | #A is Showable] {
 	static make(e #A) Pair[#A, #A] {
 		return Pair[#A, #A].make(e, e);
 	}

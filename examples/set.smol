@@ -4,8 +4,9 @@ import pair:Pair;
 import core:Array;
 import core:Integer;
 import core:Function;
+import core:Showable;
 
-class Set[#T] {
+class Set[#T | #T is Showable] is Showable {
 	var elements Array[#T];
 
 	static empty() Set[#T] {
@@ -20,9 +21,17 @@ class Set[#T] {
 		var mapper Mapper[Integer, #T, SetSplicer[#T]] = Mapper[Integer, #T, SetSplicer[#T]].make(SetSplicer[#T].make(this.elements));
 		var result Array[Pair[#T, Set[#T]]] = ArrayFromFunc[Pair[#T, Set[#T]], Mapper[Integer, Pair[#T, Set[#T], SetSplicer[#T]]]].make(elements.length(), mapper);
 	}
+
+	method show() String {
+		// TODO
+	}
+
+	static showType() String {
+		// TODO
+	}
 }
 
-class SetSplicer[#T] is Function[Integer, Pair[#T, Array[#T]]] {
+class SetSplicer[#T | #T is Showable] is Function[Integer, Pair[#T, Array[#T]]] {
 	var array Array[#T];
 
 	static make(array Array[#T]) SetSplicer[#T] {
