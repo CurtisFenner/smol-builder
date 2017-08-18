@@ -1982,7 +1982,7 @@ local function parseSmol(tokens)
 			end),
 			parser.composite { -- static method call
 				tag = "static-call",
-				{"base-type", parser.named "type"},
+				{"baseType", parser.named "type"},
 				{"_", K_DOT, "`.` after type name"},
 				{"name", T_IDENTIFIER, "a static method's name"},
 				{"_", K_ROUND_OPEN, "`(` after static method name"},
@@ -2078,6 +2078,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"NewSt",
 	"NumberLoadSt",
 	"ReturnSt",
+	"StaticCallSt",
 	"StringLoadSt",
 	"NothingSt"
 )))
@@ -2136,6 +2137,16 @@ EXTEND_TYPE("NewSt", "AbstractStatementIR", recordType {
 	type = "ConcreteType+",
 	constraints = mapType("string", "ConstraintIR"),	
 	returns = constantType "no",
+})
+
+EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
+	tag = constantType "static-call",
+	constraints = mapType("string", "ConstraintIR"),
+	baseType = "Type+",
+	arguments = listType "VariableIR",
+	destinations = listType "VariableIR",
+	returns = constantType "no",
+	name = "string",
 })
 
 REGISTER_TYPE("Signature", recordType {
@@ -2435,6 +2446,12 @@ end
 function Report.NEW_USED_OUTSIDE_STATIC(p)
 	quit("You can only use `new` expressions in static methods.",
 		"\nHowever, you try to invoke `new` ", p.location)
+end
+
+function Report.NO_SUCH_METHOD(p)
+	quit("The type `", p.type, "` does not have a ", p.modifier, " called `",
+		p.name, "`",
+		"\nHowever, you try to call `", p.type, ".", p.name, "` ", p.location)
 end
 
 --------------------------------------------------------------------------------
@@ -3234,6 +3251,15 @@ local function semanticsSmol(sources, main)
 
 	local functions = {}
 
+	local function definitionFromType(t)
+		assertis(t, "Type+")
+
+		local definition = table.findwith(allDefinitions, "name", t.name)
+		assert(definition) -- Type Finder should verify that the type exists
+
+		return definition
+	end
+
 	-- RETURNS a FunctionIR
 	local function compileFunctionFromStruct(definition, signature)
 		assertis(definition, choiceType("ClassIR", "UnionIR"))
@@ -3439,6 +3465,103 @@ local function semanticsSmol(sources, main)
 					}
 				end
 				return block, {out}
+			elseif pExpression.tag == "static-call" then
+				local t = findType(pExpression.baseType)
+				verifyInstantiable(t)
+
+				local baseDefinition = definitionFromType(t)
+
+				local fullName = showType(t) .. "." .. pExpression.name
+
+				local method = table.findwith(baseDefinition.signatures,
+					"name", pExpression.name)
+				
+				if not method then
+					Report.NO_SUCH_METHOD {
+						modifier = "static",
+						type = showType(t),
+						name = pExpression.name,
+						definitionLocation = baseDefinition.location,
+						location = pExpression.location,
+					}
+				end
+
+				-- Check the number of parameters
+				if #method.parameters ~= #pExpression.arguments then
+					Report.WRONG_ARGUMENT_COUNT {
+						signatureCount = #method.parameter,
+						argumentCount = #pExpression.arguments,
+						location = pExpression.location,
+					}
+				end
+
+				-- Evaluate the arguments
+				local evaluation = {}
+				local argumentSources = {}
+				for i, argument in ipairs(pExpression.arguments) do
+					local subEvaluation, outs = compileExpression(
+						argument, scope
+					)
+
+					-- Verify each argument has exactly one value
+					if #outs ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "static argument",
+							expectedCount = 1,
+							givenCount = #outs,
+							location = argument.location,
+						}
+					end
+
+					-- Verify the type of the argument matches
+					local arg = outs[1]
+					if not areTypesEqual(arg.type, method.parameters[i]) then
+						Report.TYPES_DONT_MATCH {
+							purpose = string.ordinal(i) .. " " .. fullName,
+							expectedLocation = method.parameters[i].location,
+							givenType = showType(arg.type),
+							location = argument.location,
+							expectedType = showType(method.parameters[i].type)
+						}
+					end
+
+					table.insert(evaluation, subEvaluation)
+					table.insert(argumentSources, arg)
+				end
+
+				-- Collect the constraints
+				local constraints = {}
+				for gi, generic in ipairs(baseDefinition.generics) do
+					for ci, constraint in ipairs(generic.constraints) do
+						local key = "#" .. gi .. "_" .. ci
+						constraints[key] = constraintFrom(
+							constraint.interface, t.parameters[gi])
+					end
+				end
+
+				-- Create variables for the output
+				local outs = {}
+				for _, returnType in pairs(method.returnTypes) do
+					local returnVariable = {
+						name = generateLocalID(),
+						type = returnType,
+						location = pExpression.location,
+					}
+					table.insert(outs, returnVariable)
+					table.insert(evaluation, localSt(returnVariable))
+				end
+
+				table.insert(evaluation, {
+					tag = "static-call",
+					baseType = t,
+					name = method.name,
+					arguments = argumentSources,
+					constraints = constraints,
+					destinations = outs,
+					returns = "no",
+				})
+				
+				return buildBlock(evaluation), outs
 			end
 
 			error("TODO expression: " .. show(pExpression))

@@ -1,0 +1,29 @@
+package test;
+
+class Foo is Convertible[Number] {
+	method toThing() Number {
+		return 1;
+	}
+
+	static make() Foo {
+		return new();
+	}
+}
+
+interface Convertible[#To] {
+	method toThing() #To;
+}
+
+class Shower[#From, #To | #From is Convertible[#To]] {
+	static convert(from #From) #To {
+		return from.toThing();
+	}
+}
+
+class Test {
+	static main() Unit {
+		var foo Foo = Foo.make();
+
+		var x Number = Shower[Foo, Number].convert(foo);
+	}
+}

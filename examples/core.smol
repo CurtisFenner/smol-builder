@@ -1,15 +1,22 @@
 package core;
 
+// TODO: replace with Unit
+class UUnit {
+	static make() UUnit {
+		return new();
+	}
+}
+
 union Option[#T] {
 	var value #T;
-	var none Unit;
+	var none UUnit;
 
 	static makeValue(value #T) Option[#T] {
 		return new(value = value);
 	}
 
 	static makeNone() Option[#T] {
-		return new(none = Unit.make());
+		return new(none = UUnit.make());
 	}
 }
 
