@@ -2028,6 +2028,7 @@ REGISTER_TYPE("ClassIR", recordType {
 	generics = listType "TypeParameterIR",
 	implements = listType "ConcreteType+",
 	signatures = listType "Signature",
+	constraints = mapType("string", "ConcreteType+"),
 })
 
 REGISTER_TYPE("UnionIR", recordType {
@@ -2037,6 +2038,7 @@ REGISTER_TYPE("UnionIR", recordType {
 	generics = listType "TypeParameterIR",
 	implements = listType "ConcreteType+",
 	signatures = listType "Signature",	
+	constraints = mapType("string", "ConcreteType+"),
 })
 
 REGISTER_TYPE("InterfaceIR", recordType {
@@ -2132,6 +2134,7 @@ EXTEND_TYPE("NewSt", "AbstractStatementIR", recordType {
 	tag = constantType "new",
 	fields = mapType("string", "VariableIR"),
 	type = "ConcreteType+",
+	constraints = mapType("string", "ConstraintIR"),	
 	returns = constantType "no",
 })
 
@@ -2148,6 +2151,18 @@ REGISTER_TYPE("VariableIR", recordType {
 	type = "Type+",
 	location = "string",
 })
+
+REGISTER_TYPE("ConstraintIR", choiceType(
+	recordType {
+		tag = "this-constraint",
+		instance = "VariableIR",
+		name = "string",
+	},
+	recordType {
+		tag = "parameter-constraint",
+		name = "string",
+	}
+))
 
 --------------------------------------------------------------------------------
 
@@ -2415,6 +2430,11 @@ end
 
 function Report.NO_SUCH_VARIABLE(p)
 	quit("There is no variable named `", p.name, "` in scope ", p.location)
+end
+
+function Report.NEW_USED_OUTSIDE_STATIC(p)
+	quit("You can only use `new` expressions in static methods.",
+		"\nHowever, you try to invoke `new` ", p.location)
 end
 
 --------------------------------------------------------------------------------
@@ -2749,6 +2769,14 @@ local function semanticsSmol(sources, main)
 			local implements = table.map(
 				typeFinder, definition.implements, generics)
 
+			-- Create a set of constraints
+			local constraints = {}
+			for gi, generic in ipairs(generics) do
+				for ci, constraint in ipairs(generic.constraints) do
+					constraints["#" .. gi .. "_" .. ci] = constraint.interface
+				end
+			end
+
 			return freeze {
 				tag = tag,
 
@@ -2757,6 +2785,8 @@ local function semanticsSmol(sources, main)
 				fields = fields,
 				signatures = signatures,
 				implements = implements,
+
+				constraints = constraints,
 
 				location = definition.location,
 			}
@@ -3332,12 +3362,28 @@ local function semanticsSmol(sources, main)
 				}
 				assertis(out.type, "ConcreteType+")
 
+				if signature.modifier ~= "static" then
+					Report.NEW_USED_OUTSIDE_STATIC {
+						location = pExpression.location,
+					}
+				end
+
 				local newSt = {
 					tag = "new",
 					type = containerType,
 					fields = {},
 					returns = "no",
+					constraints = {}
 				}
+				
+				-- All of the constraints are provided as arguments to this
+				-- static function
+				for constraintName in pairs(definition.constraints) do
+					newSt.constraints[constraintName] = freeze {
+						tag = "parameter-constraint",
+						name = constraintName,
+					}
+				end
 
 				local evaluation = {}
 				for _, argument in ipairs(pExpression.arguments) do

@@ -1,0 +1,9 @@
+package test;
+
+class Test {
+	method foo() Test {
+		return new();
+	}
+	static main() Unit {
+	}
+}
