@@ -1960,7 +1960,7 @@ local function parseSmol(tokens)
 				return {
 					tag = "method-call",
 					arguments = x.arguments,
-					func = x.name, --: string
+					methodName = x.name, --: string
 					location = x.location,
 				}
 			end
@@ -2147,6 +2147,15 @@ EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	name = "string",
+})
+
+EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
+	tag = constantType "method-call",
+	baseInstance = "VariableIR",
+	name = "string",
+	arguments = listType "VariableIR",
+	destinations = listType "VariableIR",
+	returns = constantType "no",
 })
 
 REGISTER_TYPE("Signature", recordType {
@@ -3252,10 +3261,10 @@ local function semanticsSmol(sources, main)
 	local functions = {}
 
 	local function definitionFromType(t)
-		assertis(t, "Type+")
+		assertis(t, choiceType("ConcreteType+", "KeywordType+"))
 
 		local definition = table.findwith(allDefinitions, "name", t.name)
-		assert(definition) -- Type Finder should verify that the type exists
+		assert(definition, show(t)) -- Type Finder should verify that the type exists
 
 		return definition
 	end
@@ -3362,7 +3371,7 @@ local function semanticsSmol(sources, main)
 						returns = "no",
 					}
 				}
-				return block, {out}
+				return block, freeze {out}
 			elseif pExpression.tag == "number-literal" then
 				local out = {
 					name = generateLocalID(),
@@ -3379,7 +3388,7 @@ local function semanticsSmol(sources, main)
 						returns = "no",
 					}
 				}
-				return block, {out}
+				return block, freeze {out}
 			elseif pExpression.tag == "new-expression" then
 				local out = {
 					name = generateLocalID(),
@@ -3451,7 +3460,7 @@ local function semanticsSmol(sources, main)
 				local block = buildBlock(table.concatted(
 					evaluation, {localSt(out), newSt}
 				))
-				return block, {out}
+				return block, freeze {out}
 			elseif pExpression.tag == "identifier" then
 				local block = buildBlock({})
 				local out = nil
@@ -3464,10 +3473,14 @@ local function semanticsSmol(sources, main)
 						location = pExpression.location,
 					}
 				end
-				return block, {out}
+				return block, freeze {out}
 			elseif pExpression.tag == "static-call" then
 				local t = findType(pExpression.baseType)
 				verifyInstantiable(t)
+
+				if t.tag == "generic+" then
+					error("TODO: static generic calls are different")
+				end
 
 				local baseDefinition = definitionFromType(t)
 
@@ -3476,7 +3489,7 @@ local function semanticsSmol(sources, main)
 				local method = table.findwith(baseDefinition.signatures,
 					"name", pExpression.name)
 				
-				if not method then
+				if not method or method.modifier ~= "static" then
 					Report.NO_SUCH_METHOD {
 						modifier = "static",
 						type = showType(t),
@@ -3561,7 +3574,40 @@ local function semanticsSmol(sources, main)
 					returns = "no",
 				})
 				
-				return buildBlock(evaluation), outs
+				return buildBlock(evaluation), freeze(outs)
+			elseif pExpression.tag == "method-call" then
+				-- Compile the base instance
+				local evaluation, baseInstanceValues =
+					compileExpression(pExpression.base, scope)
+				if #baseInstanceValues ~= 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "method base expression",
+						expectedCount = 1,
+						givenCount = #baseInstanceValues,
+						location = pExpression.location,
+					}
+				end
+				local baseInstance = baseInstanceValues[1]
+
+				if baseInstance.type.tag == "generic+" then
+					error("TODO: methods on generics are different")
+				end
+
+				local baseDefinition = definitionFromType(baseInstance.type)
+				
+				-- Find the definition of the method being invoked
+				local method = table.findwidth(baseDefinition.signatures,
+					"name", pExpression.methodName)
+				if not method or method.modifier ~= "method" then
+					Report.NO_SUCH_METHOD {
+						modifier = "method",
+						type = showType(t),
+						name = pExpression.name,
+						definitionLocation = baseDefinition.location,
+						location = pExpression.location,
+					}
+				end
+
 			end
 
 			error("TODO expression: " .. show(pExpression))
