@@ -551,6 +551,15 @@ function table.findwith(list, property, value)
 	end
 end
 
+-- RETURNS an index of `list` such that `list[return] == element`
+function table.indexof(list, element)
+	for i, v in pairs(list) do
+		if v == element then
+			return i
+		end
+	end
+end
+
 -- Lua Type Specifications -----------------------------------------------------
 
 local _TYPE_SPEC_BY_NAME = {}
@@ -2074,6 +2083,7 @@ REGISTER_TYPE("maybe", choiceType(
 REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"AssignSt",
 	"BlockSt",
+	"GenericMethodCallSt",
 	"LocalSt",
 	"NewSt",
 	"NumberLoadSt",
@@ -2158,6 +2168,16 @@ EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
 	returns = constantType "no",
 })
 
+EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
+	tag = constantType "generic-method-call",
+	baseInstance = "VariableIR",
+	constraint = "ConstraintIR",
+	name = "string",
+	arguments = listType "VariableIR",
+	destinations = listType "VariableIR",
+	returns = constantType "no",
+})
+
 REGISTER_TYPE("Signature", recordType {
 	name = "string",
 	parameters = listType "VariableIR",
@@ -2174,13 +2194,18 @@ REGISTER_TYPE("VariableIR", recordType {
 
 REGISTER_TYPE("ConstraintIR", choiceType(
 	recordType {
-		tag = "this-constraint",
+		tag = constantType "this-constraint",
 		instance = "VariableIR",
 		name = "string",
 	},
 	recordType {
-		tag = "parameter-constraint",
+		tag = constantType "parameter-constraint",
 		name = "string",
+	},
+	recordType {
+		tag = constantType "concrete-constraint",
+		interface = "ConcreteType+",
+		concrete = "ConcreteType+",
 	}
 ))
 
@@ -2209,7 +2234,7 @@ REGISTER_TYPE("KeywordType+", recordType {
 
 REGISTER_TYPE("GenericType+", recordType {
 	tag = constantType "generic+",
-	
+
 	name = "string", -- e.g., "Foo" for `#Foo`
 
 	location = "string",
@@ -2437,6 +2462,9 @@ function Report.WRONG_VALUE_COUNT(p)
 end
 
 function Report.TYPES_DONT_MATCH(p)
+	assertis(p.expectedType, "string")
+	assertis(p.givenType, "string")
+	assertis(p.location, "string")
 	quit("The ", p.purpose, " expects `", p.expectedType, "` as defined ",
 		p.expectedLocation,
 		"\nHowever, `", p.givenType, "` was provided at ", p.location)
@@ -2461,6 +2489,12 @@ function Report.NO_SUCH_METHOD(p)
 	quit("The type `", p.type, "` does not have a ", p.modifier, " called `",
 		p.name, "`",
 		"\nHowever, you try to call `", p.type, ".", p.name, "` ", p.location)
+end
+
+function Report.CONFLICTING_INTERFACES(p)
+	quit("The method `", p.method, "` is ambiguous ", p.location,
+		"because `", p.method, "` is defined in both `", p.interfaceOne,
+		"` and `", p.interfaceTwo, "`")
 end
 
 --------------------------------------------------------------------------------
@@ -3348,6 +3382,27 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
+		-- RETURNS a ConstraintIR
+		local function constraintFrom(interface, implementer)
+			assertis(interface, "Type+")
+			assert(isTypeInstantiable(implementer))
+
+			if implementer.tag == "concrete-type+" then
+				if #implementer.arguments > 0 then
+					error "TODO"
+				end
+				return freeze {
+					tag = "concrete-constraint",
+					interface = interface,
+					concrete = implementer,
+				}
+			end
+			print(show(interface))
+			print(show(implementer))
+			print(string.rep(".", 80))
+			error("unhandled tag: " .. show(implementer))
+		end
+
 		-- RETURNS StatementIR, [Variable]
 		local function compileExpression(pExpression, scope)
 			assertis(pExpression, recordType {
@@ -3486,6 +3541,9 @@ local function semanticsSmol(sources, main)
 
 				local fullName = showType(t) .. "." .. pExpression.name
 
+				-- Map type variables to the type-values used for this instantiation
+				local substituter = getSubstituterFromConcreteType(t)
+
 				local method = table.findwith(baseDefinition.signatures,
 					"name", pExpression.name)
 				
@@ -3528,13 +3586,14 @@ local function semanticsSmol(sources, main)
 
 					-- Verify the type of the argument matches
 					local arg = outs[1]
-					if not areTypesEqual(arg.type, method.parameters[i]) then
+					local parameterType = substituter(method.parameters[i].type)
+					if not areTypesEqual(arg.type, parameterType) then
 						Report.TYPES_DONT_MATCH {
-							purpose = string.ordinal(i) .. " " .. fullName,
+							purpose = string.ordinal(i) .. " argument to " .. fullName,
 							expectedLocation = method.parameters[i].location,
 							givenType = showType(arg.type),
 							location = argument.location,
-							expectedType = showType(method.parameters[i].type)
+							expectedType = showType(parameterType)
 						}
 					end
 
@@ -3547,8 +3606,7 @@ local function semanticsSmol(sources, main)
 				for gi, generic in ipairs(baseDefinition.generics) do
 					for ci, constraint in ipairs(generic.constraints) do
 						local key = "#" .. gi .. "_" .. ci
-						constraints[key] = constraintFrom(
-							constraint.interface, t.parameters[gi])
+						constraints[key] = constraintFrom(constraint.interface, t.arguments[gi])
 					end
 				end
 
@@ -3557,7 +3615,7 @@ local function semanticsSmol(sources, main)
 				for _, returnType in pairs(method.returnTypes) do
 					local returnVariable = {
 						name = generateLocalID(),
-						type = returnType,
+						type = substituter(returnType),
 						location = pExpression.location,
 					}
 					table.insert(outs, returnVariable)
@@ -3577,7 +3635,7 @@ local function semanticsSmol(sources, main)
 				return buildBlock(evaluation), freeze(outs)
 			elseif pExpression.tag == "method-call" then
 				-- Compile the base instance
-				local evaluation, baseInstanceValues =
+				local baseEvaluation, baseInstanceValues =
 					compileExpression(pExpression.base, scope)
 				if #baseInstanceValues ~= 1 then
 					Report.WRONG_VALUE_COUNT {
@@ -3587,16 +3645,118 @@ local function semanticsSmol(sources, main)
 						location = pExpression.location,
 					}
 				end
+				local evaluation = {baseEvaluation}
 				local baseInstance = baseInstanceValues[1]
 
 				if baseInstance.type.tag == "generic+" then
-					error("TODO: methods on generics are different")
-				end
+					-- Generic instance
+					local parameter = table.findwith(definition.generics,
+						"name", baseInstance.type.name)
+					assert(parameter)
 
+					-- Find the constraint(s) which supply this method name
+					local matches = {}
+					for ci, constraint in ipairs(parameter.constraints) do
+						local interface = definitionFromType(constraint.interface)
+						local signature = table.findwith(interface.signatures, "name", pExpression.methodName)
+						if signature then
+							table.insert(matches, freeze {
+								signature = signature,
+								interface = interface,
+								id = table.indexof(definition.generics, parameter) .. "_" .. ci
+							})
+						end
+					end
+
+					-- Verify exactly one constraint supplies this method name
+					if #matches == 0 then
+						Report.NO_SUCH_METHOD {
+							modifier = "method",
+							type = showType(baseInstance.type),
+							name = pExpression.name,
+							definitionLocation = baseDefinition.location,
+							location = pExpression.location,
+						}
+					elseif #matches > 1 then
+						Report.CONFLICTING_INTERFACES {
+							method = pExpression.name,
+							interfaceOne = showType(matches[1].interface),
+							interfaceTwo = showType(matches[2].interface),
+							location = pExpression.location,
+						}
+					end
+					local method = matches[1]
+
+					-- Verify the types of the arguments match the parameters
+					-- Evaluate the arguments
+					local arguments = {}
+					for _, pArgument in ipairs(pExpression.arguments) do
+						local subEvaluation, outs = compileExpression(pArgument, scope)
+						
+						-- Verify each argument has exactly one value
+						if #outs ~= 1 then
+							Report.WRONG_VALUE_COUNT {
+								purpose = "method argument",
+								expectedCount = 1,
+								givenCount = #outs,
+								location = pArgument.location,
+							}
+						end
+
+						table.insert(arguments, outs[1])
+						if not areTypesEqual(argument.type, method.parameters[i].type) then
+							Report.TYPES_DONT_MATCH {
+								purpose = string.ordinal(i) .. " argument to `" .. fullName .. "`",
+								expectedType =	showType(method.parameters[i].type),
+								expectedLocation = method.parameters[i].location,
+								givenType = argument.type,
+								location = pArgument.location,
+							}
+						end
+						table.insert(evaluation, subEvaluation)
+					end
+					assertis(evaluation, listType "StatementIR")
+
+					local destinations = {}
+					for _, returnType in ipairs(method.signature.returnTypes) do
+						local destination = {
+							name = generateLocalID(),
+							type = returnType,
+							location = pExpression.location .. ">",
+						}
+						table.insert(destinations, destination)
+						table.insert(evaluation, {
+							tag = "local",
+							variable = destination,
+							returns = "no",
+						})
+					end
+
+					local constraint = {
+						tag = "this-constraint",
+						instance = baseInstance,
+						name = method.id,
+					}
+
+					table.insert(evaluation, {
+						tag = "generic-method-call",
+						baseInstance = baseInstance,
+						constraint = constraint,
+						name = pExpression.methodName,
+						arguments = arguments,
+						destinations = destinations,
+						returns = "no",
+					})
+
+					return buildBlock(evaluation), destinations
+				end
+				assertis(arguments, listType "VariableIR")
+
+				-- Concrete instance
 				local baseDefinition = definitionFromType(baseInstance.type)
 				
 				-- Find the definition of the method being invoked
-				local method = table.findwidth(baseDefinition.signatures,
+				local method = table.findwith(baseDefinition.signatures,
 					"name", pExpression.methodName)
 				if not method or method.modifier ~= "method" then
 					Report.NO_SUCH_METHOD {
@@ -3666,8 +3826,12 @@ local function semanticsSmol(sources, main)
 				for i, declaration in ipairs(declarations) do
 					local variable = declaration.variable
 					if not areTypesEqual(variable.type, values[i].type) then
-						Report.VARIABLE_DEFINITION_TYPE_MISMATCH {
-
+						Report.TYPES_DONT_MATCH {
+							purpose = "variable `" .. variable.name .. "`",
+							expectedType = showType(variable.type),
+							expectedLocation = variable.location,
+							givenType = showType(values[i].type),
+							location = pStatement.value.location,
 						}
 					end
 
