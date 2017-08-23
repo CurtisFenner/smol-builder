@@ -1,0 +1,22 @@
+package test;
+
+interface IsEmpty {
+	method isEmpty() Boolean;
+}
+
+class List[#T] {
+	method isEmpty() Boolean {
+		return false;
+	}
+}
+
+class Finite {
+	method isEmpty() Boolean {
+		return true;
+	}
+}
+
+class Test {
+	static main() Unit {
+	}
+}

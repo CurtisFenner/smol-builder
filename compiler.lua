@@ -934,7 +934,6 @@ local function lexSmol(source, filename)
 		["package"] = true,
 		["return"] = true,
 		["static"] = true,
-		["this"] = true,
 		["union"] = true,
 		["var"] = true,
 		-- built-in types
@@ -943,6 +942,8 @@ local function lexSmol(source, filename)
 		["Number"] = true,
 		["String"] = true,
 		["Unit"] = true,
+		-- values
+		["this"] = true,
 	}
 
 	-- Define token parsing rules
