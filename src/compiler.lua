@@ -844,6 +844,7 @@ REGISTER_TYPE("maybe", choiceType(
 REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"AssignSt",
 	"BlockSt",
+	"BooleanLoadSt",
 	"GenericMethodCallSt",
 	"LocalSt",
 	"NewSt",
@@ -936,6 +937,13 @@ EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
 	name = "string",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
+	returns = constantType "no",
+})
+
+EXTEND_TYPE("BooleanLoadSt", "AbstractStatementIR", recordType {
+	tag = constantType "boolean",
+	boolean = "boolean",
+	destination = "VariableIR",
 	returns = constantType "no",
 })
 

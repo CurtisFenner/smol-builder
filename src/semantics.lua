@@ -78,6 +78,8 @@ local function genericSubstituter(assignments)
 	return subs
 end
 
+--------------------------------------------------------------------------------
+
 local STRING_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "String",
@@ -89,6 +91,14 @@ local NUMBER_TYPE = freeze {
 	name = "Number",
 	location = "???",
 }
+
+local BOOLEAN_TYPE = freeze {
+	tag = "keyword-type+",
+	name = "Boolean",
+	location = "???",
+}
+
+--------------------------------------------------------------------------------
 
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
@@ -1271,12 +1281,22 @@ local function semanticsSmol(sources, main)
 				end
 
 			elseif pExpression.tag == "keyword" then
-				if pExpression.keyword == "false" then
+				if pExpression.keyword == "false" or pExpression.keyword == "true" then
 					local boolean = {
 						type = BOOLEAN_TYPE,
 						name = generateLocalID(),
+						location = pExpression.location,
 					}
-					error "TODO"
+					local execution = {
+						localSt(boolean),
+						{
+							tag = "boolean",
+							boolean = pExpression.keyword == "true",
+							destination = boolean,
+							returns = "no",
+						},
+					}
+					return buildBlock(execution), {boolean}
 				end
 				error("TODO: keyword `" .. pExpression.keyword .. "`")
 			end
