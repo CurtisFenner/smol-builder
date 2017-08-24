@@ -2,6 +2,94 @@
 
 local Report = import "semantic-errors.lua"
 
+-- RETURNS a string of smol representing the given type
+local function showType(t)
+	assertis(t, "Type+")
+
+	if t.tag == "concrete-type+" then
+		if #t.arguments == 0 then
+			return t.name
+		end
+		local arguments = table.map(showType, t.arguments)
+		return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
+	elseif t.tag == "keyword-type+" then
+		return t.name
+	elseif t.tag == "generic+" then
+		return "#" .. t.name
+	end
+	error("unknown Type+ tag `" .. t.tag .. "`")
+end
+
+-- RETURNS whether or not a and b are the same type
+-- REQUIRES that type names cannot be shadowed and
+-- that a and b come from the same (type) scope
+local function areTypesEqual(a, b)
+	assertis(a, "Type+")
+	assertis(b, "Type+")
+
+	if a.tag ~= b.tag then
+		return false
+	elseif a.tag == "concrete-type+" then
+		if a.name ~= b.name then
+			return false
+		elseif #a.arguments ~= #b.arguments then
+			-- XXX: should this be fixed before here?
+			return false
+		end
+		for k in ipairs(a.arguments) do
+			if not areTypesEqual(a.arguments[k], b.arguments[k]) then
+				return false
+			end
+		end
+		return true
+	elseif a.tag == "keyword-type+" then
+		return a.name == b.name
+	elseif a.tag == "generic+" then
+		return a.name == b.name
+	end
+	error("unknown type tag `" .. a.tag .. "`")
+end
+
+-- assignments: map string -> Type+
+-- RETURNS a function Type+ -> Type+ that substitutes the indicated
+-- types for generic variables.
+local function genericSubstituter(assignments)
+	assertis(assignments, mapType("string", "Type+"))
+
+	local function subs(t)
+		assertis(t, "Type+")
+
+		if t.tag == "concrete-type+" then
+			return {tag = "concrete-type+",
+				name = t.name,
+				arguments = table.map(subs, t.arguments),
+				location = t.location,
+			}
+		elseif t.tag == "keyword-type+" then
+			return t
+		elseif t.tag == "generic+" then
+			if not assignments[t.name] then
+				Report.UNKNOWN_GENERIC_USED(t)
+			end
+			return assignments[t.name]
+		end
+		error("unknown Type+ tag `" .. t.tag .. "`")
+	end
+	return subs
+end
+
+local STRING_TYPE = freeze {
+	tag = "keyword-type+",
+	name = "String",
+	location = "???",
+}
+
+local NUMBER_TYPE = freeze {
+	tag = "keyword-type+",
+	name = "Number",
+	location = "???",
+}
+
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
 	assertis(main, "string")
@@ -30,24 +118,6 @@ local function semanticsSmol(sources, main)
 
 			definitionSourceByFullName[fullName] = definition
 		end
-	end
-
-	-- RETURNS a string of smol representing the given type
-	local function showType(t)
-		assertis(t, "Type+")
-
-		if t.tag == "concrete-type+" then
-			if #t.arguments == 0 then
-				return t.name
-			end
-			local arguments = table.map(showType, t.arguments)
-			return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
-		elseif t.tag == "keyword-type+" then
-			return t.name
-		elseif t.tag == "generic+" then
-			return "#" .. t.name
-		end
-		error("unknown Type+ tag `" .. t.tag .. "`")
 	end
 
 	-- (2) Fully qualify all local type names
@@ -405,64 +475,6 @@ local function semanticsSmol(sources, main)
 
 	-- (3) Verify and record all interfaces implementation
 
-	-- RETURNS whether or not a and b are the same type
-	-- REQUIRES that type names cannot be shadowed and
-	-- that a and b come from the same (type) scope
-	local function areTypesEqual(a, b)
-		assertis(a, "Type+")
-		assertis(b, "Type+")
-
-		if a.tag ~= b.tag then
-			return false
-		elseif a.tag == "concrete-type+" then
-			if a.name ~= b.name then
-				return false
-			elseif #a.arguments ~= #b.arguments then
-				-- XXX: should this be fixed before here?
-				return false
-			end
-			for k in ipairs(a.arguments) do
-				if not areTypesEqual(a.arguments[k], b.arguments[k]) then
-					return false
-				end
-			end
-			return true
-		elseif a.tag == "keyword-type+" then
-			return a.name == b.name
-		elseif a.tag == "generic+" then
-			return a.name == b.name
-		end
-		error("unknown type tag `" .. a.tag .. "`")
-	end
-
-	-- assignments: map string -> Type+
-	-- RETURNS a function Type+ -> Type+ that substitutes the indicated
-	-- types for generic variables.
-	local function genericSubstituter(assignments)
-		assertis(assignments, mapType("string", "Type+"))
-
-		local function subs(t)
-			assertis(t, "Type+")
-
-			if t.tag == "concrete-type+" then
-				return {tag = "concrete-type+",
-					name = t.name,
-					arguments = table.map(subs, t.arguments),
-					location = t.location,
-				}
-			elseif t.tag == "keyword-type+" then
-				return t
-			elseif t.tag == "generic+" then
-				if not assignments[t.name] then
-					Report.UNKNOWN_GENERIC_USED(t)
-				end
-				return assignments[t.name]
-			end
-			error("unknown Type+ tag `" .. t.tag .. "`")
-		end
-		return subs
-	end
-
 	-- Verify that `class` actually implements each interface that it claims to
 	-- RETURNS nothing
 	local function checkStructImplementsClaims(class)
@@ -781,18 +793,6 @@ local function semanticsSmol(sources, main)
 
 		return signature.container:gsub(":", "_") .. "_" .. signature.name
 	end
-
-	local STRING_TYPE = freeze {
-		tag = "keyword-type+",
-		name = "String",
-		location = "???",
-	}
-
-	local NUMBER_TYPE = freeze {
-		tag = "keyword-type+",
-		name = "Number",
-		location = "???",
-	}
 
 	local functions = {}
 
@@ -1176,7 +1176,7 @@ local function semanticsSmol(sources, main)
 							modifier = "method",
 							type = showType(baseInstance.type),
 							name = pExpression.name,
-							definitionLocation = baseDefinition.location,
+							definitionLocation = parameter.location,
 							location = pExpression.location,
 						}
 					elseif #matches > 1 then
@@ -1192,7 +1192,7 @@ local function semanticsSmol(sources, main)
 					-- Verify the types of the arguments match the parameters
 					-- Evaluate the arguments
 					local arguments = {}
-					for _, pArgument in ipairs(pExpression.arguments) do
+					for i, pArgument in ipairs(pExpression.arguments) do
 						local subEvaluation, outs = compileExpression(pArgument, scope)
 						
 						-- Verify each argument has exactly one value
@@ -1206,12 +1206,12 @@ local function semanticsSmol(sources, main)
 						end
 
 						table.insert(arguments, outs[1])
-						if not areTypesEqual(argument.type, method.parameters[i].type) then
+						if not areTypesEqual(pArgument.type, method.parameters[i].type) then
 							Report.TYPES_DONT_MATCH {
 								purpose = string.ordinal(i) .. " argument to `" .. fullName .. "`",
 								expectedType =	showType(method.parameters[i].type),
 								expectedLocation = method.parameters[i].location,
-								givenType = argument.type,
+								givenType = showType(pArgument.type),
 								location = pArgument.location,
 							}
 						end
