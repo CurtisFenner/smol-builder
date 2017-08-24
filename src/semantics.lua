@@ -120,6 +120,87 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a function Type+ -> Type+ to apply to types on the
+-- class/struct/interface's definition to use the specific types
+-- in this instance
+local function getSubstituterFromConcreteType(type, allDefinitions)
+	assertis(type, "ConcreteType+")
+	assertis(allDefinitions, listType "Definition")
+
+	local definition = table.findwith(allDefinitions, "name", type.name)
+	assert(definition)
+
+	local assignments = {}
+	for i, generic in ipairs(definition.generics) do
+		assignments[generic.name] = type.arguments[i]
+	end
+	return genericSubstituter(assignments)
+end
+
+-- RETURNS a list of constraints (as Type+) that the given type satisfies
+local function getTypeConstraints(type, scope, allDefinitions)
+	assertis(type, "Type+")
+	assertis(scope, listType "TypeParameterIR")
+	assertis(allDefinitions, listType "Definition")
+
+	if type.tag == "concrete-type+" then
+		local definition = table.findwith(allDefinitions, "name", type.name)
+		if definition.tag ~= "union" and definition.tag ~= "class" then
+			error(string.rep("?", 8000))
+		end
+
+		-- TODO: Is arity already checked?
+		local substitute = getSubstituterFromConcreteType(type, allDefinitions)
+
+		local constraints = table.map(substitute, definition.implements)
+		return constraints
+	elseif type.tag == "keyword-type+" then
+		error("TODO: getTypeConstraints(keyword-type+")
+	elseif type.tag == "generic+" then
+		local parameter = table.findwith(scope, "name", type.name)
+		-- TODO: Are generics guaranteed to be in scope here?
+		assert(parameter)
+
+		return table.map(table.getter "interface", parameter.constraints)
+	end
+	error("unknown Type+ tag `" .. type.tag .. "`")
+end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS nothing
+-- VERIFIES that the type satisfies the required constraint
+local function verifyTypeSatisfiesConstraint(type, constraint, scope, need, allDefinitions)
+	assertis(type, "Type+")
+	assertis(constraint, "ConcreteType+")
+	assertis(scope, listType "TypeParameterIR")
+	assertis(need, recordType {
+		container = "Definition",
+		constraint = "Type+",
+		nth = "integer",
+	})
+	assertis(allDefinitions, listType "Definition")
+
+	for _, c in ipairs(getTypeConstraints(type, scope, allDefinitions)) do
+		if areTypesEqual(c, constraint) then
+			return
+		end
+	end
+
+	-- The type `type` does not implement the constraint `constraint`
+	Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
+		type = showType(type),
+		constraint = showType(constraint),
+		location = type.location,
+		
+		nth = need.nth,
+		container = need.container.name,
+		cause = need.constraint.location,
+	}
+end
+
+--------------------------------------------------------------------------------
+
 local STRING_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "String",
@@ -646,79 +727,6 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	-- RETURNS a function Type+ -> Type+ to apply to types on the
-	-- class/struct/interface's definition to use the specific types
-	-- in this instance
-	local function getSubstituterFromConcreteType(type)
-		assertis(type, "ConcreteType+")
-
-		local definition = table.findwith(allDefinitions, "name", type.name)
-
-		local assignments = {}
-		for i, generic in ipairs(definition.generics) do
-			assignments[generic.name] = type.arguments[i]
-		end
-		return genericSubstituter(assignments)
-	end
-
-	-- RETURNS a list of constraints (as Type+) that the given type satisfies
-	local function getTypeConstraints(type, scope)
-		assertis(type, "Type+")
-		assertis(scope, listType "TypeParameterIR")
-
-		if type.tag == "concrete-type+" then
-			local definition = table.findwith(allDefinitions, "name", type.name)
-			if definition.tag ~= "union" and definition.tag ~= "class" then
-				error(string.rep("?", 8000))
-			end
-
-			-- TODO: Is arity already checked?
-			local substitute = getSubstituterFromConcreteType(type)
-
-			local constraints = table.map(substitute, definition.implements)
-			return constraints
-		elseif type.tag == "keyword-type+" then
-			error("TODO: getTypeConstraints(keyword-type+")
-		elseif type.tag == "generic+" then
-			local parameter = table.findwith(scope, "name", type.name)
-			-- TODO: Are generics guaranteed to be in scope here?
-			assert(parameter)
-
-			return table.map(table.getter "interface", parameter.constraints)
-		end
-		error("unknown Type+ tag `" .. type.tag .. "`")
-	end
-
-	-- RETURNS nothing
-	-- VERIFIES that the type satisfies the required constraint
-	local function verifyTypeSatisfiesConstraint(type, constraint, scope, need)
-		assertis(type, "Type+")
-		assertis(constraint, "ConcreteType+")
-		assertis(scope, listType "TypeParameterIR")
-		assertis(need, recordType {
-			container = "Definition",
-			constraint = "Type+",
-			nth = "integer",
-		})
-
-		for _, c in ipairs(getTypeConstraints(type, scope)) do
-			if areTypesEqual(c, constraint) then
-				return
-			end
-		end
-
-		-- The type `type` does not implement the constraint `constraint`
-		Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
-			type = showType(type),
-			constraint = showType(constraint),
-			location = type.location,
-			
-			nth = need.nth,
-			container = need.container.name,
-			cause = need.constraint.location,
-		}
-	end
-
 	-- RETURNS nothing
 	-- VERIFIES that the type is entirely valid (in terms of scope, arity,
 	-- and constraints)
@@ -728,7 +736,7 @@ local function semanticsSmol(sources, main)
 
 		if type.tag == "concrete-type+" then
 			local definition = table.findwith(allDefinitions, "name", type.name)
-			local substitute = getSubstituterFromConcreteType(type)
+			local substitute = getSubstituterFromConcreteType(type, allDefinitions)
 
 			-- Check each argument
 			for i, generic in ipairs(definition.generics) do
@@ -745,7 +753,7 @@ local function semanticsSmol(sources, main)
 						container = definition,
 						constraint = generalConstraint.interface,
 						nth = i,
-					})
+					}, allDefinitions)
 				end
 
 				-- Verify recursively
@@ -1053,7 +1061,7 @@ local function semanticsSmol(sources, main)
 				local fullName = showType(t) .. "." .. pExpression.name
 
 				-- Map type variables to the type-values used for this instantiation
-				local substituter = getSubstituterFromConcreteType(t)
+				local substituter = getSubstituterFromConcreteType(t, allDefinitions)
 
 				local method = table.findwith(baseDefinition.signatures,
 					"name", pExpression.name)
