@@ -99,7 +99,7 @@ local function compiler(sources, main)
 	assert(type(main) == "string")
 
 	local command = table.concat {
-		"lua compiler.lua",
+		"lua src/compiler.lua",
 		" ", sources,
 		" ", main,
 	}
