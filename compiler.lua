@@ -944,6 +944,8 @@ local function lexSmol(source, filename)
 		["Unit"] = true,
 		-- values
 		["this"] = true,
+		["true"] = true,
+		["false"] = true,
 	}
 
 	-- Define token parsing rules
@@ -1584,6 +1586,8 @@ local function parseSmol(tokens)
 	local K_RETURN = LEXEME "return"
 	local K_STATIC = LEXEME "static"
 	local K_THIS = LEXEME "this"
+	local K_FALSE = LEXEME "false"
+	local K_TRUE = LEXEME "true"
 	local K_UNION = LEXEME "union"
 	local K_VAR = LEXEME "var"
 
@@ -1984,6 +1988,8 @@ local function parseSmol(tokens)
 		["atom-base"] = parser.choice {
 			parser.named "new-expression",
 			K_THIS,
+			K_TRUE,
+			K_FALSE,
 			parser.map(T_STRING_LITERAL, function(v)
 				return {tag = "string-literal", value = v}
 			end),
@@ -3114,8 +3120,7 @@ local function semanticsSmol(sources, main)
 			local constraints = table.map(substitute, definition.implements)
 			return constraints
 		elseif type.tag == "keyword-type+" then
-			-- TODO
-			return {}
+			error("TODO: getTypeConstraints(keyword-type+")
 		elseif type.tag == "generic+" then
 			local parameter = table.findwith(scope, "name", type.name)
 			-- TODO: Are generics guaranteed to be in scope here?
@@ -3769,6 +3774,15 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
+			elseif pExpression.tag == "keyword" then
+				if pExpression.keyword == "false" then
+					local boolean = {
+						type = BOOLEAN_TYPE,
+						name = generateLocalID(),
+					}
+					error "TODO"
+				end
+				error("TODO: keyword `" .. pExpression.keyword .. "`")
 			end
 
 			error("TODO expression: " .. show(pExpression))
