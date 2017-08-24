@@ -20,6 +20,46 @@ local function showType(t)
 	error("unknown Type+ tag `" .. t.tag .. "`")
 end
 
+local idCount = 0
+-- RETURNS a unique (to this struct) local variable name
+local function generateLocalID()
+	idCount = idCount + 1
+	return "_local" .. tostring(idCount)
+end
+
+-- RETURNS a StatementIR representing the execution of statements in
+-- sequence
+local function buildBlock(statements)
+	assertis(statements, listType("StatementIR"))
+
+	local returned = "no"
+	for i, statement in ipairs(statements) do
+		if statement.returns == "yes" then
+			assert(i == #statements)
+			returned = "yes"
+		elseif statement.returns == "maybe" then
+			returned = "maybe"
+		end
+	end
+
+	return freeze {
+		tag = "block",
+		returns = returned,
+		statements = statements,
+	}
+end
+
+-- RETURNS a LocalSt
+local function localSt(variable)
+	assertis(variable, "VariableIR")
+
+	return freeze {
+		tag = "local",
+		variable = variable,
+		returns = "no",
+	}
+end
+
 -- RETURNS whether or not a and b are the same type
 -- REQUIRES that type names cannot be shadowed and
 -- that a and b come from the same (type) scope
@@ -804,8 +844,7 @@ local function semanticsSmol(sources, main)
 		return signature.container:gsub(":", "_") .. "_" .. signature.name
 	end
 
-	local functions = {}
-
+	-- RETURNS a Definition
 	local function definitionFromType(t)
 		assertis(t, choiceType("ConcreteType+", "KeywordType+"))
 
@@ -852,46 +891,6 @@ local function semanticsSmol(sources, main)
 				end
 			end
 			return nil
-		end
-
-		local idCount = 0
-		-- RETURNS a unique (to this struct) local variable name
-		local function generateLocalID()
-			idCount = idCount + 1
-			return "_local" .. tostring(idCount)
-		end
-
-		-- RETURNS a StatementIR representing the execution of statements in
-		-- sequence
-		local function buildBlock(statements)
-			assertis(statements, listType("StatementIR"))
-
-			local returned = "no"
-			for i, statement in ipairs(statements) do
-				if statement.returns == "yes" then
-					assert(i == #statements)
-					returned = "yes"
-				elseif statement.returns == "maybe" then
-					returned = "maybe"
-				end
-			end
-
-			return freeze {
-				tag = "block",
-				returns = returned,
-				statements = statements,
-			}
-		end
-
-		-- RETURNS a LocalSt
-		local function localSt(variable)
-			assertis(variable, "VariableIR")
-
-			return freeze {
-				tag = "local",
-				variable = variable,
-				returns = "no",
-			}
 		end
 
 		-- RETURNS a ConstraintIR
@@ -1479,6 +1478,7 @@ local function semanticsSmol(sources, main)
 		}
 	end
 
+	local functions = {}
 	-- Scan the definitions for all function bodies
 	for _, definition in ipairs(allDefinitions) do
 		if definition.tag == "class" or definition.tag == "union" then
