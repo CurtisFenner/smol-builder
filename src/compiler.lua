@@ -38,6 +38,9 @@ import "types.lua"
 
 local parser = import "parser.lua"
 local calculateSemantics = import "semantics.lua"
+local codegen = {
+	lua = import "codegen/genlua.lua",
+}
 
 -- Lexer -----------------------------------------------------------------------
 
@@ -784,9 +787,6 @@ end
 -- Semantics / Verification ----------------------------------------------------
 
 REGISTER_TYPE("Semantics", recordType {
-	classes = listType "ClassIR",
-	unions = listType "UnionIR",
-	interfaces = listType "InterfaceIR",
 	functions = listType "FunctionIR",
 	main = "string",
 })
@@ -1119,3 +1119,8 @@ for _, sourceFile in ipairs(sourceFiles) do
 end
 
 local semantics = calculateSemantics(sourceParses, mainFunction)
+
+-- TODO: read target
+local TARGET = "lua"
+local code = codegen[TARGET](semantics)
+print(code)

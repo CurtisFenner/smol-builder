@@ -1518,6 +1518,13 @@ local function semanticsSmol(sources, main)
 	end
 	
 	assertis(functions, listType "FunctionIR")
+
+	-- TODO: check the main class exists
+
+	return freeze {
+		classes = functions,
+		main = main,
+	}
 end
 
 return semanticsSmol
