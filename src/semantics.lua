@@ -2,6 +2,10 @@
 
 local Report = import "semantic-errors.lua"
 
+REGISTER_TYPE("Scope", recordType {
+	stack = listType(mapType("string", "Variable")),
+})
+
 -- RETURNS a string of smol representing the given type
 local function showType(t)
 	assertis(t, "Type+")
@@ -138,9 +142,9 @@ local function getSubstituterFromConcreteType(type, allDefinitions)
 end
 
 -- RETURNS a list of constraints (as Type+) that the given type satisfies
-local function getTypeConstraints(type, scope, allDefinitions)
+local function getTypeConstraints(type, typeScope, allDefinitions)
 	assertis(type, "Type+")
-	assertis(scope, listType "TypeParameterIR")
+	assertis(typeScope, listType "TypeParameterIR")
 	assertis(allDefinitions, listType "Definition")
 
 	if type.tag == "concrete-type+" then
@@ -157,7 +161,7 @@ local function getTypeConstraints(type, scope, allDefinitions)
 	elseif type.tag == "keyword-type+" then
 		error("TODO: getTypeConstraints(keyword-type+")
 	elseif type.tag == "generic+" then
-		local parameter = table.findwith(scope, "name", type.name)
+		local parameter = table.findwith(typeScope, "name", type.name)
 		-- TODO: Are generics guaranteed to be in scope here?
 		assert(parameter)
 
@@ -170,10 +174,10 @@ end
 
 -- RETURNS nothing
 -- VERIFIES that the type satisfies the required constraint
-local function verifyTypeSatisfiesConstraint(type, constraint, scope, need, allDefinitions)
+local function verifyTypeSatisfiesConstraint(type, constraint, typeScope, need, allDefinitions)
 	assertis(type, "Type+")
 	assertis(constraint, "ConcreteType+")
-	assertis(scope, listType "TypeParameterIR")
+	assertis(typeScope, listType "TypeParameterIR")
 	assertis(need, recordType {
 		container = "Definition",
 		constraint = "Type+",
@@ -181,7 +185,7 @@ local function verifyTypeSatisfiesConstraint(type, constraint, scope, need, allD
 	})
 	assertis(allDefinitions, listType "Definition")
 
-	for _, c in ipairs(getTypeConstraints(type, scope, allDefinitions)) do
+	for _, c in ipairs(getTypeConstraints(type, typeScope, allDefinitions)) do
 		if areTypesEqual(c, constraint) then
 			return
 		end
@@ -239,9 +243,9 @@ end
 -- RETURNS nothing
 -- VERIFIES that the type is entirely valid (in terms of scope, arity,
 -- and constraints)
-local function verifyTypeValid(type, scope, allDefinitions)
+local function verifyTypeValid(type, typeScope, allDefinitions)
 	assertis(type, "Type+")
-	assertis(scope, listType "TypeParameterIR")
+	assertis(typeScope, listType "TypeParameterIR")
 	assertis(allDefinitions, listType "Definition")
 
 	if type.tag == "concrete-type+" then
@@ -259,7 +263,7 @@ local function verifyTypeValid(type, scope, allDefinitions)
 				local constraint = substitute(generalConstraint.interface)
 
 				-- TODO: better explain context
-				verifyTypeSatisfiesConstraint(argument, constraint, scope, {
+				verifyTypeSatisfiesConstraint(argument, constraint, typeScope, {
 					container = definition,
 					constraint = generalConstraint.interface,
 					nth = i,
@@ -267,7 +271,7 @@ local function verifyTypeValid(type, scope, allDefinitions)
 			end
 
 			-- Verify recursively
-			verifyTypeValid(argument, scope, allDefinitions)
+			verifyTypeValid(argument, typeScope, allDefinitions)
 		end
 	elseif type.tag == "keyword-type+" then
 		return -- All keyword types are valid
@@ -276,6 +280,21 @@ local function verifyTypeValid(type, scope, allDefinitions)
 	else
 		error("unknown Type+ tag `" .. type.tag .. "`")
 	end
+end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS a variable or false
+local function getFromScope(scope, name)
+	assertis(scope, listType(mapType("string", "object")))
+	assertis(name, "string")
+
+	for i = #scope, 1, -1 do
+		if scope[i][name] then
+			return scope[i][name]
+		end
+	end
+	return nil
 end
 
 --------------------------------------------------------------------------------
@@ -385,8 +404,8 @@ local function semanticsSmol(sources, main)
 		assertis(packageIsInScope, mapType("string", constantType(true)))
 
 		-- RETURNS a Type+ with a fully-qualified name
-		local function typeFinder(t, scope)
-			assertis(scope, listType(recordType {name = "string"}))
+		local function typeFinder(t, typeScope)
+			assertis(typeScope, listType(recordType {name = "string"}))
 
 			if t.tag == "concrete-type" then
 				-- Search for the type in `type`
@@ -418,12 +437,12 @@ local function semanticsSmol(sources, main)
 
 				return {tag = "concrete-type+",
 					name = fullName,
-					arguments = table.map(typeFinder, t.arguments, scope),
+					arguments = table.map(typeFinder, t.arguments, typeScope),
 					location = t.location,
 				}
 			elseif t.tag == "generic" then
-				-- Search for the name in `scope`
-				if not table.findwith(scope, "name", t.name) then
+				-- Search for the name in `typeScope`
+				if not table.findwith(typeScope, "name", t.name) then
 					Report.UNKNOWN_GENERIC_USED(t)
 				end
 
@@ -904,19 +923,6 @@ local function semanticsSmol(sources, main)
 			local outType = signature.typeFinder(parsedType, typeScope)
 			verifyTypeValid(outType, definition.generics, allDefinitions)
 			return outType
-		end
-
-		-- RETURNS a variable or false
-		local function getFromScope(scope, name)
-			assertis(scope, listType(mapType("string", "object")))
-			assertis(name, "string")
-
-			for i = #scope, 1, -1 do
-				if scope[i][name] then
-					return scope[i][name]
-				end
-			end
-			return nil
 		end
 
 		-- RETURNS a ConstraintIR
