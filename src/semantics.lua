@@ -1510,7 +1510,11 @@ local function semanticsSmol(sources, main)
 		}
 	end
 
+	local classes = {}
+	local unions = {}
+	local interfaces = {}
 	local functions = {}
+
 	-- Scan the definitions for all function bodies
 	for _, definition in ipairs(allDefinitions) do
 		if definition.tag == "class" or definition.tag == "union" then
@@ -1520,6 +1524,15 @@ local function semanticsSmol(sources, main)
 
 				table.insert(functions, func)
 			end
+			if definition.tag == "class" then
+				table.insert(classes, definition)
+			else
+				table.insert(unions, definition)
+			end
+		elseif definition.tag == "interface" then
+			table.insert(interfaces, definition)
+		else
+			error("unknown definition tag `" .. definition.tag .. "`")
 		end
 	end
 	
@@ -1528,7 +1541,10 @@ local function semanticsSmol(sources, main)
 	-- TODO: check the main class exists
 
 	return freeze {
-		classes = functions,
+		classes = classes,
+		unions = unions,
+		interfaces = interfaces,
+		functions = functions,
 		main = main,
 	}
 end
