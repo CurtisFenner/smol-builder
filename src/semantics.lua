@@ -317,6 +317,12 @@ local BOOLEAN_TYPE = freeze {
 	location = "???",
 }
 
+local UNIT_TYPE = freeze {
+	tag = "keyword-type+",
+	name = "Unit",
+	location = "???",
+}
+
 --------------------------------------------------------------------------------
 
 -- RETURNS a Semantics, an IR description of the program
@@ -1102,9 +1108,10 @@ local function semanticsSmol(sources, main)
 
 				-- Check the number of parameters
 				if #method.parameters ~= #pExpression.arguments then
-					Report.WRONG_ARGUMENT_COUNT {
-						signatureCount = #method.parameter,
-						argumentCount = #pExpression.arguments,
+					Report.WRONG_VALUE_COUNT {
+						purpose = "static function `" .. fullName .. "`",
+						expectedCount = #method.parameters,
+						givenCount = #pExpression.arguments,
 						location = pExpression.location,
 					}
 				end
@@ -1435,6 +1442,30 @@ local function semanticsSmol(sources, main)
 				else
 					error("TODO")
 				end
+			elseif pStatement.tag == "do-statement" then
+				local evaluation, out = compileExpression(
+					pStatement.expression,
+					scope
+				)
+				assert(#out ~= 0)
+				if #out > 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "do-statement expression",
+						expectedCount = 1,
+						givenCount = #out,
+						location = pExpression.location,
+					}
+				elseif not areTypesEqual(out[1].type, UNIT_TYPE) then
+					Report.TYPES_DONT_MATCH {
+						purpose = "do-statement expression",
+						expectedType = "Unit",
+						expectedLocation = pExpression.expression.location,
+						givenType = showType(out[1].type),
+						location = pExpression.expression.location,
+					}
+				end
+
+				return evaluation
 			end
 			error("TODO: compileStatement(" .. show(pStatement) .. ")")
 		end
