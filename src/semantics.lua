@@ -468,9 +468,8 @@ local function semanticsSmol(sources, main)
 		-- RETURNS a signature
 		local function compiledSignature(signature, scope)
 			assertis(scope, listType("TypeParameterIR"))
-
-			local signature = freeze {
-				foreign = signature.foreign,
+			return freeze {
+				foreign = not not signature.foreign,
 				modifier = signature.modifier.keyword,
 				name = signature.name,
 				returnTypes = table.map(typeFinder, signature.returnTypes, scope),
@@ -483,8 +482,6 @@ local function semanticsSmol(sources, main)
 				end, signature.parameters),
 				location = signature.location,
 			}
-
-			return signature
 		end
 
 		-- RETURNS a list[TypeParameterIR]

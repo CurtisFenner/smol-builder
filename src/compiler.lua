@@ -953,6 +953,7 @@ REGISTER_TYPE("Signature", recordType {
 	returnTypes = listType "Type+",
 	modifier = choiceType(constantType "static", constantType "method"),
 	container = "string",
+	foreign = "boolean",
 })
 
 REGISTER_TYPE("VariableIR", recordType {
