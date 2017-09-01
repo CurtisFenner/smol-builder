@@ -47,6 +47,11 @@ local function luaEncodedString(value)
 	return "\"" .. table.concat(out) .. "\""
 end
 
+-- RETURNS a string
+local function luaEncodedNumber(value)
+	return tostring(value)
+end
+
 local function indentedEmitter(emit)
 	return function(line)
 		return emit("\t" .. line)
@@ -72,6 +77,14 @@ local function generateStatement(statement, emit)
 		emit(localName(statement.destination.name))
 		emit("\t= " .. luaEncodedString(statement.string))
 		return
+	elseif statement.tag == "number" then
+		emit(localName(statement.destination.name))
+		emit("\t= " .. luaEncodedNumber(statement.number))
+		return
+	elseif statement.tag == "boolean" then
+		emit(localName(statement.destination.name))
+		emit("\t= " .. tostring(statement.boolean))
+		return
 	elseif statement.tag == "static-call" then
 		local destinationNames = {}
 		for _, destination in ipairs(statement.destinations) do
@@ -89,6 +102,9 @@ local function generateStatement(statement, emit)
 		emit("\t" .. table.concat(arguments, ", "))
 
 		emit(")")
+		return
+	elseif statement.tag == "assign" then
+		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name))
 		return
 	end
 	
@@ -120,8 +136,7 @@ end
 			table.insert(code, "function")
 			table.insert(code, concreteConstraintFunctionName(definition.name, interface.name))
 			table.insert(code, "(requirements)")
-			table.insert(code, beginFunction)
-			error("TODO")
+			table.insert(code, "\terror 'TODO'")
 			table.insert(code, "end")
 		end
 	end
