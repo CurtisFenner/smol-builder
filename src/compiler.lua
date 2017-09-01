@@ -3,7 +3,7 @@
 
 local ARGV = arg
 
-local INVOKATION = ARGV[0] .. " " .. table.concat(ARGV, ", ")
+INVOKATION = ARGV[0] .. " " .. table.concat(ARGV, " ")
 	.. "\non " .. os.date("!%c")
 	.. "\nsmol version 0??"
 
@@ -787,6 +787,9 @@ end
 -- Semantics / Verification ----------------------------------------------------
 
 REGISTER_TYPE("Semantics", recordType {
+	classes = listType "ClassIR",
+	interfaces = listType "InterfaceIR",
+	unions = listType "UnionIR",
 	functions = listType "FunctionIR",
 	main = "string",
 })
@@ -833,6 +836,7 @@ REGISTER_TYPE("FunctionIR", recordType {
 	generics = listType "TypeParameterIR",
 	returnTypes = listType "Type+",
 	body = "BlockSt",
+	signature = "Signature",
 })
 
 REGISTER_TYPE("maybe", choiceType(
@@ -1122,6 +1126,6 @@ end
 local semantics = calculateSemantics(sourceParses, mainFunction)
 
 -- TODO: read target
+local arguments = {out = "output.lua"}
 local TARGET = "lua"
-local code = codegen[TARGET](semantics)
-print(code)
+codegen[TARGET](semantics, arguments)

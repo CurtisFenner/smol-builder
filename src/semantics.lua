@@ -468,6 +468,7 @@ local function semanticsSmol(sources, main)
 		-- RETURNS a signature
 		local function compiledSignature(signature, scope)
 			assertis(scope, listType("TypeParameterIR"))
+
 			return freeze {
 				foreign = not not signature.foreign,
 				modifier = signature.modifier.keyword,
@@ -886,18 +887,15 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- (5) Compile all code bodies
-	local function targetSignatureIdentifier(signature)
-		assertis(signature, "Signature")
-
-		return signature.container:gsub(":", "_") .. "_" .. signature.name
-	end
 
 	-- RETURNS a Definition
 	local function definitionFromType(t)
 		assertis(t, choiceType("ConcreteType+", "KeywordType+"))
 
 		local definition = table.findwith(allDefinitions, "name", t.name)
-		assert(definition, show(t)) -- Type Finder should verify that the type exists
+		
+		-- Type Finder should verify that the type exists
+		assert(definition, "definition must exist")
 
 		return definition
 	end
@@ -1526,7 +1524,8 @@ local function semanticsSmol(sources, main)
 		assertis(body, "StatementIR")
 
 		return freeze {
-			name = targetSignatureIdentifier(signature),
+			name = signature.name,
+			definitionName = definition.name,
 			
 			-- Function's generics exclude those on the `this` instance
 			generics = generics,
@@ -1535,6 +1534,7 @@ local function semanticsSmol(sources, main)
 			returnTypes = signature.returnTypes,
 
 			body = body,
+			signature = signature,
 		}
 	end
 
