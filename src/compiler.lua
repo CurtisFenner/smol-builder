@@ -911,7 +911,8 @@ EXTEND_TYPE("NewSt", "AbstractStatementIR", recordType {
 	tag = constantType "new",
 	fields = mapType("string", "VariableIR"),
 	type = "ConcreteType+",
-	constraints = mapType("string", "ConstraintIR"),	
+	constraints = mapType("string", "ConstraintIR"),
+	destination = "VariableIR",
 	returns = constantType "no",
 })
 

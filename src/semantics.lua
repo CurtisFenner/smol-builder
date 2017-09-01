@@ -1007,7 +1007,8 @@ local function semanticsSmol(sources, main)
 					type = containerType,
 					fields = {},
 					returns = "no",
-					constraints = {}
+					constraints = {},
+					destination = out,
 				}
 				
 				-- All of the constraints are provided as arguments to this

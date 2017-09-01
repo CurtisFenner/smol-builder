@@ -20,10 +20,16 @@ local function concreteConstraintFunctionName(definitionName, interfaceName)
 	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_"
 end
 
--- RETURNS a string
+-- RETURNS a string representing a Lua identifier for a Smol variable or parameter
 local function localName(name)
 	assert(not name:find(":"))
 	return "smol_local_" .. name
+end
+
+-- RETURNS a string representing a Lua identifier for a Smol field
+local function fieldName(name)
+	assert(not name:find(":"))
+	return "smol_field_ " .. name
 end
 
 -- RETURNS a string
@@ -105,6 +111,16 @@ local function generateStatement(statement, emit)
 		return
 	elseif statement.tag == "assign" then
 		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name))
+		return
+	elseif statement.tag == "new" then
+		emit(localName(statement.destination.name) .. " = {")
+		for key, value in pairs(statement.fields) do
+			emit("\t" .. fieldName(key) .. " = " .. localName(value.name))
+		end
+		for key, constraint in pairs(statement.constraints) do
+			error "TODO"
+		end
+		emit("}")
 		return
 	end
 	
