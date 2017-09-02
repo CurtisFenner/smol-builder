@@ -1,0 +1,21 @@
+package test;
+import core;
+
+class Greeting {
+	var message String;
+
+	static evening() Greeting {
+		return new(message = "good evening");
+	}
+
+	method greet() Unit {
+		do core:Out.println(this.message);
+	}
+}
+
+class Test {
+	static main() Unit {
+		var greeter Greeting = Greeting.evening();
+		do greeter.greet();
+	}
+}

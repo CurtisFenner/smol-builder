@@ -1,0 +1,12 @@
+package smol;
+
+class Test {
+	var x Test;
+
+	static main() Unit {
+	}
+
+	static bad() Test {
+		return new();
+	}
+}

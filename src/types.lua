@@ -12,8 +12,7 @@
 -- + assertis
 -- Defines
 -- + constantType, recordType, listType, mapType, choiceType, intersectType,
--- + predicateType, nullableType, tupleTYpe
-
+-- + predicateType, nullableType, tupleType
 
 local specialRepresentation = {
 	["\a"] = [[\a]],

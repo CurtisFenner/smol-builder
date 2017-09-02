@@ -2,10 +2,6 @@
 
 local Report = import "semantic-errors.lua"
 
-REGISTER_TYPE("Scope", recordType {
-	stack = listType(mapType("string", "Variable")),
-})
-
 -- RETURNS a string of smol representing the given type
 local function showType(t)
 	assertis(t, "Type+")
@@ -927,7 +923,7 @@ local function semanticsSmol(sources, main)
 		end
 
 		-- RETURNS a ConstraintIR
-		local function constraintFrom(interface, implementer)
+		local function constraintFromStruct(interface, implementer)
 			assertis(interface, "Type+")
 			assert(isTypeInstantiable(implementer, allDefinitions))
 
@@ -958,7 +954,7 @@ local function semanticsSmol(sources, main)
 				local out = {
 					name = generateLocalID(),
 					type = STRING_TYPE,
-					location = pExpression.location .. ">"
+					location = pExpression.location,
 				}
 
 				local block = buildBlock {
@@ -968,14 +964,14 @@ local function semanticsSmol(sources, main)
 						string = pExpression.value,
 						destination = out,
 						returns = "no",
-					}
+					},
 				}
 				return block, freeze {out}
 			elseif pExpression.tag == "number-literal" then
 				local out = {
 					name = generateLocalID(),
 					type = NUMBER_TYPE,
-					location = pExpression.location .. ">"
+					location = pExpression.location,
 				}
 
 				local block = buildBlock {
@@ -1010,7 +1006,7 @@ local function semanticsSmol(sources, main)
 					constraints = {},
 					destination = out,
 				}
-				
+
 				-- All of the constraints are provided as arguments to this
 				-- static function
 				for constraintName in pairs(definition.constraints) do
@@ -1021,6 +1017,7 @@ local function semanticsSmol(sources, main)
 				end
 
 				local evaluation = {}
+				-- Evaluate all arguments to new
 				for _, argument in ipairs(pExpression.arguments) do
 					local subEvaluation, subOut = compileExpression(
 						argument.value, scope)
@@ -1034,9 +1031,9 @@ local function semanticsSmol(sources, main)
 					end
 					
 					table.insert(evaluation, subEvaluation)
-					local field = table.findwith(definition.fields,
-						"name", argument.name)
+					assertis(evaluation, listType "StatementIR")
 
+					local field = table.findwith(definition.fields, "name", argument.name)
 					if not field then
 						Report.NO_SUCH_FIELD {
 							name = argument.name,
@@ -1044,7 +1041,7 @@ local function semanticsSmol(sources, main)
 							location = argument.location,
 						}
 					end
-					newSt.fields[argument.name] = subOut[1]
+
 
 					if not areTypesEqual(field.type, subOut[1].type) then
 						Report.TYPES_DONT_MATCH {
@@ -1053,6 +1050,19 @@ local function semanticsSmol(sources, main)
 							expectedLocation = field.location,
 							givenType = showType(subOut[1].type),
 							location = argument.location,
+						}
+					end
+
+					newSt.fields[argument.name] = subOut[1]
+				end
+
+				-- Check that no fields are missing
+				for _, field in ipairs(definition.fields) do
+					if not newSt.fields[field.name] then
+						Report.MISSING_VALUE {
+							purpose = "new " .. showType(containerType) .. " expression",
+							name = field.name,
+							location = pExpression.location,
 						}
 					end
 				end
@@ -1152,7 +1162,7 @@ local function semanticsSmol(sources, main)
 				for gi, generic in ipairs(baseDefinition.generics) do
 					for ci, constraint in ipairs(generic.constraints) do
 						local key = "#" .. gi .. "_" .. ci
-						constraints[key] = constraintFrom(constraint.interface, t.arguments[gi])
+						constraints[key] = constraintFromStruct(constraint.interface, t.arguments[gi])
 					end
 				end
 
@@ -1314,6 +1324,8 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
+				error "TODO?"
+
 			elseif pExpression.tag == "keyword" then
 				if pExpression.keyword == "false" or pExpression.keyword == "true" then
 					local boolean = {
@@ -1331,8 +1343,74 @@ local function semanticsSmol(sources, main)
 						},
 					}
 					return buildBlock(execution), {boolean}
+				elseif pExpression.keyword == "this" then
+					local variable = {
+						type = containerType,
+						name = generateLocalID(),
+						location = pExpression.location,
+					}
+					local execution = {
+						localSt(variable),
+						{
+							tag = "this",
+							destination = variable,
+							returns = "no",
+						},
+					}
+					return buildBlock(execution), {variable}
 				end
 				error("TODO: keyword `" .. pExpression.keyword .. "`")
+			elseif pExpression.tag == "field" then
+				local baseEvaluation, bases = compileExpression(pExpression.base, scope)
+				if #bases ~= 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "base of a `." .. pExpression.field .. "` field access",
+						givenCount = #bases,
+						expectedCount = 1,
+						location = pExpression.location,
+					}
+				end
+
+				local base = bases[1]
+				if base.type.tag ~= "concrete-type+" then
+					Report.TYPE_MUST_BE_CLASS {
+						givenType = showType(base.type),
+						location = pExpression.location,
+					}
+				end
+
+				local definition = definitionFromType(base.type)
+				if definition.tag ~= "class" then
+					Report.TYPE_MUST_BE_CLASS {
+						givenType = showType(base.type),
+						location = pExpression.location,
+					}
+				end
+
+				local field = table.findwith(definition.fields, "name", pExpression.field)
+				if not field then
+					Report.NO_SUCH_FIELD {
+						container = showType(base.type),
+						name = pExpression.field,
+						location = pExpression.location,
+					}
+				end
+
+				-- TODO: verify that access is to the current class
+
+				local result = {
+					type = field.type,
+					name = generateLocalID(),
+					location = pExpression.location,
+				}
+				local accessStatement = {
+					tag = "field",
+					name = pExpression.field,
+					base = base,
+					destination = result,
+					returns = "no",
+				}
+				return buildBlock {baseEvaluation, accessStatement}, {result}
 			end
 
 			error("TODO expression: " .. show(pExpression))

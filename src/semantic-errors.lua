@@ -204,4 +204,14 @@ function Report.CONFLICTING_INTERFACES(p)
 		"` and `", p.interfaceTwo, "`")
 end
 
+function Report.TYPE_MUST_BE_CLASS(p)
+	quit("The ", p.purpose, " must be a class instance. However, it is a ",
+		p.givenType, " ", p.location)
+end
+
+function Report.MISSING_VALUE(p)
+	quit("The ", p.purpose, " requires `", p.name, "` be provided.",
+		"\nHowever, it is missing ", p.location)
+end
+
 return Report

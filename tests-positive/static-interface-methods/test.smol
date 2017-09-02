@@ -1,0 +1,25 @@
+package test;
+
+interface Makeable[#T] {
+	static make() #T;
+}
+
+class Foo is Makeable[Foo] {
+	static make() Foo {
+		return new();
+	}
+}
+
+class Box[#T | #T is Makeable[#T]] is Makeable[Box[#T]] {
+	var thing #T;
+
+	static make() Box[#T] {
+		return new(thing = #T.make());
+	}
+}
+
+class Test {
+	static main() Unit {
+	}
+}
+
