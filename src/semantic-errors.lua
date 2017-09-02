@@ -157,8 +157,8 @@ function Report.VARIABLE_DEFINED_TWICE(p)
 		"with the same name ", p.second)
 end
 
-function Report.UNINSTANTIABLE_USED(p)
-	quit("The type `", p.type, "` is not instantiable,",
+function Report.INTERFACE_USED_AS_VALUE(p)
+	quit("The definition for `", p.interface, "` is an interface,",
 		" so you cannot use it as the type of a variable or value as you are ",
 		p.location)
 end

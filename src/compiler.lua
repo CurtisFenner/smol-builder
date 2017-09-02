@@ -799,9 +799,9 @@ REGISTER_TYPE("ClassIR", recordType {
 	name = "string",
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
-	implements = listType "ConcreteType+",
+	implements = listType "InterfaceType+",
 	signatures = listType "Signature",
-	constraints = mapType("string", "ConcreteType+"),
+	constraints = mapType("string", "InterfaceType+"),
 })
 
 REGISTER_TYPE("UnionIR", recordType {
@@ -809,9 +809,9 @@ REGISTER_TYPE("UnionIR", recordType {
 	name = "string",
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
-	implements = listType "ConcreteType+",
+	implements = listType "InterfaceType+",
 	signatures = listType "Signature",	
-	constraints = mapType("string", "ConcreteType+"),
+	constraints = mapType("string", "InterfaceType+"),
 })
 
 REGISTER_TYPE("InterfaceIR", recordType {
@@ -826,7 +826,7 @@ REGISTER_TYPE("Definition", choiceType("ClassIR", "UnionIR", "InterfaceIR"))
 REGISTER_TYPE("TypeParameterIR", recordType {
 	name = "string", -- Type parameter name (e.g., "#Right")
 	constraints = listType(recordType {
-		interface = "ConcreteType+",
+		interface = "InterfaceType+",
 	}),
 })
 
@@ -995,7 +995,7 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 	},
 	recordType {
 		tag = constantType "concrete-constraint",
-		interface = "ConcreteType+",
+		interface = "InterfaceType+",
 		concrete = "ConcreteType+",
 	}
 ))
@@ -1005,6 +1005,13 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 REGISTER_TYPE("Type+", choiceType(
 	"ConcreteType+", "KeywordType+", "GenericType+"
 ))
+
+REGISTER_TYPE("InterfaceType+", recordType {
+	tag = constantType "interface-type",
+	name = "string",
+	arguments = listType "Type+",
+	location = "string",
+})
 
 REGISTER_TYPE("ConcreteType+", recordType {
 	tag = constantType "concrete-type+",

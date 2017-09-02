@@ -20,6 +20,17 @@ local function showType(t)
 	error("unknown Type+ tag `" .. t.tag .. "`")
 end
 
+-- RETURNS a string of smol representing the given interface type
+local function showInterfaceType(t)
+	assertis(t, "InterfaceType+")
+
+	if #t.arguments == 0 then
+		return t.name
+	end
+	local arguments = table.map(showType, t.arguments)
+	return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
+end
+
 local idCount = 0
 -- RETURNS a unique (to this struct) local variable name
 local function generateLocalID()
@@ -90,6 +101,27 @@ local function areTypesEqual(a, b)
 	error("unknown type tag `" .. a.tag .. "`")
 end
 
+-- RETURNS whether or not a and b are the same interface
+-- REQUIRES that type names cannot be shadowed and
+-- that a and b come from the same (type) scope
+local function areInterfaceTypesEqual(a, b)
+	assertis(a, "InterfaceType+")
+	assertis(b, "InterfaceType+")
+
+	if a.name ~= b.name then
+		return false
+	end
+	assert(#a.arguments == #b.arguments)
+
+	for k in ipairs(a.arguments) do
+		if not areTypesEqual(a.arguments[k], b.arguments[k]) then
+			return false
+		end
+	end
+
+	return true
+end
+
 -- assignments: map string -> Type+
 -- RETURNS a function Type+ -> Type+ that substitutes the indicated
 -- types for generic variables.
@@ -97,9 +129,16 @@ local function genericSubstituter(assignments)
 	assertis(assignments, mapType("string", "Type+"))
 
 	local function subs(t)
-		assertis(t, "Type+")
+		assertis(t, choiceType("InterfaceType+", "Type+"))
 
-		if t.tag == "concrete-type+" then
+		if t.tag == "interface-type" then
+			return {
+				tag = "interface-type",
+				name = t.name,
+				arguments = table.map(subs, t.arguments),
+				location = t.location,
+			}
+		elseif t.tag == "concrete-type+" then
 			return {tag = "concrete-type+",
 				name = t.name,
 				arguments = table.map(subs, t.arguments),
@@ -109,6 +148,7 @@ local function genericSubstituter(assignments)
 			return t
 		elseif t.tag == "generic+" then
 			if not assignments[t.name] then
+				-- XXX: should this be an assert?
 				Report.UNKNOWN_GENERIC_USED(t)
 			end
 			return assignments[t.name]
@@ -124,11 +164,13 @@ end
 -- class/struct/interface's definition to use the specific types
 -- in this instance
 local function getSubstituterFromConcreteType(type, allDefinitions)
-	assertis(type, "ConcreteType+")
+	-- XXX: This union is not a good thing
+	assertis(type, choiceType("ConcreteType+", "InterfaceType+"))
 	assertis(allDefinitions, listType "Definition")
 
 	local definition = table.findwith(allDefinitions, "name", type.name)
 	assert(definition)
+	assert(#definition.generics == #type.arguments)
 
 	local assignments = {}
 	for i, generic in ipairs(definition.generics) do
@@ -137,7 +179,8 @@ local function getSubstituterFromConcreteType(type, allDefinitions)
 	return genericSubstituter(assignments)
 end
 
--- RETURNS a list of constraints (as Type+) that the given type satisfies
+-- RETURNS a list of constraints (as InterfaceType+) that the given type
+-- satisfies
 local function getTypeConstraints(type, typeScope, allDefinitions)
 	assertis(type, "Type+")
 	assertis(typeScope, listType "TypeParameterIR")
@@ -145,20 +188,15 @@ local function getTypeConstraints(type, typeScope, allDefinitions)
 
 	if type.tag == "concrete-type+" then
 		local definition = table.findwith(allDefinitions, "name", type.name)
-		if definition.tag ~= "union" and definition.tag ~= "class" then
-			error(string.rep("?", 8000))
-		end
+		assert(definition and #definition.generics == #type.arguments)
 
-		-- TODO: Is arity already checked?
 		local substitute = getSubstituterFromConcreteType(type, allDefinitions)
-
 		local constraints = table.map(substitute, definition.implements)
 		return constraints
 	elseif type.tag == "keyword-type+" then
 		error("TODO: getTypeConstraints(keyword-type+")
 	elseif type.tag == "generic+" then
 		local parameter = table.findwith(typeScope, "name", type.name)
-		-- TODO: Are generics guaranteed to be in scope here?
 		assert(parameter)
 
 		return table.map(table.getter "interface", parameter.constraints)
@@ -172,17 +210,17 @@ end
 -- VERIFIES that the type satisfies the required constraint
 local function verifyTypeSatisfiesConstraint(type, constraint, typeScope, need, allDefinitions)
 	assertis(type, "Type+")
-	assertis(constraint, "ConcreteType+")
+	assertis(constraint, "InterfaceType+")
 	assertis(typeScope, listType "TypeParameterIR")
 	assertis(need, recordType {
 		container = "Definition",
-		constraint = "Type+",
+		constraint = "InterfaceType+",
 		nth = "integer",
 	})
 	assertis(allDefinitions, listType "Definition")
 
 	for _, c in ipairs(getTypeConstraints(type, typeScope, allDefinitions)) do
-		if areTypesEqual(c, constraint) then
+		if areInterfaceTypesEqual(c, constraint) then
 			return
 		end
 	end
@@ -190,50 +228,13 @@ local function verifyTypeSatisfiesConstraint(type, constraint, typeScope, need, 
 	-- The type `type` does not implement the constraint `constraint`
 	Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
 		type = showType(type),
-		constraint = showType(constraint),
+		constraint = showInterfaceType(constraint),
 		location = type.location,
 		
 		nth = need.nth,
 		container = need.container.name,
 		cause = need.constraint.location,
 	}
-end
-
--- RETURNS whether or not the type is instantiable, meaning usable
--- as a variable type or method parameter type
-local function isTypeInstantiable(t, allDefinitions)
-	assertis(t, "Type+")
-	assertis(allDefinitions, listType "Definition")
-
-	if t.tag == "concrete-type+" then
-		-- Find whether or not it is an interface
-		local definition = table.findwith(allDefinitions, "name", t.name)
-		if definition.tag == "interface" then
-			return false
-		elseif definition.tag == "union" or definition.tag == "class" then
-			return true
-		end
-		error("unknown definition tag `" .. definition.tag .. "`")
-	elseif t.tag == "keyword-type+" then
-		-- TODO: never type
-		return true
-	elseif t.tag == "generic+" then
-		return true
-	end
-	error("unknown type tag")
-end
-
--- RETURNS nothing
-local function verifyInstantiable(t, allDefinitions)
-	assertis(t, "Type+")
-	assertis(allDefinitions, listType "Definition")
-
-	if not isTypeInstantiable(t, allDefinitions) then
-		Report.UNINSTANTIABLE_USED {
-			location = t.location,
-			type = showType(t),
-		}
-	end
 end
 
 -- RETURNS nothing
@@ -251,15 +252,15 @@ local function verifyTypeValid(type, typeScope, allDefinitions)
 		-- Check each argument
 		for i, generic in ipairs(definition.generics) do
 			local argument = type.arguments[i]
-			verifyInstantiable(argument, allDefinitions)
+			assertis(argument, "Type+")
 
 			-- Verify that the `i`th argument satisfies the constraints of
 			-- the `i`th parameter
 			for _, generalConstraint in ipairs(generic.constraints) do
-				local constraint = substitute(generalConstraint.interface)
+				local instantiatedConstraint = substitute(generalConstraint.interface)
 
 				-- TODO: better explain context
-				verifyTypeSatisfiesConstraint(argument, constraint, typeScope, {
+				verifyTypeSatisfiesConstraint(argument, instantiatedConstraint, typeScope, {
 					container = definition,
 					constraint = generalConstraint.interface,
 					nth = i,
@@ -275,6 +276,40 @@ local function verifyTypeValid(type, typeScope, allDefinitions)
 		return -- All generic literals are valid
 	else
 		error("unknown Type+ tag `" .. type.tag .. "`")
+	end
+end
+
+-- RETURNS nothing
+local function verifyInterfaceValid(constraint, typeScope, allDefinitions)
+	assertis(constraint, "InterfaceType+")
+	assertis(typeScope, listType "TypeParameterIR")
+	assertis(allDefinitions, listType "Definition")
+
+	local definition = table.findwith(allDefinitions, "name", constraint.name)
+	assert(definition.tag == "interface")
+
+	local substitute = getSubstituterFromConcreteType(constraint, allDefinitions)
+	
+	-- Check each argument
+	for i, generic in ipairs(definition.generics) do
+		local argument = constraint.arguments[i]
+		assertis(argument, "Type+")
+
+		-- Verify that the i-th argument satisfies the constraints of the i-th
+		-- parameter
+		for _, generalConstraint in ipairs(generic.constraints) do
+			local instantiatedConstraint = substitute(generalConstraint.interface)
+
+			-- TODO: provide a clearer context for error messages
+			verifyTypeSatisfiesConstraint(argument, instantiatedConstraint, typeScope, {
+				container = definition,
+				constraint = generalConstraint.interface,
+				nth = i,
+			}, allDefinitions)
+		end
+
+		-- Verify each argument in a recursive fashion
+		verifyTypeValid(argument, typeScope, allDefinitions)
 	end
 end
 
@@ -406,7 +441,7 @@ local function semanticsSmol(sources, main)
 		assertis(packageIsInScope, mapType("string", constantType(true)))
 
 		-- RETURNS a Type+ with a fully-qualified name
-		local function typeFinder(t, typeScope)
+		local function resolveType(t, typeScope)
 			assertis(typeScope, listType(recordType {name = "string"}))
 
 			if t.tag == "concrete-type" then
@@ -421,25 +456,44 @@ local function semanticsSmol(sources, main)
 						}
 					end
 					package = package.package
-				elseif not packageIsInScope[package] then
+				end
+				assertis(package, "string")
+				if not packageIsInScope[package] then
 					Report.UNKNOWN_PACKAGE_USED {
 						package = package,
 						location = t.location,
 					}
 				end
-				assertis(package, "string")
 
 				local fullName = package .. ":" .. t.base
-				if not definitionSourceByFullName[fullName] then
+				local definition = definitionSourceByFullName[fullName] 
+				if not definition then
 					Report.UNKNOWN_TYPE_USED {
 						name = fullName,
 						location = t.location,
 					}
+				elseif definition.tag == "interface-definition" then
+					Report.INTERFACE_USED_AS_VALUE {
+						interface = fullName,
+						location = t.location,
+					}
 				end
 
-				return {tag = "concrete-type+",
+				-- TODO: check arity
+				--[[
+					Report.WRONG_ARITY {
+						name = interface.name,
+						givenArity = #int.arguments,
+						expectedArity = #interface.generics,
+						location = int.location,
+						definitionLocation = interface.location,
+					}
+				]]
+
+				return {
+					tag = "concrete-type+",
 					name = fullName,
-					arguments = table.map(typeFinder, t.arguments, typeScope),
+					arguments = table.map(resolveType, t.arguments, typeScope),
 					location = t.location,
 				}
 			elseif t.tag == "generic" then
@@ -448,17 +502,83 @@ local function semanticsSmol(sources, main)
 					Report.UNKNOWN_GENERIC_USED(t)
 				end
 
-				return {tag = "generic+",
+				return {
+					tag = "generic+",
 					name = t.name,
 					location = t.location,
 				}
 			elseif t.tag == "type-keyword" then
-				return {tag = "keyword-type+",
+				return {
+					tag = "keyword-type+",
 					name = t.name,
 					location = t.location,
 				}
 			end
 			error("unhandled ast type tag `" .. t.tag .. "`")
+		end
+
+		-- RETURNS an InterfaceType+ (with a fully qualified name)
+		local function resolveInterface(t, typeScope)
+			assertis(t, recordType {
+				tag = constantType "concrete-type",
+				arguments = "object",
+				location = "string",
+				base = "string",
+			})
+			assertis(typeScope, listType(recordType {name = "string"}))
+
+			-- Get the appropriate package for this type
+			local package = t.package
+			if not package then
+				package = packageScopeMap[t.base]
+				if not package then
+					Report.UNKNOWN_LOCAL_TYPE_USED {
+						name = t.base,
+						location = t.location,
+					}
+				end
+				package = package.package
+			end
+			assertis(package, "string")
+			if not packageIsInScope[package] then
+				Report.UNKNOWN_PACKAGE_USED {
+					package = package,
+					location = t.location,
+				}
+			end
+
+			local fullName = package .. ":" .. t.base
+			local definition = definitionSourceByFullName[fullName] 
+			if not definition then
+				Report.UNKNOWN_TYPE_USED {
+					name = fullName,
+					location = t.location,
+				}
+			elseif definition.tag ~= "interface-definition" then
+				Report.CONSTRAINTS_MUST_BE_INTERFACES {
+					is = definition.tag,
+					typeShown = fullName,
+					location = t.location,
+				}
+			end
+
+			-- TODO: check arity
+			--[[
+				Report.WRONG_ARITY {
+					name = interface.name,
+					givenArity = #int.arguments,
+					expectedArity = #interface.generics,
+					location = int.location,
+					definitionLocation = interface.location,
+				}
+			]]
+
+			return {
+				tag = "interface-type",
+				name = fullName,
+				arguments = table.map(resolveType, t.arguments, typeScope),
+				location = t.location,
+			}
 		end
 
 		-- RETURNS a signature
@@ -469,11 +589,11 @@ local function semanticsSmol(sources, main)
 				foreign = not not signature.foreign,
 				modifier = signature.modifier.keyword,
 				name = signature.name,
-				returnTypes = table.map(typeFinder, signature.returnTypes, scope),
+				returnTypes = table.map(resolveType, signature.returnTypes, scope),
 				parameters = table.map(function(p)
 					return {
 						name = p.name,
-						type = typeFinder(p.type, scope),
+						type = resolveType(p.type, scope),
 						location = p.location,
 					}
 				end, signature.parameters),
@@ -481,16 +601,16 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
-		-- RETURNS a list[TypeParameterIR]
+		-- RETURNS a [TypeParameterIR]
 		local function compiledGenerics(generics)
-			local list = {}
+			local parametersOut = {}
 			local map = {}
 			for _, parameterAST in ipairs(generics.parameters) do
 				local parameter = {
 					name = parameterAST,
 					constraints = {},
 				}
-				table.insert(list, parameter)
+				table.insert(parametersOut, parameter)
 
 				-- Check for duplicates
 				if map[parameter.name] then
@@ -510,8 +630,7 @@ local function semanticsSmol(sources, main)
 			
 			-- Associate each constraint with a generic parameter
 			for _, constraintAST in ipairs(generics.constraints) do
-				local constraint = typeFinder(
-					constraintAST.constraint, typeScope)
+				local constraint = resolveInterface(constraintAST.constraint, typeScope)
 
 				-- Check that the named parameter exists
 				local parameter = map[constraintAST.parameter]
@@ -526,7 +645,7 @@ local function semanticsSmol(sources, main)
 				})
 			end
 
-			return list
+			return parametersOut
 		end
 
 		-- RETURNS a class+/union+
@@ -558,7 +677,7 @@ local function semanticsSmol(sources, main)
 
 				table.insert(fields, {
 					name = field.name,
-					type = typeFinder(field.type, generics),
+					type = resolveType(field.type, generics),
 					location = field.location,
 				})
 			end
@@ -579,14 +698,14 @@ local function semanticsSmol(sources, main)
 				
 				local signature = compiledSignature(method.signature, generics)
 				signature = table.with(signature, "body", method.body)
-				signature = table.with(signature, "typeFinder", typeFinder)
+				signature = table.with(signature, "resolveType", resolveType)
+				signature = table.with(signature, "resolveInterface", resolveInterface)
 				signature = table.with(signature, "container", structName)
 				table.insert(signatures, signature)
 			end
 
 			-- Compile the set of interfaces this class claims to implement
-			local implements = table.map(
-				typeFinder, definition.implements, generics)
+			local implements = table.map(resolveInterface, definition.implements, generics)
 
 			-- Create a set of constraints
 			local constraints = {}
@@ -598,15 +717,12 @@ local function semanticsSmol(sources, main)
 
 			return freeze {
 				tag = tag,
-
 				name = structName,
 				generics = generics,
 				fields = fields,
 				signatures = signatures,
 				implements = implements,
-
 				constraints = constraints,
-
 				location = definition.location,
 			}
 		end
@@ -625,11 +741,9 @@ local function semanticsSmol(sources, main)
 
 			return freeze {
 				tag = "interface",
-
 				name = name,
 				generics = generics,
 				signatures = signatures,
-
 				location = definition.location,
 			}
 		end
@@ -666,27 +780,13 @@ local function semanticsSmol(sources, main)
 	local function checkStructImplementsClaims(class)
 		for _, int in ipairs(class.implements) do
 			local interfaceName = int.name
-			local interface = table.findwith(
-				allDefinitions, "name", interfaceName)
-			-- TODO: check that it is an interface
-			assert(interface)
+			local interface = table.findwith(allDefinitions, "name", interfaceName)
+			assert(interface and interface.tag == "interface")
+			assert(#int.arguments == #interface.generics)
 
 			-- Instantiate each of the interface's type parameters with the
 			-- argument specified in the "implements"
-			local assignments = {}
-			if #int.arguments ~= #interface.generics then
-				Report.WRONG_ARITY {
-					name = interface.name,
-					givenArity = #int.arguments,
-					expectedArity = #interface.generics,
-					location = int.location,
-					definitionLocation = interface.location,
-				}
-			end
-			for i, argument in ipairs(int.arguments) do
-				assignments[interface.generics[i].name] = argument
-			end
-			local subs = genericSubstituter(assignments)
+			local subs = getSubstituterFromConcreteType(int, allDefinitions)
 
 			-- Check that each signature matches
 			for _, iSignature in ipairs(interface.signatures) do
@@ -727,6 +827,7 @@ local function semanticsSmol(sources, main)
 						interfaceCount = #iSignature.parameters,
 					}
 				end
+
 				for k, iParameter in ipairs(iSignature.parameters) do
 					local iType = subs(iParameter.type)
 					local cParameter = cSignature.parameters[k]
@@ -756,12 +857,13 @@ local function semanticsSmol(sources, main)
 						member = cSignature.name,
 					}
 				end
+
 				for k, cType in ipairs(cSignature.returnTypes) do
 					local iType = subs(iSignature.returnTypes[k])
 					if not areTypesEqual(iType, cType) then
 						Report.INTERFACE_RETURN_TYPE_MISMATCH {
 							class = class.name,
-							interface = showType(int),
+							interface = showInterfaceType(int),
 							classLocation = cType.location,
 							interfaceLocation = iType.location,
 							classType = showType(cType),
@@ -789,43 +891,31 @@ local function semanticsSmol(sources, main)
 		-- Verify that the generic constraints are valid
 		for _, parameter in ipairs(definition.generics) do
 			for _, constraint in ipairs(parameter.constraints) do
-				verifyTypeValid(
-					constraint.interface,
-					definition.generics,
-					allDefinitions
-				)
+				verifyInterfaceValid(constraint.interface, definition.generics, allDefinitions)
 			end
 		end
 
 		if definition.tag == "class" then
 			-- Verify each field
 			for _, field in ipairs(definition.fields) do
-				verifyInstantiable(field.type, allDefinitions)
-				verifyTypeValid(field.type, definition.generics,
-					allDefinitions)
+				verifyTypeValid(field.type, definition.generics, allDefinitions)
 			end
 
 			-- Verify each implements
 			for _, implements in ipairs(definition.implements) do
-				-- XXX: is implements validated to be an interface already?
-				verifyTypeValid(implements, definition.generics,
-					allDefinitions)
+				verifyInterfaceValid(implements, definition.generics, allDefinitions)
 			end
 
 			-- Verify each signature
 			for _, signature in ipairs(definition.signatures) do
 				-- Verify each signature parameter type
 				for _, parameter in ipairs(signature.parameters) do
-					verifyInstantiable(parameter.type, allDefinitions)
-					verifyTypeValid(parameter.type, definition.generics,
-						allDefinitions)
+					verifyTypeValid(parameter.type, definition.generics, allDefinitions)
 				end
 
 				-- Verify each signature return type
 				for _, returnType in ipairs(signature.returnTypes) do
-					verifyInstantiable(returnType, allDefinitions)
-					verifyTypeValid(returnType, definition.generics,
-						allDefinitions)
+					verifyTypeValid(returnType, definition.generics, allDefinitions)
 				end
 
 				-- Verify the signature's body later
@@ -833,31 +923,24 @@ local function semanticsSmol(sources, main)
 		elseif definition.tag == "union" then
 			-- Verify each field
 			for _, field in ipairs(definition.fields) do
-				verifyInstantiable(field.type, allDefinitions)
-				verifyTypeValid(field.type, definition.generics,
-					allDefinitions)
+				verifyTypeValid(field.type, definition.generics, allDefinitions)
 			end
 
 			-- Verify each implements
 			for _, implements in ipairs(definition.implements) do
-				verifyTypeValid(implements, definition.generics,
-					allDefinitions)
+				verifyTypeValid(implements, definition.generics, allDefinitions)
 			end
 
 			-- Verify each signature
 			for _, signature in ipairs(definition.signatures) do
 				-- Verify each signature parameter type
 				for _, parameter in ipairs(signature.parameters) do
-					verifyInstantiable(parameter.type, allDefinitions)
-					verifyTypeValid(parameter.type, definition.generics,
-						allDefinitions)
+					verifyTypeValid(parameter.type, definition.generics, allDefinitions)
 				end
 
 				-- Verify each signature return type
 				for _, returnType in ipairs(signature.returnTypes) do
-					verifyInstantiable(returnType, allDefinitions)
-					verifyTypeValid(returnType, definition.generics,
-						allDefinitions)
+					verifyTypeValid(returnType, definition.generics, allDefinitions)
 				end
 			end
 		elseif definition.tag == "interface" then
@@ -865,16 +948,12 @@ local function semanticsSmol(sources, main)
 			for _, signature in ipairs(definition.signatures) do
 				-- Verify each signature parameter type
 				for _, parameter in ipairs(signature.parameters) do
-					verifyInstantiable(parameter.type, allDefinitions)
-					verifyTypeValid(parameter.type, definition.generics,
-						allDefinitions)
+					verifyTypeValid(parameter.type, definition.generics, allDefinitions)
 				end
 
 				-- Verify each signature return type
 				for _, returnType in ipairs(signature.returnTypes) do
-					verifyInstantiable(returnType, allDefinitions)
-					verifyTypeValid(returnType, definition.generics,
-						allDefinitions)
+					verifyTypeValid(returnType, definition.generics, allDefinitions)
 				end
 			end
 		else
@@ -892,6 +971,16 @@ local function semanticsSmol(sources, main)
 		
 		-- Type Finder should verify that the type exists
 		assert(definition, "definition must exist")
+
+		return definition
+	end
+
+	-- RETURNS a Definition
+	local function interfaceDefinitionFromConstraint(t)
+		assertis(t, "InterfaceType+")
+
+		local definition = table.findwith(allDefinitions, "name", t.name)
+		assert(definition and definition.tag == "interface")
 
 		return definition
 	end
@@ -915,17 +1004,25 @@ local function semanticsSmol(sources, main)
 		}
 
 		-- RETURNS a (verified) Type+
-		local function findType(parsedType)
+		local function resolveType(parsedType)
 			local typeScope = definition.generics
-			local outType = signature.typeFinder(parsedType, typeScope)
+			local outType = signature.resolveType(parsedType, typeScope)
+			verifyTypeValid(outType, definition.generics, allDefinitions)
+			return outType
+		end
+
+		-- RETURNS a (verified) InterfaceType+
+		local function resolveInterface(parsedInterface)
+			local typeScope = definition.generics
+			local outType = signature.resolveInterface(parsedInterface, typeScope)
 			verifyTypeValid(outType, definition.generics, allDefinitions)
 			return outType
 		end
 
 		-- RETURNS a ConstraintIR
 		local function constraintFromStruct(interface, implementer)
-			assertis(interface, "Type+")
-			assert(isTypeInstantiable(implementer, allDefinitions))
+			assertis(interface, "InterfaceType+")
+			assertis(implementer, "Type+")
 
 			if implementer.tag == "concrete-type+" then
 				if #implementer.arguments > 0 then
@@ -1085,8 +1182,7 @@ local function semanticsSmol(sources, main)
 				end
 				return block, freeze {out}
 			elseif pExpression.tag == "static-call" then
-				local t = findType(pExpression.baseType)
-				verifyInstantiable(t, allDefinitions)
+				local t = resolveType(pExpression.baseType)
 
 				if t.tag == "generic+" then
 					error("TODO: static generic calls are different")
@@ -1213,7 +1309,7 @@ local function semanticsSmol(sources, main)
 					-- Find the constraint(s) which supply this method name
 					local matches = {}
 					for ci, constraint in ipairs(parameter.constraints) do
-						local interface = definitionFromType(constraint.interface)
+						local interface = interfaceDefinitionFromConstraint(constraint.interface)
 						local signature = table.findwith(interface.signatures, "name", pExpression.methodName)
 						if signature then
 							table.insert(matches, freeze {
@@ -1437,10 +1533,9 @@ local function semanticsSmol(sources, main)
 					-- Add the variable to the current scope
 					local variable = {
 						name = pVariable.name,
-						type = findType(pVariable.type),
+						type = resolveType(pVariable.type),
 						location = pVariable.location,
 					}
-					verifyInstantiable(variable.type, allDefinitions)
 					
 					scope[#scope][variable.name] = variable
 					table.insert(declarations, {
