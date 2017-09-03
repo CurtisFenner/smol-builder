@@ -1384,19 +1384,16 @@ local function semanticsSmol(sources, main)
 						end
 					end
 
+					-- Create destinations for each return value
 					local destinations = {}
 					for _, returnType in ipairs(method.signature.returnTypes) do
 						local destination = {
 							name = generateLocalID(),
 							type = returnType,
-							location = pExpression.location .. ">",
+							location = pExpression.location,
 						}
 						table.insert(destinations, destination)
-						table.insert(evaluation, {
-							tag = "local",
-							variable = destination,
-							returns = "no",
-						})
+						table.insert(evaluation, localSt(destination))
 					end
 
 					local constraint = {
@@ -1422,8 +1419,7 @@ local function semanticsSmol(sources, main)
 				local baseDefinition = definitionFromType(baseInstance.type)
 				
 				-- Find the definition of the method being invoked
-				local method = table.findwith(baseDefinition.signatures,
-					"name", pExpression.methodName)
+				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
 				if not method or method.modifier ~= "method" then
 					Report.NO_SUCH_METHOD {
 						modifier = "method",
@@ -1434,8 +1430,28 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
-				error "TODO?"
+				-- Create destinations for each return value
+				local destinations = {}
+				for _, returnType in ipairs(method.returnTypes) do
+					local destination = {
+						name = generateLocalID(),
+						type = returnType,
+						location = pExpression.location,
+					}
+					table.insert(destinations, destination)
+					table.insert(evaluation, localSt(destination))
+				end
 
+				table.insert(evaluation, {
+					tag = "method-call",
+					baseInstance = baseInstance,
+					name = method.name,
+					arguments = arguments,
+					destinations = destinations,
+					returns = "no"
+				})
+
+				return buildBlock(evaluation), destinations
 			elseif pExpression.tag == "keyword" then
 				if pExpression.keyword == "false" or pExpression.keyword == "true" then
 					local boolean = {
@@ -1606,7 +1622,7 @@ local function semanticsSmol(sources, main)
 				return buildBlock(sequence)
 			elseif pStatement.tag == "return-statement" then
 				if #pStatement.values == 1 then
-					local evaluation, sources = compileExpression(
+					local subEvaluation, sources = compileExpression(
 						pStatement.values[1], scope)
 					
 					if #sources ~= #signature.returnTypes then
@@ -1617,11 +1633,14 @@ local function semanticsSmol(sources, main)
 						}
 					end
 
-					return buildBlock(table.concatted({evaluation}, {
+					local returnSt = {
 						tag = "return",
 						sources = sources,
 						returns = "yes",
-					}))
+					}
+					local evaluation = {subEvaluation, returnSt}
+
+					return buildBlock(evaluation)
 				else
 					error("TODO")
 				end

@@ -12,6 +12,10 @@ end
 
 -- RETURNS a string
 local function methodFunctionName(name, definition)
+	assertis(name, "string")
+	assertis(definition, "string")
+	assert(definition:match(":"))
+
 	return "smol_method_" .. luaizeName(definition) .. "_" .. luaizeName(name)
 end
 
@@ -23,13 +27,15 @@ end
 -- RETURNS a string representing a Lua identifier for a Smol variable or parameter
 local function localName(name)
 	assert(not name:find(":"))
+
 	return "smol_local_" .. name
 end
 
 -- RETURNS a string representing a Lua identifier for a Smol field
 local function fieldName(name)
 	assert(not name:find(":"))
-	return "smol_field_ " .. name
+
+	return "smol_field_" .. name
 end
 
 -- RETURNS a string
@@ -68,6 +74,9 @@ end
 -- Appends strings to code
 local function generateStatement(statement, emit)
 	assertis(statement, "StatementIR")
+
+	print("#", statement.tag)
+
 	if statement.tag == "block" then
 		for _, subStatement in ipairs(statement.statements) do
 			generateStatement(subStatement, emit)
@@ -90,6 +99,9 @@ local function generateStatement(statement, emit)
 	elseif statement.tag == "boolean" then
 		emit(localName(statement.destination.name))
 		emit("\t= " .. tostring(statement.boolean))
+		return
+	elseif statement.tag == "this" then
+		emit(localName(statement.destination.name) .. " = this")
 		return
 	elseif statement.tag == "static-call" then
 		local destinationNames = {}
@@ -121,6 +133,26 @@ local function generateStatement(statement, emit)
 			error "TODO"
 		end
 		emit("}")
+		return
+	elseif statement.tag == "return" then
+		local values = table.map(function(v) return localName(v.name) end, statement.sources)
+		emit("return " .. table.concat(values, ", "))
+		return
+	elseif statement.tag == "method-call" then
+
+		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+		destinations = table.concat(destinations, ", ")
+		local method = methodFunctionName(statement.name, statement.baseInstance.type.name)
+		emit(destinations .. " = " .. method .. "(")
+		emit("\t" .. localName(statement.baseInstance.name))
+		for i, argument in ipairs(statement.arguments) do
+			emit("\t," .. localName(statement.arguments[i].name))
+		end
+		emit(")")
+		return
+	elseif statement.tag == "field" then
+		emit(localName(statement.destination.name) .. " = ")
+		emit("\t" .. localName(statement.base.name) .. "." .. fieldName(statement.name))
 		return
 	end
 	

@@ -852,6 +852,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"FieldSt",
 	"GenericMethodCallSt",
 	"LocalSt",
+	"MethodCallSt",
 	"NewSt",
 	"NumberLoadSt",
 	"ReturnSt",
