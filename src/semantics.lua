@@ -1729,6 +1729,22 @@ local function semanticsSmol(sources, main)
 
 		local body = compileBlock(signature.body, functionScope)
 		assertis(body, "StatementIR")
+		if body.returns ~= "yes" then
+			local returns = {}
+			for _, returnType in ipairs(signature.returnTypes) do
+				table.insert(returns, showType(returnType))
+			end
+			returns = table.concat(returns, ", ")
+
+			if returns ~= "Unit" then
+				Report.FUNCTION_DOESNT_RETURN {
+					name = signature.container .. ":" .. signature.name,
+					modifier = signature.modifier,
+					location = signature.body.location,
+					returns = returns,
+				}
+			end
+		end
 
 		return freeze {
 			name = signature.name,

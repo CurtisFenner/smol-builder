@@ -1,0 +1,9 @@
+package test;
+
+class Test {
+	static main() Unit {
+	}
+
+	static foo() Boolean {
+	}
+}

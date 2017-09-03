@@ -75,7 +75,7 @@ end
 local function generateStatement(statement, emit)
 	assertis(statement, "StatementIR")
 
-	print("#", statement.tag)
+	--print("#", statement.tag)
 
 	if statement.tag == "block" then
 		for _, subStatement in ipairs(statement.statements) do

@@ -214,4 +214,9 @@ function Report.MISSING_VALUE(p)
 		"\nHowever, it is missing ", p.location)
 end
 
+function Report.FUNCTION_DOESNT_RETURN(p)
+	quit("The ", p.modifier, " ", p.name, " does not always `return` ",
+		p.returns, " as it says it does ", p.location)
+end
+
 return Report
