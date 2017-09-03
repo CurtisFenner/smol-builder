@@ -1300,6 +1300,27 @@ local function semanticsSmol(sources, main)
 				local evaluation = {baseEvaluation}
 				local baseInstance = baseInstanceValues[1]
 
+				-- Evaluate the arguments
+				local arguments = {}
+				for i, pArgument in ipairs(pExpression.arguments) do
+					local subEvaluation, outs = compileExpression(pArgument, scope)
+					
+					-- Verify each argument has exactly one value
+					if #outs ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "method argument",
+							expectedCount = 1,
+							givenCount = #outs,
+							location = pArgument.location,
+						}
+					end
+
+					table.insert(arguments, table.with(outs[1], "location", pArgument.location))
+					table.insert(evaluation, subEvaluation)
+				end
+				assertis(evaluation, listType "StatementIR")
+				assertis(arguments, listType "VariableIR")
+
 				if baseInstance.type.tag == "generic+" then
 					-- Generic instance
 					local parameter = table.findwith(definition.generics,
@@ -1338,36 +1359,30 @@ local function semanticsSmol(sources, main)
 						}
 					end
 					local method = matches[1]
+					local methodFullName = method.interface.name .. ":" .. method.signature.name
+
+					-- Verify the correct number of arguments is provided
+					if #arguments ~= #method.signature.parameters then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "interface method " .. methodFullName,
+							expectedCount = #method.signature.parameters,
+							givenCount = #arguments,
+							location = pExpression.location,
+						}
+					end
 
 					-- Verify the types of the arguments match the parameters
-					-- Evaluate the arguments
-					local arguments = {}
-					for i, pArgument in ipairs(pExpression.arguments) do
-						local subEvaluation, outs = compileExpression(pArgument, scope)
-						
-						-- Verify each argument has exactly one value
-						if #outs ~= 1 then
-							Report.WRONG_VALUE_COUNT {
-								purpose = "method argument",
-								expectedCount = 1,
-								givenCount = #outs,
-								location = pArgument.location,
-							}
-						end
-
-						table.insert(arguments, outs[1])
-						if not areTypesEqual(pArgument.type, method.parameters[i].type) then
+					for i, argument in ipairs(arguments) do
+						if not areTypesEqual(argument.type, method.parameters[i].type) then
 							Report.TYPES_DONT_MATCH {
 								purpose = string.ordinal(i) .. " argument to `" .. fullName .. "`",
 								expectedType =	showType(method.parameters[i].type),
 								expectedLocation = method.parameters[i].location,
-								givenType = showType(pArgument.type),
-								location = pArgument.location,
+								givenType = showType(argument.type),
+								location = argument.location,
 							}
 						end
-						table.insert(evaluation, subEvaluation)
 					end
-					assertis(evaluation, listType "StatementIR")
 
 					local destinations = {}
 					for _, returnType in ipairs(method.signature.returnTypes) do
@@ -1402,7 +1417,6 @@ local function semanticsSmol(sources, main)
 
 					return buildBlock(evaluation), destinations
 				end
-				assertis(arguments, listType "VariableIR")
 
 				-- Concrete instance
 				local baseDefinition = definitionFromType(baseInstance.type)
