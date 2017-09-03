@@ -119,7 +119,7 @@ local function lexSmol(source, filename)
 			function(x) return false end
 		},
 		{ -- punctuation (braces, commas, etc)
-			"[.,:;|()%[%]{}]",
+			"[.,:;!|()%[%]{}]",
 			function(x) return {tag = "punctuation"} end
 		},
 		{ -- assignment
@@ -323,6 +323,7 @@ local function parseSmol(tokens)
 	local K_DOT = LEXEME "."
 	local K_EQUAL = LEXEME "="
 	local K_SCOPE = LEXEME ":"
+	local K_BANG = LEXEME "!"
 
 	local K_CURLY_OPEN = LEXEME "{"
 	local K_CURLY_CLOSE = LEXEME "}"
@@ -580,6 +581,7 @@ local function parseSmol(tokens)
 			{"foreign", parser.query "`foreign`?"},
 			{"modifier", parser.named "method-modifier"},
 			{"name", T_IDENTIFIER, "a method name"},
+			{"bang", parser.optional(K_BANG)},
 			{"_", K_ROUND_OPEN, "`(` after method name"},
 			{"parameters", parser.query "variable,0+"},
 			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
@@ -715,32 +717,42 @@ local function parseSmol(tokens)
 			return out
 		end),
 
-		["access"] = parser.map(parser.composite {
-			tag = "***access",
+		["method-access"] = parser.composite {
+			tag = "method-call",
 			{"_", K_DOT},
-			{"name", T_IDENTIFIER, "a method/field name"},
-			-- N.B.: Optional, since a field access is also possible...
-			{"arguments", parser.optional(parser.composite{
-				tag = "***arguments",
-				{"_", K_ROUND_OPEN},
-				{"#arguments", parser.query "expression,0+"},
-				{"_", K_ROUND_CLOSE, "`)` to end"},
-			})},
-		}, function(x)
-			if x.arguments then
-				return {
-					tag = "method-call",
-					arguments = x.arguments,
-					methodName = x.name, --: string
-					location = x.location,
+			{"methodName", T_IDENTIFIER, "a method/field name"},
+			-- N.B.: This is optional, since a field access is also possible
+			{
+				"arguments",
+				parser.composite {
+					tag = "arguments",
+					{"_", K_ROUND_OPEN},
+					{"#arguments", parser.query "expression,0+"},
+					{"_", K_ROUND_CLOSE, "`)` to end method arguments"},
 				}
-			end
-			return {
-				tag = "field",
-				field = x.name, --: string
-				location = x.location,
 			}
-		end),
+		},
+		["field-access"] = parser.composite {
+			tag = "field",
+			{"_", K_DOT},
+			{"field", T_IDENTIFIER, "a field name"},
+		},
+
+		["access"] = parser.choice {
+			parser.named "method-access",
+			parser.named "field-access"
+		},
+
+		["static-call"] = parser.composite {
+			tag = "static-call",
+			{"baseType", parser.named "type"},
+			{"_", K_DOT, "`.` after type name"},
+			{"name", T_IDENTIFIER, "a static method's name"},
+			{"bang", parser.optional(K_BANG)},
+			{"_", K_ROUND_OPEN, "`(` after static method name"},
+			{"arguments", parser.query "expression,0+"},
+			{"_", K_ROUND_CLOSE, "`)` to end static method call"},
+		},
 
 		["atom-base"] = parser.choice {
 			parser.named "new-expression",
@@ -753,15 +765,7 @@ local function parseSmol(tokens)
 			parser.map(T_INTEGER_LITERAL, function(v)
 				return {tag = "number-literal", value = v}
 			end),
-			parser.composite { -- static method call
-				tag = "static-call",
-				{"baseType", parser.named "type"},
-				{"_", K_DOT, "`.` after type name"},
-				{"name", T_IDENTIFIER, "a static method's name"},
-				{"_", K_ROUND_OPEN, "`(` after static method name"},
-				{"arguments", parser.query "expression,0+"},
-				{"_", K_ROUND_CLOSE, "`)` to end static method call"},
-			},
+			parser.named "static-call",
 			parser.map(T_IDENTIFIER, function(n)
 				return {tag = "identifier", name = n}
 			end),

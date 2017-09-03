@@ -48,7 +48,8 @@ end
 
 -- RETURNS a parser
 function parser.choice(options)
-	assert(type(options) == "table" or type(options) == "userdata")
+	assert(type(options) == "table" or type(options) == "userdata",
+		"parser.choice expects a list")
 	assert(#options >= 1)
 
 	return function(stream, grammar)
