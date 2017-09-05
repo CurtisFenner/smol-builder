@@ -1273,6 +1273,11 @@ local function semanticsSmol(sources, main)
 						signatureLocation = method.location,
 						location = pExpression.location,
 					}
+				elseif method.bang and not signature.bang then
+					Report.BANG_NOT_ALLOWED {
+						context = signature.modifier .. " " .. definition.name .. "." .. signature.name,
+						location = pExpression.location,
+					}
 				end
 
 				-- Create variables for the output
@@ -1490,6 +1495,11 @@ local function semanticsSmol(sources, main)
 						expected = method.bang,
 						given = pExpression.bang,
 						signatureLocation = method.location,
+						location = pExpression.location,
+					}
+				elseif method.bang and not signature.bang then
+					Report.BANG_NOT_ALLOWED {
+						context = signature.modifier .. " " .. definition.name .. "." .. signature.name,
 						location = pExpression.location,
 					}
 				end

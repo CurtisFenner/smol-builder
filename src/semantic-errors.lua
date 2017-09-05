@@ -237,4 +237,9 @@ function Report.BANG_MISMATCH(p)
 		"\nHowever, you try to call it ", given, " ", p.location)
 end
 
+function Report.BANG_NOT_ALLOWED(p)
+	quit("A `!` action is not allowed in ", p.context, ".",
+		"\nHowever, you try to invoke one ", p.location)
+end
+
 return Report
