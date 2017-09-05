@@ -1359,7 +1359,7 @@ local function semanticsSmol(sources, main)
 						}
 					end
 					local method = matches[1]
-					local methodFullName = method.interface.name .. ":" .. method.signature.name
+					local methodFullName = method.interface.name .. "." .. method.signature.name
 
 					-- Verify the correct number of arguments is provided
 					if #arguments ~= #method.signature.parameters then
@@ -1375,7 +1375,7 @@ local function semanticsSmol(sources, main)
 					for i, argument in ipairs(arguments) do
 						if not areTypesEqual(argument.type, method.parameters[i].type) then
 							Report.TYPES_DONT_MATCH {
-								purpose = string.ordinal(i) .. " argument to `" .. fullName .. "`",
+								purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
 								expectedType =	showType(method.parameters[i].type),
 								expectedLocation = method.parameters[i].location,
 								givenType = showType(argument.type),
@@ -1420,6 +1420,7 @@ local function semanticsSmol(sources, main)
 				
 				-- Find the definition of the method being invoked
 				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
+				local methodFullName = baseDefinition.name .. "." .. pExpression.methodName
 				if not method or method.modifier ~= "method" then
 					Report.NO_SUCH_METHOD {
 						modifier = "method",
@@ -1428,6 +1429,29 @@ local function semanticsSmol(sources, main)
 						definitionLocation = baseDefinition.location,
 						location = pExpression.location,
 					}
+				end
+
+				-- Verify the correct number of arguments is provided
+				if #arguments ~= #method.parameters then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "interface method " .. methodFullName,
+						expectedCount = #method.parameters,
+						givenCount = #arguments,
+						location = pExpression.location,
+					}
+				end
+
+				-- Verify the types of the arguments match the parameters
+				for i, argument in ipairs(arguments) do
+					if not areTypesEqual(argument.type, method.parameters[i].type) then
+						Report.TYPES_DONT_MATCH {
+							purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
+							expectedType =	showType(method.parameters[i].type),
+							expectedLocation = method.parameters[i].location,
+							givenType = showType(argument.type),
+							location = argument.location,
+						}
+					end
 				end
 
 				-- Create destinations for each return value

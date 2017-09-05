@@ -1,0 +1,8 @@
+package test;
+import core;
+
+class Test {
+	static main!() Unit {
+		var x Unit = core:Out.println("this is a bang function");
+	}
+}

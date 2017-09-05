@@ -1,0 +1,10 @@
+package test;
+
+class Test {
+	method foo(n Boolean) Unit {
+	}
+
+	static main() Unit {
+		var out Unit = new().foo(5);
+	}
+}

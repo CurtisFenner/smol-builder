@@ -1,0 +1,11 @@
+package test;
+import core;
+
+class Test {
+	static pure() Unit {
+	}
+
+	static main!() Unit {
+		var x Unit = Test.pure!();
+	}
+}
