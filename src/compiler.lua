@@ -323,7 +323,11 @@ local function parseSmol(tokens)
 	local K_DOT = LEXEME "."
 	local K_EQUAL = LEXEME "="
 	local K_SCOPE = LEXEME ":"
-	local K_BANG = LEXEME "!"
+	local K_BANG = parser.token(function(token)
+		if token.lexeme == "!" then
+			return true
+		end
+	end)
 
 	local K_CURLY_OPEN = LEXEME "{"
 	local K_CURLY_CLOSE = LEXEME "}"
@@ -721,7 +725,8 @@ local function parseSmol(tokens)
 			tag = "method-call",
 			{"_", K_DOT},
 			{"methodName", T_IDENTIFIER, "a method/field name"},
-			-- N.B.: This is optional, since a field access is also possible
+			-- What follows is optional, since a field access is also possible
+			{"bang", parser.optional(K_BANG)},
 			{
 				"arguments",
 				parser.composite {
@@ -980,6 +985,7 @@ REGISTER_TYPE("Signature", recordType {
 	modifier = choiceType(constantType "static", constantType "method"),
 	container = "string",
 	foreign = "boolean",
+	bang = "boolean",
 })
 
 REGISTER_TYPE("VariableIR", recordType {

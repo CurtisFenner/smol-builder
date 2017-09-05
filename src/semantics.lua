@@ -598,6 +598,7 @@ local function semanticsSmol(sources, main)
 					}
 				end, signature.parameters),
 				location = signature.location,
+				bang = signature.bang,
 			}
 		end
 
@@ -1262,6 +1263,18 @@ local function semanticsSmol(sources, main)
 					end
 				end
 
+				-- Verify the bang matches
+				if not method.bang ~= not pExpression.bang then
+					Report.BANG_MISMATCH {
+						modifier = method.modifier,
+						fullName = fullName,
+						expected = method.bang,
+						given = pExpression.bang,
+						signatureLocation = method.location,
+						location = pExpression.location,
+					}
+				end
+
 				-- Create variables for the output
 				local outs = {}
 				for _, returnType in pairs(method.returnTypes) do
@@ -1384,6 +1397,18 @@ local function semanticsSmol(sources, main)
 						end
 					end
 
+					-- Verify the bang matches
+					if not method.signature.bang ~= not pExpression.bang then
+						Report.BANG_MISMATCH {
+							modifier = method.signature.modifier,
+							fullName = methodFullName,
+							expected = method.signature.bang,
+							given = pExpression.bang,
+							signatureLocation = method.signature.location,
+							location = pExpression.location,
+						}
+					end
+
 					-- Create destinations for each return value
 					local destinations = {}
 					for _, returnType in ipairs(method.signature.returnTypes) do
@@ -1420,6 +1445,8 @@ local function semanticsSmol(sources, main)
 				
 				-- Find the definition of the method being invoked
 				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
+				assertis(method, "Signature")
+
 				local methodFullName = baseDefinition.name .. "." .. pExpression.methodName
 				if not method or method.modifier ~= "method" then
 					Report.NO_SUCH_METHOD {
@@ -1452,6 +1479,19 @@ local function semanticsSmol(sources, main)
 							location = argument.location,
 						}
 					end
+				end
+
+				-- Verify the bang matches
+				assertis(method, "Signature")
+				if not method.bang ~= not pExpression.bang then
+					Report.BANG_MISMATCH {
+						modifier = method.modifier,
+						fullName = methodFullName,
+						expected = method.bang,
+						given = pExpression.bang,
+						signatureLocation = method.location,
+						location = pExpression.location,
+					}
 				end
 
 				-- Create destinations for each return value

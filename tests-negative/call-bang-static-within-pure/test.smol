@@ -1,11 +1,14 @@
 package test;
-import core;
 
 class Test {
+	static action!() Unit {
+	}
+
 	static pure() Unit {
+		do Test.action!();
 	}
 
 	static main!() Unit {
-		var x Unit = Test.pure!();
+		var x Unit = Test.pure();
 	}
 }

@@ -1,0 +1,10 @@
+package test;
+
+class Test {
+	method pure(message String) Unit {
+	}
+
+	static main!() Unit {
+		do new().pure!("this call shouldn't have a bang");
+	}
+}

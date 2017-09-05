@@ -1,0 +1,10 @@
+package test;
+
+class Test {
+	method action!(message String) Unit {
+	}
+
+	static main!() Unit {
+		do new().action("this call should have a bang");
+	}
+}

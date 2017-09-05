@@ -219,4 +219,22 @@ function Report.FUNCTION_DOESNT_RETURN(p)
 		p.returns, " as it says it does ", p.location)
 end
 
+function Report.BANG_MISMATCH(p)
+	assert(p.given ~= p.expected)
+
+	local expects
+	local given
+	if p.expected then
+		expects = "a `!` " .. p.modifier .. " action"
+		given = "without a `!`"
+	else
+		expects = "a pure (no `!`) " .. p.modifier
+		given = "with a `!`"
+	end
+
+	quit("The ", p.modifier, " ", p.fullName, " is defined to be ", expects,
+		" ", p.signatureLocation,
+		"\nHowever, you try to call it ", given, " ", p.location)
+end
+
 return Report
