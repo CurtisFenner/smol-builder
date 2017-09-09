@@ -101,9 +101,9 @@ end
 
 -- RETURNS an element of `list` such that `return[property] == value`
 function table.findwith(list, property, value)
-	for _, element in ipairs(list) do
+	for key, element in ipairs(list) do
 		if element[property] == value then
-			return element
+			return element, key
 		end
 	end
 end

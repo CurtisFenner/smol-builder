@@ -298,7 +298,8 @@ TYPE_PREDICATE = memoized(1, TYPE_PREDICATE)
 -- RETURNS a string representing the type `t`
 local function TYPE_DESCRIPTION(t)
 	if type(t) == "string" then
-		assert(_TYPE_SPEC_BY_NAME[t])
+		local message = "_TYPE_SPEC_BY_NAME[" .. tostring(t) .. "]"
+		assert(_TYPE_SPEC_BY_NAME[t], message)
 		return t
 	end
 

@@ -987,9 +987,9 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- RETURNS a FunctionIR
-	local function compileFunctionFromStruct(definition, signature)
+	local function compileFunctionFromStruct(definition, containingSignature)
 		assertis(definition, choiceType("ClassIR", "UnionIR"))
-		assertis(signature, "Signature")
+		assertis(containingSignature, "Signature")
 
 		local containerType = freeze {
 			tag = "concrete-type+",
@@ -1004,10 +1004,20 @@ local function semanticsSmol(sources, main)
 			location = definition.location,
 		}
 
+		local thisVariable = nil
+		if containingSignature.modifier == "method" then
+			thisVariable = {
+				name = "this",
+				type = containerType,
+				location = containingSignature.location,
+			}
+		end
+		assertis(thisVariable, nullableType "VariableIR")
+
 		-- RETURNS a (verified) Type+
 		local function resolveType(parsedType)
 			local typeScope = definition.generics
-			local outType = signature.resolveType(parsedType, typeScope)
+			local outType = containingSignature.resolveType(parsedType, typeScope)
 			verifyTypeValid(outType, definition.generics, allDefinitions)
 			return outType
 		end
@@ -1015,7 +1025,7 @@ local function semanticsSmol(sources, main)
 		-- RETURNS a (verified) InterfaceType+
 		local function resolveInterface(parsedInterface)
 			local typeScope = definition.generics
-			local outType = signature.resolveInterface(parsedInterface, typeScope)
+			local outType = containingSignature.resolveInterface(parsedInterface, typeScope)
 			verifyTypeValid(outType, definition.generics, allDefinitions)
 			return outType
 		end
@@ -1039,6 +1049,85 @@ local function semanticsSmol(sources, main)
 			print(show(implementer))
 			print(string.rep(".", 80))
 			error("unhandled tag: " .. show(implementer))
+		end
+
+		-- RETURNS TODO
+		local function findConstraintByMember(genericType, modifier, name, location)
+			assertis(genericType, "GenericType+")
+			assertis(modifier, choiceType(constantType "static", constantType "method"))
+			assertis(name, "string")
+			assertis(location, "string")
+			assert(name:sub(1, 1):lower() == name:sub(1, 1))
+
+			local parameter, pi = table.findwith(definition.generics, "name", genericType.name)
+			assert(parameter)
+
+			local matches = {}
+			for ci, constraint in ipairs(parameter.constraints) do
+				local interface = interfaceDefinitionFromConstraint(constraint.interface)
+				local signature = table.findwith(interface.signatures, "name", name)
+				if signature then
+					local constraintIR = {
+						tag = "parameter-constraint",
+						name = pi .. "_" .. ci,
+						location = constraint.location,
+					}
+					if containingSignature.modifier == "method" then
+						constraintIR = {
+							tag = "this-constraint",
+							instance = thisVariable,
+							name = pi .. "_" .. ci
+						}
+					end
+
+					table.insert(matches, freeze {
+						signature = signature,
+						interface = interface,
+						constraint = constraint.interface,
+						constraintIR = constraintIR,
+					})
+				end
+			end
+
+			-- Verify exactly one constraint supplies this method name
+			if #matches == 0 then
+				Report.NO_SUCH_METHOD {
+					modifier = modifier,
+					type = showType(genericType),
+					name = name,
+					definitionLocation = parameter.location,
+					location = location,
+				}
+			elseif #matches > 1 then
+				Report.CONFLICTING_INTERFACES {
+					method = name,
+					interfaceOne = showType(matches[1].interface),
+					interfaceTwo = showType(matches[2].interface),
+					location = location,
+				}
+			end
+
+			-- Verify the method's modifier matches
+			local method = matches[1]
+			if method.signature.modifier ~= modifier then
+				Report.WRONG_MODIFIER {
+					signatureModifier = method.signature.modifier,
+					signatureLocation = method.signature.location,
+					callModifier = modifier,
+					location = location,
+				}
+			end
+
+			local methodFullName = method.interface.name .. "." .. method.signature.name
+			local out = table.with(method, "fullName", methodFullName)
+			assertis(out, recordType {
+				interface = "InterfaceIR",
+				signature = "Signature",
+				constraint = "InterfaceType+",
+				constraintIR = "ConstraintIR",
+				fullName = "string",
+			})
+			return out
 		end
 
 		-- RETURNS StatementIR, [Variable]
@@ -1090,7 +1179,7 @@ local function semanticsSmol(sources, main)
 				}
 				assertis(out.type, "ConcreteType+")
 
-				if signature.modifier ~= "static" then
+				if containingSignature.modifier ~= "static" then
 					Report.NEW_USED_OUTSIDE_STATIC {
 						location = pExpression.location,
 					}
@@ -1111,6 +1200,7 @@ local function semanticsSmol(sources, main)
 					newSt.constraints[constraintName] = freeze {
 						tag = "parameter-constraint",
 						name = constraintName,
+						location = pExpression.location,
 					}
 				end
 
@@ -1185,40 +1275,6 @@ local function semanticsSmol(sources, main)
 			elseif pExpression.tag == "static-call" then
 				local t = resolveType(pExpression.baseType)
 
-				if t.tag == "generic+" then
-					error("TODO: static generic calls are different")
-				end
-
-				local baseDefinition = definitionFromType(t)
-
-				local fullName = showType(t) .. "." .. pExpression.name
-
-				-- Map type variables to the type-values used for this instantiation
-				local substituter = getSubstituterFromConcreteType(t, allDefinitions)
-
-				local method = table.findwith(baseDefinition.signatures,
-					"name", pExpression.name)
-				
-				if not method or method.modifier ~= "static" then
-					Report.NO_SUCH_METHOD {
-						modifier = "static",
-						type = showType(t),
-						name = pExpression.name,
-						definitionLocation = baseDefinition.location,
-						location = pExpression.location,
-					}
-				end
-
-				-- Check the number of parameters
-				if #method.parameters ~= #pExpression.arguments then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "static function `" .. fullName .. "`",
-						expectedCount = #method.parameters,
-						givenCount = #pExpression.arguments,
-						location = pExpression.location,
-					}
-				end
-
 				-- Evaluate the arguments
 				local evaluation = {}
 				local argumentSources = {}
@@ -1237,10 +1293,121 @@ local function semanticsSmol(sources, main)
 						}
 					end
 
-					-- Verify the type of the argument matches
-					local arg = outs[1]
+					table.insert(argumentSources, outs[1])
+					table.insert(evaluation, subEvaluation)
+				end
+
+				if t.tag == "generic+" then
+					-- Generic static function
+					local static = findConstraintByMember(t, "static", pExpression.funcName, t.location)
+					assert(static and static.signature.modifier == "static")
+					assertis(static.constraint, "InterfaceType+")
+
+					-- Map type variables to the type-values used for this instantiation
+					local substituter = getSubstituterFromConcreteType(static.constraint, allDefinitions)
+
+					-- Check the number of parameters
+					if #static.signature.parameters ~= #pExpression.arguments then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "static function `" .. fullName .. "`",
+							expectedCount = #static.signature.parameters,
+							givenCount = #pExpression.arguments,
+							location = pExpression.location,
+						}
+					end
+
+					-- Verify the argument types match the parameter types
+					for i, argument in ipairs(argumentSources) do
+						local parameterType = substituter(static.signature.parameters[i].type)
+						if not areTypesEqual(arg.type, parameterType) then
+							Report.TYPES_DONT_MATCH {
+								purpose = string.ordinal(i) .. " argument to " .. fullName,
+								expectedLocation = static.signature.parameters[i].location,
+								givenType = showType(arg.type),
+								location = argument.location,
+								expectedType = showType(parameterType)
+							}
+						end
+					end
+
+					-- Create variables for the output
+					local destinations = {}
+					for _, returnType in pairs(static.signature.returnTypes) do
+						local returnVariable = {
+							name = generateLocalID(),
+							type = substituter(returnType),
+							location = pExpression.location,
+						}
+						table.insert(destinations, returnVariable)
+						table.insert(evaluation, localSt(returnVariable))
+					end
+
+					-- Verify the bang matches
+					if not static.signature.bang ~= not pExpression.bang then
+						Report.BANG_MISMATCH {
+							modifier = static.signature.modifier,
+							fullName = fullName,
+							expected = static.signature.bang,
+							given = pExpression.bang,
+							signatureLocation = static.signature.location,
+							location = pExpression.location,
+						}
+					elseif static.signature.bang and not containingSignature.bang then
+						local fullName = definition.name .. "." .. containingSignature.name
+						Report.BANG_NOT_ALLOWED {
+							context = containingSignature.modifier .. " " .. fullName,
+							location = pExpression.location,
+						}
+					end
+
+					local callSt = {
+						tag = "generic-static-call",
+						constraint = static.constraintIR,
+						staticName = pExpression.funcName,
+						arguments = argumentSources,
+						destinations = destinations,
+						returns = "no",
+					}
+					assertis(callSt, "StatementIR")
+					table.insert(evaluation, callSt)
+
+					return buildBlock(evaluation), destinations
+				end
+
+				local baseDefinition = definitionFromType(t)
+
+				local fullName = showType(t) .. "." .. pExpression.funcName
+
+				-- Map type variables to the type-values used for this instantiation
+				local substituter = getSubstituterFromConcreteType(t, allDefinitions)
+
+				local method = table.findwith(baseDefinition.signatures,
+					"name", pExpression.funcName)
+				
+				if not method or method.modifier ~= "static" then
+					Report.NO_SUCH_METHOD {
+						modifier = "static",
+						type = showType(t),
+						name = pExpression.funcName,
+						definitionLocation = baseDefinition.location,
+						location = pExpression.location,
+					}
+				end
+
+				-- Check the number of parameters
+				if #method.parameters ~= #pExpression.arguments then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "static function `" .. fullName .. "`",
+						expectedCount = #method.parameters,
+						givenCount = #pExpression.arguments,
+						location = pExpression.location,
+					}
+				end
+
+				-- Verify the argument types match the parameter types
+				for i, argument in ipairs(argumentSources) do
 					local parameterType = substituter(method.parameters[i].type)
-					if not areTypesEqual(arg.type, parameterType) then
+					if not areTypesEqual(argument.type, parameterType) then
 						Report.TYPES_DONT_MATCH {
 							purpose = string.ordinal(i) .. " argument to " .. fullName,
 							expectedLocation = method.parameters[i].location,
@@ -1249,9 +1416,6 @@ local function semanticsSmol(sources, main)
 							expectedType = showType(parameterType)
 						}
 					end
-
-					table.insert(evaluation, subEvaluation)
-					table.insert(argumentSources, arg)
 				end
 
 				-- Collect the constraints
@@ -1273,9 +1437,10 @@ local function semanticsSmol(sources, main)
 						signatureLocation = method.location,
 						location = pExpression.location,
 					}
-				elseif method.bang and not signature.bang then
+				elseif method.bang and not containingSignature.bang then
+					local fullName = definition.name .. "." .. containingSignature.name
 					Report.BANG_NOT_ALLOWED {
-						context = signature.modifier .. " " .. definition.name .. "." .. signature.name,
+						context = containingSignature.modifier .. " " .. fullName,
 						location = pExpression.location,
 					}
 				end
@@ -1341,43 +1506,12 @@ local function semanticsSmol(sources, main)
 
 				if baseInstance.type.tag == "generic+" then
 					-- Generic instance
-					local parameter = table.findwith(definition.generics,
-						"name", baseInstance.type.name)
-					assert(parameter)
-
-					-- Find the constraint(s) which supply this method name
-					local matches = {}
-					for ci, constraint in ipairs(parameter.constraints) do
-						local interface = interfaceDefinitionFromConstraint(constraint.interface)
-						local signature = table.findwith(interface.signatures, "name", pExpression.methodName)
-						if signature then
-							table.insert(matches, freeze {
-								signature = signature,
-								interface = interface,
-								id = table.indexof(definition.generics, parameter) .. "_" .. ci
-							})
-						end
-					end
-
-					-- Verify exactly one constraint supplies this method name
-					if #matches == 0 then
-						Report.NO_SUCH_METHOD {
-							modifier = "method",
-							type = showType(baseInstance.type),
-							name = pExpression.name,
-							definitionLocation = parameter.location,
-							location = pExpression.location,
-						}
-					elseif #matches > 1 then
-						Report.CONFLICTING_INTERFACES {
-							method = pExpression.name,
-							interfaceOne = showType(matches[1].interface),
-							interfaceTwo = showType(matches[2].interface),
-							location = pExpression.location,
-						}
-					end
-					local method = matches[1]
-					local methodFullName = method.interface.name .. "." .. method.signature.name
+					local method = findConstraintByMember(
+						baseInstance.type,
+						"method",
+						pExpression.methodName,
+						pExpression.location
+					)
 
 					-- Verify the correct number of arguments is provided
 					if #arguments ~= #method.signature.parameters then
@@ -1426,21 +1560,17 @@ local function semanticsSmol(sources, main)
 						table.insert(evaluation, localSt(destination))
 					end
 
-					local constraint = {
-						tag = "this-constraint",
-						instance = baseInstance,
-						name = method.id,
-					}
-
-					table.insert(evaluation, {
+					local callSt = {
 						tag = "generic-method-call",
 						baseInstance = baseInstance,
-						constraint = constraint,
-						name = pExpression.methodName,
+						constraint = method.constraintIR,
+						methodName = pExpression.methodName,
 						arguments = arguments,
 						destinations = destinations,
 						returns = "no",
-					})
+					}
+					assertis(callSt, "StatementIR")
+					table.insert(evaluation, callSt)
 
 					return buildBlock(evaluation), destinations
 				end
@@ -1699,9 +1829,9 @@ local function semanticsSmol(sources, main)
 					local subEvaluation, sources = compileExpression(
 						pStatement.values[1], scope)
 					
-					if #sources ~= #signature.returnTypes then
+					if #sources ~= #containingSignature.returnTypes then
 						Report.RETURN_COUNT_MISMATCH {
-							signatureCount = #signature.returnTypes,
+							signatureCount = #containingSignature.returnTypes,
 							returnCount = #sources,
 							location = pStatement.location,
 						}
@@ -1791,47 +1921,63 @@ local function semanticsSmol(sources, main)
 
 		-- Collect static functions' type parameters from the containing class
 		local generics = {}
-		if signature.modifier == "static" then
+		if containingSignature.modifier == "static" then
 			generics = definition.generics
 		end
 
 		-- Create the initial scope with the function's parameters
 		local functionScope = {{}}
-		for _, parameter in ipairs(signature.parameters) do
+		for _, parameter in ipairs(containingSignature.parameters) do
 			functionScope[1][parameter.name] = parameter
 		end
 
-		local body = compileBlock(signature.body, functionScope)
+		-- Initialize a "this" variable
+		local initialization = buildBlock {}
+		if containingSignature.modifier == "method" then
+			initialization = buildBlock {
+				localSt(thisVariable),
+				{
+					tag = "this",
+					destination = thisVariable,
+					returns = "no",
+				},
+			}
+		end
+
+		local body = buildBlock {
+			initialization,
+			compileBlock(containingSignature.body, functionScope)
+		}
 		assertis(body, "StatementIR")
 		if body.returns ~= "yes" then
 			local returns = {}
-			for _, returnType in ipairs(signature.returnTypes) do
+			for _, returnType in ipairs(containingSignature.returnTypes) do
 				table.insert(returns, showType(returnType))
 			end
 			returns = table.concat(returns, ", ")
 
 			if returns ~= "Unit" then
 				Report.FUNCTION_DOESNT_RETURN {
-					name = signature.container .. ":" .. signature.name,
-					modifier = signature.modifier,
-					location = signature.body.location,
+					name = containingSignature.container .. ":" .. containingSignature.name,
+					modifier = containingSignature.modifier,
+					location = containingSignature.body.location,
 					returns = returns,
 				}
 			end
 		end
 
 		return freeze {
-			name = signature.name,
+			name = containingSignature.name,
 			definitionName = definition.name,
 			
 			-- Function's generics exclude those on the `this` instance
 			generics = generics,
 			
-			parameters = signature.parameters,
-			returnTypes = signature.returnTypes,
+			parameters = containingSignature.parameters,
+			returnTypes = containingSignature.returnTypes,
 
 			body = body,
-			signature = signature,
+			signature = containingSignature,
 		}
 	end
 
