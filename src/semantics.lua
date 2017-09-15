@@ -2,6 +2,16 @@
 
 local Report = import "semantic-errors.lua"
 
+-- RETURNS the clearest possible combination of a, and b.
+local function unclear(a, b)
+	assertis(a, "maybe")
+	assertis(b, "maybe")
+	if a == b then
+		return a
+	end
+	return "maybe"
+end
+
 -- RETURNS a string of smol representing the given type
 local function showType(t)
 	assertis(t, "Type+")
@@ -1894,13 +1904,6 @@ local function semanticsSmol(sources, main)
 						givenType = showType(conditionOut[1].type),
 						location = pStatement.condition.location,
 					}
-				end
-
-				local function unclear(a, b)
-					if a == b then
-						return a
-					end
-					return "maybe"
 				end
 
 				-- Builds the else-if-chain IR instructions.
