@@ -61,6 +61,9 @@ local function lexSmol(source, filename)
 		["class"] = true,
 		["do"] = true,
 		["foreign"] = true,
+		["if"] = true,
+		["else"] = true,
+		["elseif"] = true,
 		["import"] = true,
 		["interface"] = true,
 		["is"] = true,
@@ -338,7 +341,10 @@ local function parseSmol(tokens)
 
 	local K_CLASS = LEXEME "class"
 	local K_DO = LEXEME "do"
+	local K_ELSE = LEXEME "else"
+	local K_ELSEIF = LEXEME "elseif"
 	local K_FOREIGN = LEXEME "foreign"
+	local K_IF = LEXEME "if"
 	local K_IMPORT = LEXEME "import"
 	local K_INTERFACE = LEXEME "interface"
 	local K_IS = LEXEME "is"
@@ -607,6 +613,7 @@ local function parseSmol(tokens)
 			parser.named "do-statement",
 			parser.named "var-statement",
 			parser.named "assign-statement",
+			parser.named "if-statement",
 		},
 
 		["block"] = parser.composite {
@@ -659,6 +666,28 @@ local function parseSmol(tokens)
 			{"_", K_EQUAL, "`=` after the variable in the var-statement"},
 			{"value", parser.named "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end var-statement"},
+		},
+
+		["if-statement"] = parser.composite {
+			tag = "if-statement",
+			{"_", K_IF},
+			{"condition", parser.named "expression", "expected a condition in `if` statement"},
+			{"body", parser.named "block", "expected a block to follow `if` condition"},
+			{"elseifs", parser.query "else-if-clause*"},
+			{"else", parser.query "else-clause?"},
+		},
+
+		["else-if-clause"] = parser.composite {
+			tag = "else-if-clause",
+			{"_", K_ELSEIF},
+			{"condition", parser.named "expression", "expected a condition in `elseif` clause"},
+			{"body", parser.named "block", "expected a block to follow `elseif` condition"},
+		},
+
+		["else-clause"] = parser.composite {
+			tag = "else-clause",
+			{"_", K_ELSE},
+			{"body", parser.named "block", "expected a block to follow `else`"},
 		},
 
 		-- Expressions!
@@ -866,6 +895,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"NewSt",
 	"NumberLoadSt",
 	"ReturnSt",
+	"IfSt",
 	"StaticCallSt",
 	"StringLoadSt",
 	"ThisSt",
@@ -911,6 +941,13 @@ EXTEND_TYPE("ReturnSt", "AbstractStatementIR", recordType {
 	tag = constantType "return",
 	sources = listType "VariableIR",
 	returns = constantType "yes",
+})
+
+EXTEND_TYPE("IfSt", "AbstractStatementIR", recordType {
+	tag = constantType "if",
+	condition = "VariableIR",
+	bodyThen = "StatementIR",
+	bodyElse = "StatementIR",
 })
 
 EXTEND_TYPE("NumberLoadSt", "AbstractStatementIR", recordType {

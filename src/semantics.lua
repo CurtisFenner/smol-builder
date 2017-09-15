@@ -2,6 +2,16 @@
 
 local Report = import "semantic-errors.lua"
 
+-- RETURNS the clearest possible combination of a, and b.
+local function unclear(a, b)
+	assertis(a, "maybe")
+	assertis(b, "maybe")
+	if a == b then
+		return a
+	end
+	return "maybe"
+end
+
 -- RETURNS a string of smol representing the given type
 local function showType(t)
 	assertis(t, "Type+")
@@ -1278,7 +1288,7 @@ local function semanticsSmol(sources, main)
 				-- Evaluate the arguments
 				local evaluation = {}
 				local argumentSources = {}
-				for i, argument in ipairs(pExpression.arguments) do
+				for _, argument in ipairs(pExpression.arguments) do
 					local subEvaluation, outs = compileExpression(
 						argument, scope
 					)
@@ -1309,7 +1319,7 @@ local function semanticsSmol(sources, main)
 					-- Check the number of parameters
 					if #static.signature.parameters ~= #pExpression.arguments then
 						Report.WRONG_VALUE_COUNT {
-							purpose = "static function `" .. fullName .. "`",
+							purpose = "static function `" .. static.fullName .. "`",
 							expectedCount = #static.signature.parameters,
 							givenCount = #pExpression.arguments,
 							location = pExpression.location,
@@ -1319,11 +1329,11 @@ local function semanticsSmol(sources, main)
 					-- Verify the argument types match the parameter types
 					for i, argument in ipairs(argumentSources) do
 						local parameterType = substituter(static.signature.parameters[i].type)
-						if not areTypesEqual(arg.type, parameterType) then
+						if not areTypesEqual(argument.type, parameterType) then
 							Report.TYPES_DONT_MATCH {
 								purpose = string.ordinal(i) .. " argument to " .. fullName,
 								expectedLocation = static.signature.parameters[i].location,
-								givenType = showType(arg.type),
+								givenType = showType(argument.type),
 								location = argument.location,
 								expectedType = showType(parameterType)
 							}
@@ -1411,7 +1421,7 @@ local function semanticsSmol(sources, main)
 						Report.TYPES_DONT_MATCH {
 							purpose = string.ordinal(i) .. " argument to " .. fullName,
 							expectedLocation = method.parameters[i].location,
-							givenType = showType(arg.type),
+							givenType = showType(argument.type),
 							location = argument.location,
 							expectedType = showType(parameterType)
 						}
@@ -1513,6 +1523,8 @@ local function semanticsSmol(sources, main)
 						pExpression.location
 					)
 
+					local methodFullName = method.fullName
+
 					-- Verify the correct number of arguments is provided
 					if #arguments ~= #method.signature.parameters then
 						Report.WRONG_VALUE_COUNT {
@@ -1586,7 +1598,7 @@ local function semanticsSmol(sources, main)
 				if not method or method.modifier ~= "method" then
 					Report.NO_SUCH_METHOD {
 						modifier = "method",
-						type = showType(t),
+						type = showType(baseInstance.type),
 						name = pExpression.name,
 						definitionLocation = baseDefinition.location,
 						location = pExpression.location,
@@ -1746,6 +1758,8 @@ local function semanticsSmol(sources, main)
 			error("TODO expression: " .. show(pExpression))
 		end
 
+		local compileBlock
+
 		-- RETURNS a StatementIR
 		local function compileStatement(pStatement, scope)
 			assertis(scope, listType(mapType("string", "VariableIR")))
@@ -1859,25 +1873,105 @@ local function semanticsSmol(sources, main)
 						purpose = "do-statement expression",
 						expectedCount = 1,
 						givenCount = #out,
-						location = pExpression.location,
+						location = pStatement.location,
 					}
 				elseif not areTypesEqual(out[1].type, UNIT_TYPE) then
 					Report.TYPES_DONT_MATCH {
 						purpose = "do-statement expression",
 						expectedType = "Unit",
-						expectedLocation = pExpression.expression.location,
+						expectedLocation = pStatement.expression.location,
 						givenType = showType(out[1].type),
-						location = pExpression.expression.location,
+						location = pStatement.expression.location,
 					}
 				end
 
 				return evaluation
+			elseif pStatement.tag == "if-statement" then
+				local conditionEvaluation, conditionOut = compileExpression(pStatement.condition, scope)
+				assert(#conditionOut ~= 0)
+				if #conditionOut > 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "if-statement condition",
+						expectedCount = 1,
+						givenCount = #conditionOut,
+						location = pStatement.location,
+					}
+				elseif not areTypesEqual(conditionOut[1].type, BOOLEAN_TYPE) then
+					Report.TYPES_DONT_MATCH {
+						purpose = "if-statement condition",
+						expectedType = "Boolean",
+						expectedLocation = pStatement.condition.location,
+						givenType = showType(conditionOut[1].type),
+						location = pStatement.condition.location,
+					}
+				end
+
+				-- Builds the else-if-chain IR instructions.
+				-- The index is the index of the first else-if clause to include.
+				-- RETURNS an IRStatement that holds the compiled tail of the else.
+				local function compileElseChain(i)
+					if i > #pStatement.elseifs then
+						if pStatement["else"] then
+							local blockIR = compileBlock(pStatement["else"].body, scope)
+							assertis(blockIR, "StatementIR")
+							return blockIR
+						else
+							return buildBlock({})
+						end
+					end
+					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(pStatement.elseifs[i].condition, scope)
+					assert(#elseIfConditionOut ~= 0)
+					if #elseIfConditionOut > 1 then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "else-if-statement condition",
+							expectedCount = 1,
+							givenCount = #conditionOut,
+							location = pStatement.elseifs[i].location,
+						}
+					elseif not areTypesEqual(elseIfConditionOut[1].type, BOOLEAN_TYPE) then
+						Report.TYPES_DONT_MATCH {
+							purpose = "else-if-statement condition",
+							expectedType = "Boolean",
+							expectedLocation = pStatement.elseifs[i].condition.location,
+							givenType = showType(elseIfConditionOut[1].type),
+							location = pStatement.elseifs[i].condition.location,
+						}
+					end
+
+					local bodyThen = compileBlock(pStatement.elseifs[i].body, scope)
+					local bodyElse = compileElseChain(i + 1)
+					local ifSt = freeze {
+						tag = "if",
+						returns = unclear(bodyThen.returns, bodyElse.returns),
+						condition = elseIfConditionOut[1],
+						bodyThen = bodyThen,
+						bodyElse = bodyElse,
+					}
+					assertis(elseIfConditionEvaluation, "StatementIR")
+					assertis(ifSt, "StatementIR")
+					return buildBlock({elseIfConditionEvaluation, ifSt})
+				end
+
+				local bodyThen = compileBlock(pStatement.body, scope)
+				local bodyElse = compileElseChain(1)
+
+				local ifSt = freeze {
+					tag = "if",
+					returns = unclear(bodyThen.returns, bodyElse.returns),
+					condition = conditionOut[1],
+					bodyThen = bodyThen,
+					bodyElse = bodyElse,
+				}
+
+				assertis(conditionEvaluation, "StatementIR")
+				assertis(ifSt, "StatementIR")
+				return buildBlock({conditionEvaluation, ifSt})
 			end
 			error("TODO: compileStatement(" .. show(pStatement) .. ")")
 		end
 
 		-- RETURNS a BlockSt
-		local function compileBlock(pBlock, scope)
+		compileBlock = function(pBlock, scope)
 			assertis(scope, listType(mapType("string", "VariableIR")))
 
 			-- Open a new scope
