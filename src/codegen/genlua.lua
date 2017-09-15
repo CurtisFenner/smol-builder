@@ -173,6 +173,13 @@ local function generateStatement(statement, emit)
 		local values = table.map(function(v) return localName(v.name) end, statement.sources)
 		emit("return " .. table.concat(values, ", "))
 		return
+	elseif statement.tag == "if" then
+		emit("if " .. localName(statement.condition.name) .. " then")
+		generateStatement(statement.bodyThen, indentedEmitter(emit))
+		emit("else")
+		generateStatement(statement.bodyElse, indentedEmitter(emit))
+		emit("end")
+		return
 	elseif statement.tag == "method-call" then
 		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 		destinations = table.concat(destinations, ", ")

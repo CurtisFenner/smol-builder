@@ -1,0 +1,32 @@
+package test;
+import core;
+
+class Test {
+	static main!() Unit {
+		if true {
+			do core:Out.println!("A");
+		}
+		if false {
+			do core:Out.println!("B");
+		} else {
+			do core:Out.println!("C");
+		}
+		if false {
+			do core:Out.println!("D");
+		} elseif true {
+			do core:Out.println!("E");
+		}
+		if false {
+			do core:Out.println!("F");
+		} elseif false {
+			do core:Out.println!("G");
+		}
+		if false {
+			do core:Out.println!("H");
+		} elseif false {
+			do core:Out.println!("I");
+		} else {
+			do core:Out.println!("J");
+		}
+	}
+}
