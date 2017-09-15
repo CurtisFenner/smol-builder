@@ -76,6 +76,7 @@ function REPORT()
 			"FAIL: " .. fail.name,
 			"\tExpected: " .. fail.expected,
 			"\tBut got:  " .. fail.got,
+			fail.reason and "\t" .. fail.reason,
 		}
 		print()
 	end
@@ -132,7 +133,12 @@ for test in io.popen("ls tests-positive", "r"):lines() do
 		if status ~= 0 then
 			FAIL {name = test, expected = 0, got = status}
 		else
-			PASS {name = test}
+			local correct = os.execute("lua output.lua | diff - tests-positive/" .. test .. "/out.correct")
+			if correct == 0 then
+				PASS {name = test}
+			else
+				FAIL {name = test, expected = status, got = status, reason = "wrong output"}
+			end
 		end
 	end
 end

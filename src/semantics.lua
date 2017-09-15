@@ -1627,9 +1627,9 @@ local function semanticsSmol(sources, main)
 						signatureLocation = method.location,
 						location = pExpression.location,
 					}
-				elseif method.bang and not signature.bang then
+				elseif method.bang and not containingSignature.bang then
 					Report.BANG_NOT_ALLOWED {
-						context = signature.modifier .. " " .. definition.name .. "." .. signature.name,
+						context = containingSignature.modifier .. " " .. definition.name .. "." .. containingSignature.name,
 						location = pExpression.location,
 					}
 				end

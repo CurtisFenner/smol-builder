@@ -8,14 +8,14 @@ class Greeting {
 		return new(message = "good evening");
 	}
 
-	method greet() Unit {
-		do core:Out.println(this.message);
+	method greet!() Unit {
+		do core:Out.println!(this.message);
 	}
 }
 
 class Test {
-	static main() Unit {
+	static main!() Unit {
 		var greeter Greeting = Greeting.evening();
-		do greeter.greet();
+		do greeter.greet!();
 	}
 }
