@@ -1896,13 +1896,16 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
-				local unclear = function(a, b)
+				local function unclear(a, b)
 					if a == b then
 						return a
 					end
 					return "maybe"
 				end
 
+				-- Builds the else-if-chain IR instructions.
+				-- The index is the index of the first else-if clause to include.
+				-- RETURNS an IRStatement that holds the compiled tail of the else.
 				local function compileElseChain(i)
 					if i > #pStatement.elseifs then
 						if pStatement["else"] then
@@ -1943,8 +1946,7 @@ local function semanticsSmol(sources, main)
 					}
 					assertis(elseIfConditionEvaluation, "StatementIR")
 					assertis(ifSt, "StatementIR")
-					local v = buildBlock({elseIfConditionEvaluation, ifSt})
-					return v
+					return buildBlock({elseIfConditionEvaluation, ifSt})
 				end
 
 				local bodyThen = compileBlock(pStatement.body, scope)
@@ -1960,8 +1962,7 @@ local function semanticsSmol(sources, main)
 
 				assertis(conditionEvaluation, "StatementIR")
 				assertis(ifSt, "StatementIR")
-				local v = buildBlock({conditionEvaluation, ifSt})
-				return v
+				return buildBlock({conditionEvaluation, ifSt})
 			end
 			error("TODO: compileStatement(" .. show(pStatement) .. ")")
 		end
