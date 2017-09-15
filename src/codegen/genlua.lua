@@ -21,8 +21,12 @@ end
 
 -- RETURNS a string
 local function concreteConstraintFunctionName(definitionName, interfaceName)
-	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_"
+	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_" .. luaizeName(interfaceName)
 end
+
+local LUA_THIS_LOCAL = "this"
+local LUA_CONSTRAINT_PARAMETER = "constraintParameters"
+local LUA_CONSTRAINTS_FIELD = "constraintField"
 
 -- RETURNS a string representing a Lua identifier for a Smol variable or parameter
 local function localName(name)
@@ -45,8 +49,10 @@ end
 
 -- RETURNS a string
 local function luaEncodedString(value)
+	assertis(value, "string")
+
 	local out = {}
-	local safe = "[A-Za-z0-9 +-^*/:.,?!%%%[%]]"
+	local safe = "[#_A-Za-z0-9 +-^*/:.,?!%%%[%]]"
 	for i = 1, #value do
 		if value:sub(i, i):match(safe) then
 			table.insert(out, value:sub(i, i))
@@ -61,13 +67,43 @@ end
 
 -- RETURNS a string
 local function luaEncodedNumber(value)
+	assertis(value, "number")
+
 	return tostring(value)
 end
 
 local function indentedEmitter(emit)
+	assertis(emit, "function")
+
 	return function(line)
 		return emit("\t" .. line)
 	end
+end
+
+-- RETURNS a string that is a Lua identifier
+local function variableToLuaLocal(variable)
+	assertis(variable, "VariableIR")
+
+	return localName(variable.name)
+end
+
+-- RETURNS a string
+local function variablesToLuaList(variables)
+	assertis(variables, listType "VariableIR")
+
+	local identifiers = table.map(variableToLuaLocal, variables)
+	return table.concat(identifiers, ", ")
+end
+
+-- RETURNS a string that is a Lua expression
+local function luaConstraint(constraint)
+	assertis(constraint, "ConstraintIR")
+
+	if constraint.tag == "parameter-constraint" then
+		return LUA_CONSTRAINT_PARAMETER .. "[" .. luaEncodedString(constraint.name) .. "]"
+	end
+	print(show(constraint))
+	error "unimplemented constraint"
 end
 
 -- RETURNS nothing
@@ -104,16 +140,13 @@ local function generateStatement(statement, emit)
 		emit(localName(statement.destination.name) .. " = this")
 		return
 	elseif statement.tag == "static-call" then
-		local destinationNames = {}
-		for _, destination in ipairs(statement.destinations) do
-			table.insert(destinationNames, localName(destination.name))
-		end
-		local destinations = table.concat(destinationNames, ", ")
+		local destinations = variablesToLuaList(statement.destinations)
 		emit(destinations .. " = " .. staticFunctionName(statement.name, statement.baseType.name) .. "(")
+
+		assert(#statement.constraints == 0, "TODO: constraints")
 
 		-- Collect real arguments and constraint parameters
 		local arguments = {}
-		assert(#statement.constraints == 0, "TODO: constraints")
 		for _, argument in ipairs(statement.arguments) do
 			table.insert(arguments, localName(argument.name))
 		end
@@ -127,11 +160,13 @@ local function generateStatement(statement, emit)
 	elseif statement.tag == "new" then
 		emit(localName(statement.destination.name) .. " = {")
 		for key, value in pairs(statement.fields) do
-			emit("\t" .. fieldName(key) .. " = " .. localName(value.name))
+			emit("\t" .. fieldName(key) .. " = " .. localName(value.name) .. ",")
 		end
+		emit("\t" .. LUA_CONSTRAINTS_FIELD .. " = {")
 		for key, constraint in pairs(statement.constraints) do
-			error "TODO"
+			emit("\t\t[" .. luaEncodedString(constraint.name) .. "] = " .. luaConstraint(constraint) .. ",")
 		end
+		emit("\t},")
 		emit("}")
 		return
 	elseif statement.tag == "return" then
@@ -139,20 +174,39 @@ local function generateStatement(statement, emit)
 		emit("return " .. table.concat(values, ", "))
 		return
 	elseif statement.tag == "method-call" then
-
 		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 		destinations = table.concat(destinations, ", ")
 		local method = methodFunctionName(statement.name, statement.baseInstance.type.name)
 		emit(destinations .. " = " .. method .. "(")
 		emit("\t" .. localName(statement.baseInstance.name))
-		for i, argument in ipairs(statement.arguments) do
-			emit("\t," .. localName(statement.arguments[i].name))
+		for _, argument in ipairs(statement.arguments) do
+			emit("\t," .. localName(argument.name))
 		end
 		emit(")")
 		return
 	elseif statement.tag == "field" then
 		emit(localName(statement.destination.name) .. " = ")
 		emit("\t" .. localName(statement.base.name) .. "." .. fieldName(statement.name))
+		return
+	elseif statement.tag == "generic-static-call" then
+		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+		destinations = table.concat(destinations, ", ")
+		emit(destinations .. " = (" .. luaConstraint(statement.constraint) .. ")." .. statement.staticName .. "(")
+		for i, argument in ipairs(statement.arguments) do
+			local comma = i == #statement.arguments and "" or ", "
+			emit("\t" .. localName(argument.name) .. comma)
+		end
+		emit(")")
+		return
+	elseif statement.tag == "generic-method-call" then
+		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+		destinations = table.concat(destinations, ", ")
+		emit(destinations .. " = (" .. luaConstraint(statement.constraint) .. ")." .. statement.methodName .. "(")
+		emit("\t" .. localName(statement.baseInstance.name))
+		for _, argument in ipairs(statement.arguments) do
+			emit("\t, " .. localName(argument.name))
+		end
+		emit(")")
 		return
 	end
 	
@@ -170,49 +224,49 @@ return function(semantics, arguments)
 		quit("Could not open file `" .. arguments.out .. "` for writing")
 	end
 
-	file:write [[
+	local code = {"-- Generated by Smol Lua compiler", commented(INVOKATION), ""}
+	table.insert(code, [[
 local function smol_static_core_Out_println(message)
 	print(message)
 end
-	]]
-
-	local code = {"-- Generated by Smol Lua compiler", commented(INVOKATION), ""}
+]])
 
 	-- Generate a constraint-building-function for each constraint
 	for _, definition in ipairs(table.concatted(semantics.classes, semantics.unions)) do
 		for _, interface in ipairs(definition.implements) do
-			table.insert(code, "function")
-			table.insert(code, concreteConstraintFunctionName(definition.name, interface.name))
-			table.insert(code, "(requirements)")
+			local functionName = concreteConstraintFunctionName(definition.name, interface.name)
+			table.insert(code, "function " .. functionName .. "(requirements)")
 			table.insert(code, "\terror 'TODO'")
 			table.insert(code, "end")
+			table.insert(code, "")
 		end
 	end
 
 	-- Generate the body for each method and static
 	for _, func in ipairs(semantics.functions) do
-		table.insert(code, "-- " .. func.signature.modifier .. " " .. func.name)
+		local fullName = func.definitionName .. "." .. func.name
+		table.insert(code, "-- " .. func.signature.modifier .. " " .. fullName)
 		if func.signature.foreign then
 			table.insert(code, "-- is foreign")
 		else
 			-- Generate function header
-			table.insert(code, "function")
-			local parameters
+			local luaFunctionName
+			local luaParameters
 			if func.signature.modifier == "static" then
-				table.insert(code, staticFunctionName(func.name, func.definitionName))
-				parameters = {}
+				luaFunctionName = staticFunctionName(func.name, func.definitionName)
+				luaParameters = {}
 			else
 				assert(func.signature.modifier == "method")
-				table.insert(code, methodFunctionName(func.name, func.definitionName))
-				parameters = {"this"}
+				luaFunctionName = methodFunctionName(func.name, func.definitionName)
+				luaParameters = {LUA_THIS_LOCAL}
 			end
 
 			for _, parameter in ipairs(func.parameters) do
-				table.insert(parameters, localName(parameter.name))
+				table.insert(luaParameters, localName(parameter.name))
 			end
 
-			assert(#func.generics == 0, "TODO: constraint parameters")
-			table.insert(code, "(" .. table.concat(parameters, ", ") .. ")")
+			table.insert(luaParameters, LUA_CONSTRAINT_PARAMETER)
+			table.insert(code, "function " .. luaFunctionName .. "(" .. table.concat(luaParameters, ", ") .. ")")
 
 			-- Generate function body
 			local function emit(line)
