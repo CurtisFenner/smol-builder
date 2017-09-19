@@ -242,9 +242,11 @@ local function generateStatement(statement, emit, structScope, semantics)
 		return
 	elseif statement.tag == "string" then
 		comment(statement.destination.name .. " = " .. luaEncodedString(statement.string) .. ";")
-		-- emit(localName(statement.destination.name))
-		-- emit("\t= " .. luaEncodedString(statement.string))
-		-- return
+		local name = localName(statement.destination.name)
+		emit(name .. " = ALLOCATE(smol_String);")
+		emit(name .. "->length = " .. #statement.string .. ";")
+		emit(name .. "->text = " .. luaEncodedString(statement.string) .. ";")
+		return
 	elseif statement.tag == "number" then
 		comment(statement.destination.name .. " = " .. statement.number .. ";")
 		local name = localName(statement.destination.name)
@@ -427,7 +429,22 @@ return function(semantics, arguments)
 	}
 ]])
 
-	local TUPLE_INDEX = #code + 1
+	local forwardSequence = {}
+	table.insert(code, "// Forward type declarations")
+	table.insert(code, forwardSequence)
+	table.insert(code, "")
+	local function forwardDeclareStruct(private, public)
+		assertis(private, "string")
+		assert(not private:find(";"))
+		assertis(public, "string")
+
+		table.insert(forwardSequence, "struct " .. private .. "; typedef struct " .. private .. " " .. public .. ";")
+	end
+
+	table.insert(code, "// Tuples")
+	local tupleSequence = {}
+	table.insert(code, tupleSequence)
+	table.insert(code, "")
 
 	-- RETURNS a string that is a C type
 	local generatedTuples = {}
@@ -445,7 +462,7 @@ return function(semantics, arguments)
 		if not generatedTuples[name] then
 			generatedTuples[name] = true
 			local sequence = {}
-			table.insert(sequence, "typedef struct {")
+			table.insert(sequence, "typedef struct _" .. name .. " {")
 			local parameters = {}
 			for i = 1, #list do
 				table.insert(parameters, list[i] .. " _" .. i)
@@ -463,31 +480,37 @@ return function(semantics, arguments)
 			table.insert(sequence, "\treturn out;")
 			table.insert(sequence, "}")
 			table.insert(sequence, "")
-			table.insert(code, TUPLE_INDEX, table.concat(sequence, "\n"))
+			table.insert(tupleSequence, table.concat(sequence, "\n"))
+			forwardDeclareStruct("_" .. name, name)
 		end
 		return name
 	end
 
 	table.insert(code, [[
-typedef struct {
+typedef struct _smol_Unit {
 	void* nothing;
 } smol_Unit;
 
-typedef struct {
+typedef struct _smol_Boolean {
 	int value;
 } smol_Boolean;
 
-typedef struct {
+typedef struct _smol_String {
 	size_t length;
 	char const* text;
 } smol_String;
 
-typedef struct {
+typedef struct _smol_Number {
 	double value;
 } smol_Number;
 
 ////////////////////////////////////////////////////////////////////////////////
 ]])
+
+	forwardDeclareStruct("_smol_Unit", "smol_Unit")
+	forwardDeclareStruct("_smol_Boolean", "smol_Boolean")
+	forwardDeclareStruct("_smol_Number", "smol_Number")
+	forwardDeclareStruct("_smol_String", "smol_String")
 
 	-- Build the struct scope map
 	local structScope = {}
@@ -499,7 +522,8 @@ typedef struct {
 	-- Generate a struct for each interface
 	for _, interface in ipairs(semantics.interfaces) do
 		table.insert(code, "// interface " .. interface.name)
-		table.insert(code, "typedef struct {")
+		local structName = interfaceStructName(interface.name)
+		table.insert(code, "typedef struct _" .. structName .. " {")
 		for _, signature in ipairs(interface.signatures) do
 			local returns = cTypeTuple(signature.returnTypes, demandTuple, structScope)
 			local name = interfaceMember(signature.name)
@@ -511,40 +535,48 @@ typedef struct {
 				table.insert(parameters, cType(parameter.type))
 			end
 
-			local prototype = #parameters == 0 and "smol_Unit" or table.concat(parameters, ", ")
+			local prototype = #parameters == 0 and "void* /*ignore*/ " or table.concat(parameters, ", ")
 			table.insert(code, "\tCLOSURE(" .. returns .. ", " .. prototype .. ") " .. name .. ";")
 		end
 		table.insert(code, "\tchar _;")
-		table.insert(code, "} " .. interfaceStructName(interface.name) .. ";")
+		table.insert(code, "} " .. structName .. ";")
+		forwardDeclareStruct("_" .. structName, structName)
 		table.insert(code, "")
 	end
 
 table.insert(code, [[
-void smol_static_core_Out_println(smol_String message) {
+void* smol_static_core_Out_println(smol_String* message) {
 	// TODO: allow nulls, etc.
-	printf("%s\n", message.text);
+	for (size_t i = 0; i < message->length; i++) {
+		putchar(message->text[i]);
+	}
+	return NULL;
 }
 ]])
 
 	-- Generate a struct for each class
 	for _, class in ipairs(semantics.classes) do
 		table.insert(code, "// class " .. class.name)
-		table.insert(code, "typedef struct {")
+		local structName = classStructName(class.name)
+		table.insert(code, "typedef struct _" .. structName .. " {")
 		for _, field in ipairs(class.fields) do
 			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
 		end
 		table.insert(code, "\tchar _;")
-		table.insert(code, "} " .. classStructName(class.name) .. ";")
+		table.insert(code, "} " .. structName .. ";")
+		forwardDeclareStruct("_" .. structName, structName)
 		table.insert(code, "")
 	end
 
-	table.insert(code, "")
 	-- TODO: generate a tagged union for each union
 
-	local PROTOTYPE_INDEX = #code + 1
+	local prototypeSequence = {}
+	table.insert(code, prototypeSequence)
+	table.insert(code, "")
+	-- Add a prototype string to up here
 	local function genPrototype(prototype)
 		assert(prototype:find(" ") and prototype:find(";"))
-		table.insert(code, PROTOTYPE_INDEX, prototype)
+		table.insert(prototypeSequence, prototype)
 	end
 
 	-- Generate a constraint-building-function for each constraint
@@ -597,6 +629,9 @@ void smol_static_core_Out_println(smol_String message) {
 					local t = cType(parameter.type, structScope)
 					local name = localName(parameter.name)
 					table.insert(cParameters, t .. " " .. name)
+				end
+				if #cParameters == 1 then
+					table.insert(cParameters, "void* /*ignore*/ _")
 				end
 
 				-- Create prototype for wrapper
@@ -729,7 +764,7 @@ void smol_static_core_Out_println(smol_String message) {
 			end
 			local outType = cTypeTuple(func.returnTypes, demandTuple, structScope)
 			local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
-			table.insert(code, PROTOTYPE_INDEX, prototype .. ";")
+			genPrototype(prototype .. ";")
 			table.insert(code, prototype .. " {")
 
 			-- Generate function body
@@ -756,7 +791,14 @@ void smol_static_core_Out_println(smol_String message) {
 
 	-- Write the code to the output file
 	for _, line in ipairs(code) do
-		file:write(line .. "\n")
+		if type(line) == "string" then
+			file:write(line .. "\n")
+		else
+			assertis(line, listType "string")
+			for _, subline in ipairs(line) do
+				file:write(subline .. "\n")
+			end
+		end
 	end
 	file:close()
 end
