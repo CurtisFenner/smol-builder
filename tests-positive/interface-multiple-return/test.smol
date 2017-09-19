@@ -1,0 +1,39 @@
+package test;
+
+import core;
+
+interface Favorites[#A] {
+	static top2() #A, #A;
+	method next2() #A, #A;
+}
+
+class Q is Favorites[String] {
+	static top2() String, String {
+		return "42", "43";
+	}
+	method next2() String, String {
+		return "44", "45";
+	}
+
+	static make() Q {
+		return new();
+	}
+}
+
+class Four[#T, #Y | #T is Favorites[#Y]] {
+	static four(instance #T) #Y, #Y, #Y, #Y {
+		var a #Y, b #Y = #T.top2();
+		var c #Y, d #Y = instance.next2();
+		return a, b, c, d;
+	}
+}
+
+class Test {
+	static main!() Unit {
+		var a String, b String, c String, d String = Four[Q, String].four(Q.make());
+		do core:Out.println!(a);
+		do core:Out.println!(b);
+		do core:Out.println!(c);
+		do core:Out.println!(d);
+	}
+}

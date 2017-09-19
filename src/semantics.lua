@@ -1220,8 +1220,7 @@ local function semanticsSmol(sources, main)
 				local evaluation = {}
 				-- Evaluate all arguments to new
 				for _, argument in ipairs(pExpression.arguments) do
-					local subEvaluation, subOut = compileExpression(
-						argument.value, scope)
+					local subEvaluation, subOut = compileExpression(argument.value, scope)
 					if #subOut ~= 1 then
 						Report.WRONG_VALUE_COUNT {
 							purpose = "field value",
@@ -1528,6 +1527,9 @@ local function semanticsSmol(sources, main)
 						pExpression.location
 					)
 
+					local substituter = getSubstituterFromConcreteType(method.constraint, allDefinitions)
+					assertis(substituter, "function")
+
 					local methodFullName = method.fullName
 
 					-- Verify the correct number of arguments is provided
@@ -1542,10 +1544,11 @@ local function semanticsSmol(sources, main)
 
 					-- Verify the types of the arguments match the parameters
 					for i, argument in ipairs(arguments) do
-						if not areTypesEqual(argument.type, method.parameters[i].type) then
+						local expectedType = substituter(method.parameters[i].type)
+						if not areTypesEqual(argument.type, expectedType) then
 							Report.TYPES_DONT_MATCH {
 								purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
-								expectedType =	showType(method.parameters[i].type),
+								expectedType =	showType(expectedType),
 								expectedLocation = method.parameters[i].location,
 								givenType = showType(argument.type),
 								location = argument.location,
@@ -1570,7 +1573,7 @@ local function semanticsSmol(sources, main)
 					for _, returnType in ipairs(method.signature.returnTypes) do
 						local destination = {
 							name = generateLocalID("return"),
-							type = returnType,
+							type = substituter(returnType),
 							location = pExpression.location,
 						}
 						table.insert(destinations, destination)
@@ -1594,6 +1597,7 @@ local function semanticsSmol(sources, main)
 
 				-- Concrete instance
 				local baseDefinition = definitionFromType(baseInstance.type)
+				local substituter = getSubstituterFromConcreteType(baseInstance.type, allDefinitions)
 				
 				-- Find the definition of the method being invoked
 				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
@@ -1622,7 +1626,7 @@ local function semanticsSmol(sources, main)
 
 				-- Verify the types of the arguments match the parameters
 				for i, argument in ipairs(arguments) do
-					if not areTypesEqual(argument.type, method.parameters[i].type) then
+					if not areTypesEqual(argument.type, substituter(method.parameters[i].type)) then
 						Report.TYPES_DONT_MATCH {
 							purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
 							expectedType =	showType(method.parameters[i].type),
@@ -1656,7 +1660,7 @@ local function semanticsSmol(sources, main)
 				for _, returnType in ipairs(method.returnTypes) do
 					local destination = {
 						name = generateLocalID("return"),
-						type = returnType,
+						type = substituter(returnType),
 						location = pExpression.location,
 					}
 					table.insert(destinations, destination)
@@ -1844,29 +1848,66 @@ local function semanticsSmol(sources, main)
 				)
 				return buildBlock(sequence)
 			elseif pStatement.tag == "return-statement" then
+				local sources = {}
+				local evaluation = {}
 				if #pStatement.values == 1 then
-					local subEvaluation, sources = compileExpression(
+					-- A single value must have exactly the target multiplicity
+					local subEvaluation, subsources = compileExpression(
 						pStatement.values[1], scope)
 					
-					if #sources ~= #containingSignature.returnTypes then
+					if #subsources ~= #containingSignature.returnTypes then
 						Report.RETURN_COUNT_MISMATCH {
 							signatureCount = #containingSignature.returnTypes,
-							returnCount = #sources,
+							returnCount = #subsources,
 							location = pStatement.location,
 						}
 					end
 
-					local returnSt = {
-						tag = "return",
-						sources = sources,
-						returns = "yes",
-					}
-					local evaluation = {subEvaluation, returnSt}
-
-					return buildBlock(evaluation)
+					table.insert(evaluation, subEvaluation)
+					sources = subsources
 				else
-					error("TODO")
+					-- If multiple values are given, each must be a 1-tuple
+					for _, value in ipairs(pStatement.values) do
+						local subevaluation, subsources = compileExpression(value, scope)
+						if #subsources ~= 1 then
+							Report.WRONG_VALUE_COUNT {
+								purpose = "value in multiple-value return statement",
+								expectedCount = 1,
+								givenCount = #subsources,
+								location = value.location,
+							}
+						end
+
+						table.insert(sources, subsources[1])
+						table.insert(evaluation, subevaluation)
+					end
 				end
+
+				local returnSt = {
+					tag = "return",
+					sources = sources,
+					returns = "yes",
+				}
+				table.insert(evaluation, returnSt)
+
+				local fullName = containingSignature.container .. "." .. containingSignature.name
+
+				-- Check return types
+				assert(#sources == #containingSignature.returnTypes)
+				for i, source in ipairs(sources) do
+					local expected = containingSignature.returnTypes[i]
+					if not areTypesEqual(source.type, expected) then
+						Report.TYPES_DONT_MATCH {
+							purpose = string.ordinal(i) .. " return value of " .. fullName,
+							expectedType = showType(expected),
+							givenType = showType(source.type),
+							expectedLocation = expected.location,
+							location = source.location,
+						}
+					end
+				end
+
+				return buildBlock(evaluation)
 			elseif pStatement.tag == "do-statement" then
 				local evaluation, out = compileExpression(
 					pStatement.expression,
@@ -1884,8 +1925,8 @@ local function semanticsSmol(sources, main)
 					Report.TYPES_DONT_MATCH {
 						purpose = "do-statement expression",
 						expectedType = "Unit",
-						expectedLocation = pStatement.expression.location,
 						givenType = showType(out[1].type),
+						expectedLocation = pStatement.expression.location,
 						location = pStatement.expression.location,
 					}
 				end

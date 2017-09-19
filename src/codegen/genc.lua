@@ -349,7 +349,7 @@ local function generateStatement(statement, emit, structScope, semantics)
 			end
 			local tuple = preTupleName(types)
 			local values = table.map(function(v) return localName(v.name) end, statement.sources)
-			emit("return " .. tuple .. "_make(" .. values .. ");")
+			emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
 		end
 	elseif statement.tag == "if" then
 		-- emit("if " .. localName(statement.condition.name) .. " then")
@@ -635,7 +635,21 @@ void smol_static_core_Out_println(smol_String message) {
 				end
 
 				-- TODO: convert out tuple types
-				table.insert(code, "\treturn " .. implName .. "(" .. table.concat(arguments, ", ") .. ");")
+				local invocation = implName .. "(" .. table.concat(arguments, ", ") .. ")"
+				if #signature.returnTypes == 1 then
+					-- Return the plain value
+					table.insert(code, "\treturn " .. invocation .. ";")
+				else
+					-- May need to convert tuple types
+					local func = table.findwith(definition.signatures, "name", signature.name)
+					local defOut = cTypeTuple(func.returnTypes, demandTuple, structScope)
+					local intOut = cTypeTuple(signature.returnTypes, demandTuple, structScope)
+					table.insert(code, "\t" .. defOut .. " concrete_out = " .. invocation .. ";")
+					table.insert(code, "\t" .. intOut .. " out;")
+					for i = 1, #signature.returnTypes do
+						table.insert(code, "\tout._" .. i .. " = concrete_out._" .. i .. ";")
+					end
+				end
 				table.insert(code, "}")
 			end
 
