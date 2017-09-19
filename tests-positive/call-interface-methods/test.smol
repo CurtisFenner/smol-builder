@@ -1,6 +1,6 @@
 package test;
 
-class Foo is Convertible[Number] {
+class Foo is ConvertibleTo[Number] {
 	var value Number;
 	method toThing() Number {
 		return this.value;
@@ -11,11 +11,11 @@ class Foo is Convertible[Number] {
 	}
 }
 
-interface Convertible[#To] {
-	method toThing() #To;
+interface ConvertibleTo[#Thing] {
+	method toThing() #Thing;
 }
 
-class Shower[#From, #To | #From is Convertible[#To]] {
+class Converter[#From, #To | #From is ConvertibleTo[#To]] {
 	static convert(from #From) #To {
 		return from.toThing();
 	}
@@ -25,6 +25,6 @@ class Test {
 	static main() Unit {
 		var foo Foo = Foo.make(7);
 
-		var x Number = Shower[Foo, Number].convert(foo);
+		var x Number = Converter[Foo, Number].convert(foo);
 	}
 }

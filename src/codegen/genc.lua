@@ -23,7 +23,7 @@ end
 
 -- RETURNS a string
 local function concreteConstraintFunctionName(definitionName, interfaceName)
-	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_" .. luaizeName(interfaceName)
+	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_is_" .. luaizeName(interfaceName)
 end
 
 -- RETURNS a string of smol representing the given type
@@ -212,6 +212,11 @@ local function preTupleName(list)
 	return name
 end
 
+-- RETURNS a C function identifier
+local function cWrapperName(signature, class, interface)
+	return "wrapper_" .. luaizeName(signature) .. "_" .. signature .. "_is_" .. luaizeName(interface)
+end
+
 -- RETURNS nothing
 -- Appends strings to code
 local function generateStatement(statement, emit, structScope, semantics)
@@ -225,6 +230,7 @@ local function generateStatement(statement, emit, structScope, semantics)
 		return
 	end
 
+	-- Emits a comment
 	local function comment(message)
 		emit("// " .. message)
 	end
@@ -414,10 +420,10 @@ return function(semantics, arguments)
 #define ALLOCATE(T) ((T*)malloc(sizeof(T)))
 
 // NOTE: closures must take at least one argument
-#define CLOSURE(rets, ...)                \
-	struct {                              \
-		void* data;                       \
-		rets (*func)(void*, __VA_ARGS__); \
+#define CLOSURE(returnType, ...)                \
+	struct {                                    \
+		void* data;                             \
+		returnType (*func)(void*, __VA_ARGS__); \
 	}
 ]])
 
@@ -519,7 +525,7 @@ void smol_static_core_Out_println(smol_String message) {
 	printf("%s\n", message.text);
 }
 ]])
-	
+
 	-- Generate a struct for each class
 	for _, class in ipairs(semantics.classes) do
 		table.insert(code, "// class " .. class.name)
@@ -544,7 +550,6 @@ void smol_static_core_Out_println(smol_String message) {
 	-- Generate a constraint-building-function for each constraint
 	for _, definition in ipairs(table.concatted(semantics.classes, semantics.unions)) do
 		for i, implement in ipairs(definition.implements) do
-			local functionName = concreteConstraintFunctionName(definition.name, implement.name)
 			local requirements = {}
 			for key, constraint in pairs(definition.constraints) do
 				table.insert(requirements, {name = key, constraint = constraint})
@@ -555,6 +560,87 @@ void smol_static_core_Out_println(smol_String message) {
 				table.insert(parameters, interfaceStructName(p.constraint.name) .. " p" .. i)
 			end
 
+			local interface = table.findwith(semantics.interfaces, "name", implement.name)
+			assert(interface)
+
+			-- Generate the wrapper for each method part of the interface
+			local wrapped = {}
+			for _, signature in ipairs(interface.signatures) do
+				table.insert(code, "// for impl")
+
+				-- Collect the constraints
+				local constraints = {}
+				for i, generic in ipairs(definition.generics) do
+					for j, constraint in ipairs(definition.constraints) do
+						table.insert(constraints, interfaceStructName(constraint.interface.name))
+					end
+				end
+
+				local dataTupleType = demandTuple(constraints)
+				if dataTupleType:sub(-1) ~= "*" then
+					dataTupleType = dataTupleType .. "*"
+				end
+
+				-- Get the out type from the interface
+				local wrapperName = cWrapperName(signature.name, definition.name, interface.name)
+				wrapped[signature.name] = wrapperName
+				local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
+				local cParameters = {"void* data_general"}
+
+				-- Add implicit this parameter
+				if signature.modifier == "method" then
+					table.insert(cParameters, "void* this")
+				end
+
+				-- Add explicit value parameters
+				for _, parameter in ipairs(signature.parameters) do
+					local t = cType(parameter.type, structScope)
+					local name = localName(parameter.name)
+					table.insert(cParameters, t .. " " .. name)
+				end
+
+				-- Create prototype for wrapper
+				local prototype = outType .. " " .. wrapperName .. "(" .. table.concat(cParameters, ", ") .. ")"
+				table.insert(code, prototype .. " {")
+				table.insert(code, "\t" .. dataTupleType .. " data = data_general;")
+
+				-- Collect the value arguments for the implementation
+				local arguments = {}
+				if signature.modifier == "method" then
+					-- TODO: add explicit cast
+					table.insert(arguments, "this")
+				end
+
+				for _, parameter in ipairs(signature.parameters) do
+					table.insert(arguments, localName(parameter.name))
+				end
+
+				-- Collect the constraint arguments for the implementation
+				if signature.modifier == "static" then
+					-- Only static functions take parameters
+					if #constraints ~= 1 then
+						for i, constraint in ipairs(constraints) do
+							table.insert(arguments, "data->_" .. i)
+						end
+					else
+						table.insert(arguments, "data")
+					end
+				end
+
+				local implName
+				if signature.modifier == "static" then
+					implName = staticFunctionName(signature.name, definition.name)
+				else
+					implName = methodFunctionName(signature.name, definition.name)
+				end
+
+				-- TODO: convert out tuple types
+				table.insert(code, "\treturn " .. implName .. "(" .. table.concat(arguments, ", ") .. ");")
+				table.insert(code, "}")
+			end
+
+			-- Generate the main function
+			local functionName = concreteConstraintFunctionName(definition.name, implement.name)
 			local outType = interfaceStructName(implement.name)
 			table.insert(code, "// " .. definition.name .. " implements " .. implement.name)
 			table.insert(code, outType .. " " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
@@ -565,18 +651,9 @@ void smol_static_core_Out_println(smol_String message) {
 			end
 
 			table.insert(code, "\t" .. outType .. " out;")
-			local interface = table.findwith(semantics.interfaces, "name", implement.name)
-			assert(interface)
 			for _, signature in ipairs(interface.signatures) do
 				table.insert(code, "\tout." .. interfaceMember(signature.name) .. ".data = closed;")
-				local func
-				if signature.modifier == "method" then
-					func = methodFunctionName(signature.name, definition.name)
-				else
-					func = staticFunctionName(signature.name, definition.name)
-				end
-				-- XXX: the C prototypes may not match exactly (for example, if one of them is 
-				-- generic)
+				local func = wrapped[signature.name]
 				table.insert(code, "\tout." .. interfaceMember(signature.name) .. ".func = " .. func .. ";")
 			end
 
