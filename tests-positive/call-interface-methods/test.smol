@@ -1,12 +1,13 @@
 package test;
 
 class Foo is Convertible[Number] {
+	var value Number;
 	method toThing() Number {
-		return 1;
+		return this.value;
 	}
 
-	static make() Foo {
-		return new();
+	static make(value Number) Foo {
+		return new(value = value);
 	}
 }
 
@@ -22,7 +23,7 @@ class Shower[#From, #To | #From is Convertible[#To]] {
 
 class Test {
 	static main() Unit {
-		var foo Foo = Foo.make();
+		var foo Foo = Foo.make(7);
 
 		var x Number = Shower[Foo, Number].convert(foo);
 	}

@@ -101,9 +101,12 @@ local function luaConstraint(constraint)
 
 	if constraint.tag == "parameter-constraint" then
 		return LUA_CONSTRAINT_PARAMETER .. "[" .. luaEncodedString(constraint.name) .. "]"
+	elseif constraint.tag == "concrete-constraint" then
+		local func = concreteConstraintFunctionName(constraint.concrete.name, constraint.interface.name)
+		local arguments = "TODO"
+		return func .. "{" .. arguments .. "}"
 	end
-	print(show(constraint))
-	error "unimplemented constraint"
+	error("unimplemented constraint tag `" .. constraint.tag .. "`")
 end
 
 -- RETURNS nothing
@@ -143,13 +146,19 @@ local function generateStatement(statement, emit)
 		local destinations = variablesToLuaList(statement.destinations)
 		emit(destinations .. " = " .. staticFunctionName(statement.name, statement.baseType.name) .. "(")
 
-		assert(#statement.constraints == 0, "TODO: constraints")
+		-- Collect constraint parameter map
+		local constraints = {}
+		for key, constraint in pairs(statement.constraints) do
+			table.insert(constraints, "[" .. luaEncodedString(key) .. "] = " .. luaConstraint(constraint))
+		end
 
 		-- Collect real arguments and constraint parameters
 		local arguments = {}
 		for _, argument in ipairs(statement.arguments) do
 			table.insert(arguments, localName(argument.name))
 		end
+		local constraintsArgument = "{" .. table.concat(constraints, ", ") .. "}"
+		table.insert(arguments, constraintsArgument)
 		emit("\t" .. table.concat(arguments, ", "))
 
 		emit(")")

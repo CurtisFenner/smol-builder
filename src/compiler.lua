@@ -40,6 +40,7 @@ local parser = import "parser.lua"
 local calculateSemantics = import "semantics.lua"
 local codegen = {
 	lua = import "codegen/genlua.lua",
+	c = import "codegen/genc.lua",
 }
 
 -- Lexer -----------------------------------------------------------------------
@@ -875,6 +876,7 @@ REGISTER_TYPE("FunctionIR", recordType {
 	returnTypes = listType "Type+",
 	body = "BlockSt",
 	signature = "Signature",
+	definitionName = "string",
 })
 
 REGISTER_TYPE("maybe", choiceType(
@@ -1055,6 +1057,7 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 		tag = constantType "concrete-constraint",
 		interface = "InterfaceType+",
 		concrete = "ConcreteType+",
+		assignments = mapType("string", "ConstraintIR"),
 	}
 ))
 
@@ -1140,6 +1143,6 @@ end
 local semantics = calculateSemantics(sourceParses, mainFunction)
 
 -- TODO: read target
-local arguments = {out = "output.lua"}
-local TARGET = "lua"
+local arguments = {out = "output.c"}
+local TARGET = "c"
 codegen[TARGET](semantics, arguments)

@@ -43,9 +43,9 @@ end
 
 local idCount = 0
 -- RETURNS a unique (to this struct) local variable name
-local function generateLocalID()
+local function generateLocalID(hint)
 	idCount = idCount + 1
-	return "_local" .. tostring(idCount)
+	return "_local" .. tostring(idCount) .. "_" .. tostring(hint)
 end
 
 -- RETURNS a StatementIR representing the execution of statements in
@@ -1046,13 +1046,16 @@ local function semanticsSmol(sources, main)
 			assertis(implementer, "Type+")
 
 			if implementer.tag == "concrete-type+" then
+				local assignments = {}
 				if #implementer.arguments > 0 then
+					-- Fill assignments
 					error "TODO"
 				end
 				return freeze {
 					tag = "concrete-constraint",
 					interface = interface,
 					concrete = implementer,
+					assignments = assignments,
 				}
 			end
 			print(show(interface))
@@ -1079,14 +1082,14 @@ local function semanticsSmol(sources, main)
 				if signature then
 					local constraintIR = {
 						tag = "parameter-constraint",
-						name = pi .. "_" .. ci,
+						name = "#" .. pi .. "_" .. ci,
 						location = constraint.location,
 					}
 					if containingSignature.modifier == "method" then
 						constraintIR = {
 							tag = "this-constraint",
 							instance = thisVariable,
-							name = pi .. "_" .. ci
+							name = "#" .. pi .. "_" .. ci
 						}
 					end
 
@@ -1149,7 +1152,7 @@ local function semanticsSmol(sources, main)
 
 			if pExpression.tag == "string-literal" then
 				local out = {
-					name = generateLocalID(),
+					name = generateLocalID("stringliteral"),
 					type = STRING_TYPE,
 					location = pExpression.location,
 				}
@@ -1166,7 +1169,7 @@ local function semanticsSmol(sources, main)
 				return block, freeze {out}
 			elseif pExpression.tag == "number-literal" then
 				local out = {
-					name = generateLocalID(),
+					name = generateLocalID("numberliteral"),
 					type = NUMBER_TYPE,
 					location = pExpression.location,
 				}
@@ -1183,7 +1186,7 @@ local function semanticsSmol(sources, main)
 				return block, freeze {out}
 			elseif pExpression.tag == "new-expression" then
 				local out = {
-					name = generateLocalID(),
+					name = generateLocalID("new"),
 					type = containerType,
 					location = pExpression.location .. ">"
 				}
@@ -1344,7 +1347,7 @@ local function semanticsSmol(sources, main)
 					local destinations = {}
 					for _, returnType in pairs(static.signature.returnTypes) do
 						local returnVariable = {
-							name = generateLocalID(),
+							name = generateLocalID("return"),
 							type = substituter(returnType),
 							location = pExpression.location,
 						}
@@ -1459,7 +1462,7 @@ local function semanticsSmol(sources, main)
 				local outs = {}
 				for _, returnType in pairs(method.returnTypes) do
 					local returnVariable = {
-						name = generateLocalID(),
+						name = generateLocalID("return"),
 						type = substituter(returnType),
 						location = pExpression.location,
 					}
@@ -1467,7 +1470,7 @@ local function semanticsSmol(sources, main)
 					table.insert(evaluation, localSt(returnVariable))
 				end
 
-				table.insert(evaluation, {
+				local call = {
 					tag = "static-call",
 					baseType = t,
 					name = method.name,
@@ -1475,7 +1478,9 @@ local function semanticsSmol(sources, main)
 					constraints = constraints,
 					destinations = outs,
 					returns = "no",
-				})
+				}
+				assertis(call, "StaticCallSt")
+				table.insert(evaluation, call)
 				
 				return buildBlock(evaluation), freeze(outs)
 			elseif pExpression.tag == "method-call" then
@@ -1564,7 +1569,7 @@ local function semanticsSmol(sources, main)
 					local destinations = {}
 					for _, returnType in ipairs(method.signature.returnTypes) do
 						local destination = {
-							name = generateLocalID(),
+							name = generateLocalID("return"),
 							type = returnType,
 							location = pExpression.location,
 						}
@@ -1650,7 +1655,7 @@ local function semanticsSmol(sources, main)
 				local destinations = {}
 				for _, returnType in ipairs(method.returnTypes) do
 					local destination = {
-						name = generateLocalID(),
+						name = generateLocalID("return"),
 						type = returnType,
 						location = pExpression.location,
 					}
@@ -1672,7 +1677,7 @@ local function semanticsSmol(sources, main)
 				if pExpression.keyword == "false" or pExpression.keyword == "true" then
 					local boolean = {
 						type = BOOLEAN_TYPE,
-						name = generateLocalID(),
+						name = generateLocalID("booleanliteral"),
 						location = pExpression.location,
 					}
 					local execution = {
@@ -1688,7 +1693,7 @@ local function semanticsSmol(sources, main)
 				elseif pExpression.keyword == "this" then
 					local variable = {
 						type = containerType,
-						name = generateLocalID(),
+						name = generateLocalID("this"),
 						location = pExpression.location,
 					}
 					local execution = {
@@ -1742,7 +1747,7 @@ local function semanticsSmol(sources, main)
 
 				local result = {
 					type = field.type,
-					name = generateLocalID(),
+					name = generateLocalID("field"),
 					location = pExpression.location,
 				}
 				local accessStatement = {
@@ -1752,7 +1757,7 @@ local function semanticsSmol(sources, main)
 					destination = result,
 					returns = "no",
 				}
-				return buildBlock {baseEvaluation, accessStatement}, {result}
+				return buildBlock {baseEvaluation, localSt(result), accessStatement}, {result}
 			end
 
 			error("TODO expression: " .. show(pExpression))

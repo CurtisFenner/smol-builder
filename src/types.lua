@@ -436,7 +436,8 @@ function mapType(from, to)
 				return false, reason .. " for key `" .. tostring(key) .. "`"
 			end
 
-			if not to(value) then
+			local okay, reason = to(value)
+			if not okay then
 				return false,
 					reason .. " for value at key `" .. tostring(key) .. "`"
 			end

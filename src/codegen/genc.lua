@@ -1,0 +1,671 @@
+-- Curtis Fenner, copyright (C) 2017
+
+-- RETURNS a string
+local function luaizeName(name)
+	return name:gsub(":", "_"):gsub("#", "hash")
+end
+
+-- RETURNS a string
+local function staticFunctionName(name, definition)
+	assert(definition:find("[A-Z]"))
+	return "smol_static_" .. luaizeName(definition) .. "_" .. luaizeName(name)
+end
+
+-- RETURNS a string
+local function methodFunctionName(name, definition)
+	assertis(name, "string")
+	assertis(definition, "string")
+	assert(definition:match(":"))
+	assert(definition:find("[A-Z]"))
+
+	return "smol_method_" .. luaizeName(definition) .. "_" .. luaizeName(name)
+end
+
+-- RETURNS a string
+local function concreteConstraintFunctionName(definitionName, interfaceName)
+	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_" .. luaizeName(interfaceName)
+end
+
+-- RETURNS a string of smol representing the given type
+local function showType(t)
+	assertis(t, "Type+")
+
+	if t.tag == "concrete-type+" then
+		if #t.arguments == 0 then
+			return t.name
+		end
+		local arguments = table.map(showType, t.arguments)
+		return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
+	elseif t.tag == "keyword-type+" then
+		return t.name
+	elseif t.tag == "generic+" then
+		return "#" .. t.name
+	end
+	error("unknown Type+ tag `" .. t.tag .. "`")
+end
+
+local LUA_THIS_LOCAL = "this"
+local C_CONSTRAINT_PARAMETER_PREFIX = "cons"
+local LUA_CONSTRAINTS_FIELD = "constraintField"
+
+-- RETURNS a string representing a Lua identifier for a Smol variable or parameter
+local function localName(name)
+	assert(not name:find(":"))
+
+	return "smol_local_" .. name
+end
+
+-- RETURNS a string representing a Lua identifier for a Smol field
+local function classFieldName(name)
+	assert(not name:find(":"))
+
+	return "smol_field_" .. name
+end
+
+-- RETURNS a string representing a C type
+local function cType(t, scope)
+	assertis(t, "Type+")
+	assertis(scope, mapType("string", "string"))
+
+	if t.tag == "generic+" then
+		return "void*"
+	elseif t.tag == "concrete-type+" then
+		return scope[t.name] .. "*"
+	elseif t.tag == "keyword-type+" then
+		return "smol_" .. t.name .. "*"
+	end
+	error "unknown"
+end
+
+-- RETURNS a string representing a tuple type
+local function cTypeTuple(ts, demandTuple, scope)
+	assertis(ts, listType "Type+")
+	assertis(demandTuple, "function")
+	assert(#ts >= 1)
+	assertis(scope, mapType("string", "string"))
+	if #ts == 1 then
+		return cType(ts[1], scope)
+	end
+	local shown = table.map(cType, ts, scope)
+	return demandTuple(shown)
+end
+
+-- RETURNS a string
+local function commented(message)
+	return "// " .. message:gsub("\n", "\n// ")
+end
+
+-- RETURNS a string
+local function luaEncodedString(value)
+	assertis(value, "string")
+
+	local out = {}
+	local safe = "[#_A-Za-z0-9 +-^*/:.,?!%%%[%]]"
+	for i = 1, #value do
+		if value:sub(i, i):match(safe) then
+			table.insert(out, value:sub(i, i))
+		else
+			local digits = tostring(value:byte(i))
+			digits = string.rep("0", 3 - #digits) .. digits
+			table.insert(out, "\\" .. digits)
+		end
+	end
+	return "\"" .. table.concat(out) .. "\""
+end
+
+-- RETURNS a string
+local function luaEncodedNumber(value)
+	assertis(value, "number")
+
+	return tostring(value)
+end
+
+local function indentedEmitter(emit)
+	assertis(emit, "function")
+
+	return function(line)
+		return emit("\t" .. line)
+	end
+end
+
+-- RETURNS a C type name
+local function interfaceStructName(name)
+	assertis(name, "string")
+	assert(name:find(":"))
+
+	return "smol_interface_" .. name:gsub(":", "_") .. "_T"
+end
+
+-- RETURNS a C type name
+local function classStructName(name)
+	assertis(name, "string")
+	assert(name:find(":"))
+
+	return "smol_class_" .. name:gsub(":", "_") .. "_T"
+end
+
+-- RETURNS a string that is a Lua identifier
+local function variableToLuaLocal(variable)
+	assertis(variable, "VariableIR")
+
+	return localName(variable.name)
+end
+
+-- RETURNS a string
+local function variablesToLuaList(variables)
+	assertis(variables, listType "VariableIR")
+
+	local identifiers = table.map(variableToLuaLocal, variables)
+	return table.concat(identifiers, ", ")
+end
+
+-- RETURNS a string that is a Lua expression
+local function cConstraint(constraint, semantics)
+	assertis(constraint, "ConstraintIR")
+	assertis(semantics, "Semantics")
+
+	if constraint.tag == "parameter-constraint" then
+		-- XXX
+		return C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. constraint.name:gsub("#", "")
+	elseif constraint.tag == "concrete-constraint" then
+		local func = concreteConstraintFunctionName(constraint.concrete.name, constraint.interface.name)
+		local class = table.findwith(semantics.classes, "name", constraint.concrete.name)
+		local union = table.findwith(semantics.unions, "name"< constraint.concrete.name)
+		local definition = class or union
+		assertis(definition, recordType {generics = listType "TypeParameterIR"})
+
+		local argumentValues = {}
+		for i, generic in ipairs(definition.generics) do
+			for j, c in ipairs(generic.constraints) do
+				-- XXX
+				local assignment = constraint.assignments["#" .. i .. "_" .. j]
+				table.insert(argumentValues, cConstraint(assignment, semantics))
+			end
+		end
+
+		local arguments = table.concat(argumentValues, ", ")
+		return func .. "(" .. arguments .. ")"
+	end
+	error("unimplemented constraint tag `" .. constraint.tag .. "`")
+end
+
+-- RETURNS a string representing a interface struct field name
+local function interfaceMember(name)
+	return "i_" .. luaizeName(name)
+end
+
+-- REQUIRES that demandTuple has already been called; otherwise the referenced
+-- tuple type doesn't exist
+-- RETURNS a string that is a C type name
+local function preTupleName(list)
+	assert(list, listType "string")
+
+	-- TODO: deal with 0-tuples
+	local values = {}
+	for _, element in ipairs(list) do
+		table.insert(values, (element:gsub("%*", "_ptr")))
+	end
+	local name = "tuple" .. #list .. "_" .. table.concat(values, "_x_")
+	if #list == 0 then
+		name = "tuple0"
+	end
+	return name
+end
+
+-- RETURNS nothing
+-- Appends strings to code
+local function generateStatement(statement, emit, structScope, semantics)
+	assertis(statement, "StatementIR")
+	assertis(structScope, mapType("string", "string"))
+
+	if statement.tag == "block" then
+		for _, subStatement in ipairs(statement.statements) do
+			generateStatement(subStatement, emit, structScope, semantics)
+		end
+		return
+	end
+
+	local function comment(message)
+		emit("// " .. message)
+	end
+
+	-- Plain statements
+	if statement.tag == "local" then
+		comment("var " .. statement.variable.name .. " " .. showType(statement.variable.type) .. ";")
+		emit(cType(statement.variable.type, structScope) .. " " .. localName(statement.variable.name) .. ";")
+		return
+	elseif statement.tag == "string" then
+		comment(statement.destination.name .. " = " .. luaEncodedString(statement.string) .. ";")
+		-- emit(localName(statement.destination.name))
+		-- emit("\t= " .. luaEncodedString(statement.string))
+		-- return
+	elseif statement.tag == "number" then
+		comment(statement.destination.name .. " = " .. statement.number .. ";")
+		local name = localName(statement.destination.name)
+		emit(name .. " = ALLOCATE(smol_Number);")
+		emit(name .. "->value = " .. luaEncodedNumber(statement.number) .. ";")
+		return
+	elseif statement.tag == "boolean" then
+		comment(statement.destination.name .. " = " .. tostring(statement.boolean) .. ";")
+		local name = localName(statement.destination.name)
+		emit(name .. " = ALLOCATE(smol_Boolean);")
+		emit(name .. "->value = " .. (statement.boolean and 1 or 0) .. ";")
+		return
+	elseif statement.tag == "this" then
+		comment(statement.destination.name .. " = this;")
+		emit(localName(statement.destination.name) .. " = this;")
+		return
+	elseif statement.tag == "static-call" then
+		comment("... = " .. showType(statement.baseType) .. "." .. statement.name .. "(...);")
+		if #statement.destinations == 1 then
+			-- Collect value arguments
+			local argumentNames = {}
+			for _, argument in ipairs(statement.arguments) do
+				table.insert(argumentNames, localName(argument.name))
+			end
+
+			-- Collect constraints
+			-- XXX: right now, we're guaranteed these are in lexical order
+			local keys = table.keys(statement.constraints)
+			table.sort(keys)
+			for _, key in ipairs(keys) do
+				local constraint = statement.constraints[key]
+				table.insert(argumentNames, cConstraint(constraint, semantics))
+			end
+
+			-- Emit code
+			local destination = statement.destinations[1]
+			local invocation = staticFunctionName(statement.name, statement.baseType.name)
+			local arguments = table.concat(argumentNames, ", ")
+			emit(localName(destination.name) .. " = " .. invocation .. "(" .. arguments .. ");")
+			return
+		else
+			assert(#statement.destinations >= 2)
+			local destinationTypes = {}
+			for _, destination in ipairs(statement.destinations) do
+				table.insert(destinationTypes, cType(destination.type, structScope))
+			end
+			local tuple = preTupleName(destinationTypes)
+			-- TODO
+		end
+		
+		-- local destinations = variablesToLuaList(statement.destinations)
+		-- emit(destinations .. " = " .. staticFunctionName(statement.name, statement.baseType.name) .. "(")
+
+		-- -- Collect constraint parameter map
+		-- local constraints = {}
+		-- for key, constraint in pairs(statement.constraints) do
+		-- 	table.insert(constraints, "[" .. luaEncodedString(key) .. "] = " .. cConstraint(constraint))
+		-- end
+
+		-- -- Collect real arguments and constraint parameters
+		-- local arguments = {}
+		-- for _, argument in ipairs(statement.arguments) do
+		-- 	table.insert(arguments, localName(argument.name))
+		-- end
+		-- local constraintsArgument = "{" .. table.concat(constraints, ", ") .. "}"
+		-- table.insert(arguments, constraintsArgument)
+		-- emit("\t" .. table.concat(arguments, ", "))
+
+		-- emit(")")
+		-- return
+	elseif statement.tag == "assign" then
+		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
+		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
+		return
+	elseif statement.tag == "new" then
+		comment(statement.destination.name .. " = new(...);")
+		local name = localName(statement.destination.name)
+		local cT = cType(statement.destination.type, structScope)
+		if cT:sub(-1) == "*" then
+			cT = cT:sub(1, -2)
+		end
+		emit(name .. " = ALLOCATE(" .. cT .. ");")
+		
+		for key, value in pairs(statement.fields) do
+			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
+		end
+		for key, constraint in pairs(statement.constraints) do
+			local constraintField = "TODO"
+			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
+		end
+		return
+	elseif statement.tag == "return" then
+		comment("return ...;")
+
+		if #statement.sources == 1 then
+			emit("return " .. localName(statement.sources[1].name) .. ";")
+			return
+		else
+			local types = {}
+			for _, source in ipairs(statement.sources) do
+				table.insert(types, cType(source.type, structScope))
+			end
+			local tuple = preTupleName(types)
+			local values = table.map(function(v) return localName(v.name) end, statement.sources)
+			emit("return " .. tuple .. "_make(" .. values .. ");")
+		end
+	elseif statement.tag == "if" then
+		-- emit("if " .. localName(statement.condition.name) .. " then")
+		-- generateStatement(statement.bodyThen, indentedEmitter(emit))
+		-- emit("else")
+		-- generateStatement(statement.bodyElse, indentedEmitter(emit))
+		-- emit("end")
+		-- return
+	elseif statement.tag == "method-call" then
+		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+		-- destinations = table.concat(destinations, ", ")
+		-- local method = methodFunctionName(statement.name, statement.baseInstance.type.name)
+		-- emit(destinations .. " = " .. method .. "(")
+		-- emit("\t" .. localName(statement.baseInstance.name))
+		-- for _, argument in ipairs(statement.arguments) do
+		-- 	emit("\t," .. localName(argument.name))
+		-- end
+		-- emit(")")
+		-- return
+	elseif statement.tag == "field" then
+		comment(statement.destination.name .. " = " .. statement.base.name .. "." .. statement.name .. ";")
+		emit(localName(statement.destination.name) .. " = ")
+		emit("\t" .. localName(statement.base.name) .. "->" .. classFieldName(statement.name) .. ";")
+		return
+	elseif statement.tag == "generic-static-call" then
+		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+		-- destinations = table.concat(destinations, ", ")
+		-- emit(destinations .. " = (" .. cConstraint(statement.constraint) .. ")." .. statement.staticName .. "(")
+		-- for i, argument in ipairs(statement.arguments) do
+		-- 	local comma = i == #statement.arguments and "" or ", "
+		-- 	emit("\t" .. localName(argument.name) .. comma)
+		-- end
+		-- emit(")")
+		-- return
+	elseif statement.tag == "generic-method-call" then
+		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+		-- destinations = table.concat(destinations, ", ")
+		-- emit(destinations .. " = (" .. cConstraint(statement.constraint) .. ")." .. statement.methodName .. "(")
+		-- emit("\t" .. localName(statement.baseInstance.name))
+		-- for _, argument in ipairs(statement.arguments) do
+		-- 	emit("\t, " .. localName(argument.name))
+		-- end
+		-- emit(")")
+		-- return
+	end
+	
+	comment(statement.tag .. " ????")
+	print("unknown statement tag `" .. statement.tag .. "`")
+end
+
+return function(semantics, arguments)
+	if not arguments.out then
+		quit("out argument must be specified for C code generator")
+	end
+
+	-- Open the file
+	local file = io.open(arguments.out, "wb")
+	if not file then
+		quit("Could not open file `" .. arguments.out .. "` for writing")
+	end
+
+	local code = {"// Generated by Smol Lua compiler", commented(INVOKATION), ""}
+	table.insert(code, [[
+#include "assert.h"
+#include "stdio.h"
+#include "stdlib.h"
+
+#define ALLOCATE(T) ((T*)malloc(sizeof(T)))
+
+// NOTE: closures must take at least one argument
+#define CLOSURE(rets, ...)                \
+	struct {                              \
+		void* data;                       \
+		rets (*func)(void*, __VA_ARGS__); \
+	}
+]])
+
+	local TUPLE_INDEX = #code + 1
+
+	-- RETURNS a string that is a C type
+	local generatedTuples = {}
+	local function demandTuple(list)
+		assert(list, listType "string")
+		-- TODO: deal with 0-tuples
+		local values = {}
+		for _, element in ipairs(list) do
+			table.insert(values, (element:gsub("%*", "_ptr")))
+		end
+		local name = "tuple" .. #list .. "_" .. table.concat(values, "_x_")
+		if #list == 0 then
+			name = "tuple0"
+		end
+		if not generatedTuples[name] then
+			generatedTuples[name] = true
+			local sequence = {}
+			table.insert(sequence, "typedef struct {")
+			local parameters = {}
+			for i = 1, #list do
+				table.insert(parameters, list[i] .. " _" .. i)
+				table.insert(sequence, "\t" .. list[i] .. " _" .. i .. ";")
+			end
+			table.insert(sequence, "\tchar _;")
+			table.insert(sequence, "} " .. name .. ";")
+			table.insert(sequence, "")
+
+			table.insert(sequence, name .. " " .. name .. "_make(" .. table.concat(parameters, ", ") .. ") {")
+			table.insert(sequence, "\t" .. name .. " out;")
+			for i = 1, #list do
+				table.insert(sequence, "\tout._" .. i .. " = _" .. i .. ";")
+			end
+			table.insert(sequence, "\treturn out;")
+			table.insert(sequence, "}")
+			table.insert(sequence, "")
+			table.insert(code, TUPLE_INDEX, table.concat(sequence, "\n"))
+		end
+		return name
+	end
+
+	table.insert(code, [[
+typedef struct {
+	void* nothing;
+} smol_Unit;
+
+typedef struct {
+	int value;
+} smol_Boolean;
+
+typedef struct {
+	size_t length;
+	char const* text;
+} smol_String;
+
+typedef struct {
+	double value;
+} smol_Number;
+
+////////////////////////////////////////////////////////////////////////////////
+]])
+
+	-- Build the struct scope map
+	local structScope = {}
+	for _, class in ipairs(semantics.classes) do
+		structScope[class.name] = classStructName(class.name)
+	end	
+	structScope = freeze(structScope)
+
+	-- Generate a struct for each interface
+	for _, interface in ipairs(semantics.interfaces) do
+		table.insert(code, "// interface " .. interface.name)
+		table.insert(code, "typedef struct {")
+		for _, signature in ipairs(interface.signatures) do
+			local returns = cTypeTuple(signature.returnTypes, demandTuple, structScope)
+			local name = interfaceMember(signature.name)
+			local parameters = {}
+			if signature.modifier == "method" then
+				table.insert(parameters, "void* /*this*/")
+			end
+			for _, parameter in ipairs(signature.parameters) do
+				table.insert(parameters, cType(parameter.type))
+			end
+
+			local prototype = #parameters == 0 and "smol_Unit" or table.concat(parameters, ", ")
+			table.insert(code, "\tCLOSURE(" .. returns .. ", " .. prototype .. ") " .. name .. ";")
+		end
+		table.insert(code, "\tchar _;")
+		table.insert(code, "} " .. interfaceStructName(interface.name) .. ";")
+		table.insert(code, "")
+	end
+
+table.insert(code, [[
+void smol_static_core_Out_println(smol_String message) {
+	// TODO: allow nulls, etc.
+	printf("%s\n", message.text);
+}
+]])
+	
+	-- Generate a struct for each class
+	for _, class in ipairs(semantics.classes) do
+		table.insert(code, "// class " .. class.name)
+		table.insert(code, "typedef struct {")
+		for _, field in ipairs(class.fields) do
+			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
+		end
+		table.insert(code, "\tchar _;")
+		table.insert(code, "} " .. classStructName(class.name) .. ";")
+		table.insert(code, "")
+	end
+
+	table.insert(code, "")
+	-- TODO: generate a tagged union for each union
+
+	local PROTOTYPE_INDEX = #code + 1
+	local function genPrototype(prototype)
+		assert(prototype:find(" ") and prototype:find(";"))
+		table.insert(code, PROTOTYPE_INDEX, prototype)
+	end
+
+	-- Generate a constraint-building-function for each constraint
+	for _, definition in ipairs(table.concatted(semantics.classes, semantics.unions)) do
+		for i, implement in ipairs(definition.implements) do
+			local functionName = concreteConstraintFunctionName(definition.name, implement.name)
+			local requirements = {}
+			for key, constraint in pairs(definition.constraints) do
+				table.insert(requirements, {name = key, constraint = constraint})
+			end
+			table.sort(requirements, function(a, b) return a.name < b.name end)
+			local parameters = {}
+			for _, p in ipairs(requirements) do
+				table.insert(parameters, interfaceStructName(p.constraint.name) .. " p" .. i)
+			end
+
+			local outType = interfaceStructName(implement.name)
+			table.insert(code, "// " .. definition.name .. " implements " .. implement.name)
+			table.insert(code, outType .. " " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
+			local tuple = demandTuple(parameters)
+			table.insert(code, "\t" .. tuple .. "* closed = ALLOCATE(" .. tuple .. ");")
+			for i = 1, #parameters do
+				table.insert(code, "\tclosed->_" .. i .. " = p" .. i)
+			end
+
+			table.insert(code, "\t" .. outType .. " out;")
+			local interface = table.findwith(semantics.interfaces, "name", implement.name)
+			assert(interface)
+			for _, signature in ipairs(interface.signatures) do
+				table.insert(code, "\tout." .. interfaceMember(signature.name) .. ".data = closed;")
+				local func
+				if signature.modifier == "method" then
+					func = methodFunctionName(signature.name, definition.name)
+				else
+					func = staticFunctionName(signature.name, definition.name)
+				end
+				-- XXX: the C prototypes may not match exactly (for example, if one of them is 
+				-- generic)
+				table.insert(code, "\tout." .. interfaceMember(signature.name) .. ".func = " .. func .. ";")
+			end
+
+			table.insert(code, "\treturn out;")
+			table.insert(code, "}")
+			table.insert(code, "")
+		end
+	end
+
+	-- Add separator before functions
+	table.insert(code, string.rep("/", 80))
+	table.insert(code, "")
+
+	-- Generate the body for each method and static
+	for _, func in ipairs(semantics.functions) do
+		local fullName = func.definitionName .. "." .. func.name
+		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
+		if func.signature.foreign then
+			table.insert(code, "// is foreign")
+		else
+			local thisType
+			local definition = table.findwith(semantics.classes, "name", func.definitionName)
+				or table.findwith(semantics.unions, "name", func.definitionName)
+			assert(definition)
+			if definition.tag == "class" then
+				thisType = classStructName(definition.name) .. "*"
+			elseif definition.tag == "union" then
+				error "TODO"
+			end
+			assert(definition)
+
+			-- Generate function header
+			local cFunctionName
+			local cParameters
+			if func.signature.modifier == "static" then
+				cFunctionName = staticFunctionName(func.name, func.definitionName)
+				cParameters = {}
+			else
+				assert(func.signature.modifier == "method")
+				cFunctionName = methodFunctionName(func.name, func.definitionName)
+				cParameters = {thisType .. " " .. LUA_THIS_LOCAL}
+			end
+
+			-- Add value parameters
+			for _, parameter in ipairs(func.parameters) do
+				table.insert(cParameters, cType(parameter.type, structScope) .. " " .. localName(parameter.name))
+			end
+
+			-- Add constraint parameters
+			for i, generic in ipairs(func.generics) do
+				for j, constraint in ipairs(generic.constraints) do
+					local interface = constraint.interface
+					assertis(interface, "InterfaceType+")
+
+					local t = interfaceStructName(interface.name)
+					local identifier = C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. i .. "_" .. j
+					table.insert(cParameters, t .. " " .. identifier)
+				end
+			end
+			local outType = cTypeTuple(func.returnTypes, demandTuple, structScope)
+			local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
+			table.insert(code, PROTOTYPE_INDEX, prototype .. ";")
+			table.insert(code, prototype .. " {")
+
+			-- Generate function body
+			local function emit(line)
+				table.insert(code, "\t" .. line)
+			end
+			generateStatement(func.body, emit, structScope, semantics)
+
+			-- Close function body
+			if func.body.returns ~= "yes" then
+				table.insert(code, "\treturn NULL;")
+			end
+			table.insert(code, "}")
+		end
+		table.insert(code, "")
+	end
+
+	-- Generate the main function
+	table.insert(code, "// Main " .. semantics.main)
+	table.insert(code, "int main(int argv, char** argc) {")
+	table.insert(code, "\t" .. staticFunctionName("main", semantics.main) .. "();")
+	table.insert(code, "\treturn 0;")
+	table.insert(code, "}")
+
+	-- Write the code to the output file
+	for _, line in ipairs(code) do
+		file:write(line .. "\n")
+	end
+	file:close()
+end
