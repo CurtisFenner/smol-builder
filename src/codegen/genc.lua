@@ -205,9 +205,9 @@ local function preTupleName(list)
 	for _, element in ipairs(list) do
 		table.insert(values, (element:gsub("%*", "_ptr")))
 	end
-	local name = "tuple" .. #list .. "_" .. table.concat(values, "_x_")
-	if #list == 0 then
-		name = "tuple0"
+	local name = "tuple" .. #list
+	for i, value in ipairs(values) do
+		name = name .. "_" .. i .. "_" .. value
 	end
 	return name
 end
@@ -215,6 +215,12 @@ end
 -- RETURNS a C function identifier
 local function cWrapperName(signature, class, interface)
 	return "wrapper_" .. luaizeName(signature) .. "_" .. signature .. "_is_" .. luaizeName(interface)
+end
+
+local counter = 0
+local function UID()
+	counter = counter + 1
+	return counter
 end
 
 -- RETURNS nothing
@@ -265,26 +271,26 @@ local function generateStatement(statement, emit, structScope, semantics)
 		return
 	elseif statement.tag == "static-call" then
 		comment("... = " .. showType(statement.baseType) .. "." .. statement.name .. "(...);")
+		-- Collect value arguments
+		local argumentNames = {}
+		for _, argument in ipairs(statement.arguments) do
+			table.insert(argumentNames, localName(argument.name))
+		end
+
+		-- Collect constraints
+		-- XXX: right now, we're guaranteed these are in lexical order
+		local keys = table.keys(statement.constraints)
+		table.sort(keys)
+		for _, key in ipairs(keys) do
+			local constraint = statement.constraints[key]
+			table.insert(argumentNames, cConstraint(constraint, semantics))
+		end
+
+		-- Emit code
+		local destination = statement.destinations[1]
+		local invocation = staticFunctionName(statement.name, statement.baseType.name)
+		local arguments = table.concat(argumentNames, ", ")
 		if #statement.destinations == 1 then
-			-- Collect value arguments
-			local argumentNames = {}
-			for _, argument in ipairs(statement.arguments) do
-				table.insert(argumentNames, localName(argument.name))
-			end
-
-			-- Collect constraints
-			-- XXX: right now, we're guaranteed these are in lexical order
-			local keys = table.keys(statement.constraints)
-			table.sort(keys)
-			for _, key in ipairs(keys) do
-				local constraint = statement.constraints[key]
-				table.insert(argumentNames, cConstraint(constraint, semantics))
-			end
-
-			-- Emit code
-			local destination = statement.destinations[1]
-			local invocation = staticFunctionName(statement.name, statement.baseType.name)
-			local arguments = table.concat(argumentNames, ", ")
 			emit(localName(destination.name) .. " = " .. invocation .. "(" .. arguments .. ");")
 			return
 		else
@@ -293,8 +299,27 @@ local function generateStatement(statement, emit, structScope, semantics)
 			for _, destination in ipairs(statement.destinations) do
 				table.insert(destinationTypes, cType(destination.type, structScope))
 			end
-			local tuple = preTupleName(destinationTypes)
-			-- TODO
+			local class = table.findwith(semantics.classes, "name", statement.baseType.name)
+			local union = table.findwith(semantics.unions, "name", statement.baseType.name)
+			local definition = class or union
+			assert(definition)
+			local signature = table.findwith(definition.signatures, "name", statement.name)
+			assert(signature)
+
+			local types = {}
+			for _, r in ipairs(signature.returnTypes) do
+				table.insert(types, cType(r, structScope))
+			end
+			local tuple = preTupleName(types)
+			local tmp = "_tmp" .. UID()
+			emit(tuple .. " " .. tmp .. " = " .. invocation .. "(" .. arguments .. ");")
+
+			-- Assign each resulting tuple
+			for i, destination in ipairs(statement.destinations) do
+				-- TODO: add explicit casts
+				emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+			end
+			return
 		end
 		
 		-- local destinations = variablesToLuaList(statement.destinations)
@@ -352,6 +377,7 @@ local function generateStatement(statement, emit, structScope, semantics)
 			local tuple = preTupleName(types)
 			local values = table.map(function(v) return localName(v.name) end, statement.sources)
 			emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
+			return
 		end
 	elseif statement.tag == "if" then
 		-- emit("if " .. localName(statement.condition.name) .. " then")
@@ -450,15 +476,9 @@ return function(semantics, arguments)
 	local generatedTuples = {}
 	local function demandTuple(list)
 		assert(list, listType "string")
+
 		-- TODO: deal with 0-tuples
-		local values = {}
-		for _, element in ipairs(list) do
-			table.insert(values, (element:gsub("%*", "_ptr")))
-		end
-		local name = "tuple" .. #list .. "_" .. table.concat(values, "_x_")
-		if #list == 0 then
-			name = "tuple0"
-		end
+		local name = preTupleName(list)
 		if not generatedTuples[name] then
 			generatedTuples[name] = true
 			local sequence = {}
