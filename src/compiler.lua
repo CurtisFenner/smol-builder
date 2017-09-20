@@ -1047,10 +1047,12 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 	recordType {
 		tag = constantType "this-constraint",
 		instance = "VariableIR",
+		interface = "InterfaceType+",
 		name = "string",
 	},
 	recordType {
 		tag = constantType "parameter-constraint",
+		interface = "InterfaceType+",
 		name = "string",
 	},
 	recordType {

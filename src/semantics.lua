@@ -1084,12 +1084,14 @@ local function semanticsSmol(sources, main)
 						tag = "parameter-constraint",
 						name = "#" .. pi .. "_" .. ci,
 						location = constraint.location,
+						interface = constraint.interface,
 					}
 					if containingSignature.modifier == "method" then
 						constraintIR = {
 							tag = "this-constraint",
 							instance = thisVariable,
-							name = "#" .. pi .. "_" .. ci
+							name = "#" .. pi .. "_" .. ci,
+							interface = constraint.interface,
 						}
 					end
 
@@ -1209,11 +1211,12 @@ local function semanticsSmol(sources, main)
 
 				-- All of the constraints are provided as arguments to this
 				-- static function
-				for constraintName in pairs(definition.constraints) do
+				for constraintName, interface in pairs(definition.constraints) do
 					newSt.constraints[constraintName] = freeze {
 						tag = "parameter-constraint",
 						name = constraintName,
 						location = pExpression.location,
+						interface = interface,
 					}
 				end
 

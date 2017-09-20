@@ -225,13 +225,14 @@ end
 
 -- RETURNS nothing
 -- Appends strings to code
-local function generateStatement(statement, emit, structScope, semantics)
+local function generateStatement(statement, emit, structScope, semantics, demandTuple)
 	assertis(statement, "StatementIR")
 	assertis(structScope, mapType("string", "string"))
+	assertis(demandTuple, "function")
 
 	if statement.tag == "block" then
 		for _, subStatement in ipairs(statement.statements) do
-			generateStatement(subStatement, emit, structScope, semantics)
+			generateStatement(subStatement, emit, structScope, semantics, demandTuple)
 		end
 		return
 	end
@@ -413,15 +414,31 @@ local function generateStatement(statement, emit, structScope, semantics)
 		-- emit(")")
 		-- return
 	elseif statement.tag == "generic-method-call" then
-		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
-		-- destinations = table.concat(destinations, ", ")
-		-- emit(destinations .. " = (" .. cConstraint(statement.constraint) .. ")." .. statement.methodName .. "(")
-		-- emit("\t" .. localName(statement.baseInstance.name))
-		-- for _, argument in ipairs(statement.arguments) do
-		-- 	emit("\t, " .. localName(argument.name))
-		-- end
-		-- emit(")")
-		-- return
+		comment("... = " .. statement.baseInstance.name .. "." .. statement.methodName .. "(...);")
+		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
+
+		-- Collect the arguments
+		local argumentValues = {}
+		-- The first argument is the implicit this
+		table.insert(argumentValues, localName(statement.baseInstance.name))
+
+		local arguments = table.concat(argumentValues, ", ")
+		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
+		assert(interface)
+		local signature = table.findwith(interface.signatures, "name", statement.methodName)
+		assert(signature)
+
+		local tmp = "_tmp" .. UID()
+		local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
+		emit(outType .. " " .. tmp .. " = CLOSURE_CALL((" .. cConstraint(statement.constraint, semantics) .. ")." .. interfaceMember(statement.methodName) .. ", " .. arguments .. ");")
+		if #statement.destinations == 1 then
+			emit(localName(statement.destinations[1].name) .. " = " .. tmp .. ";")
+		else
+			for i, destination in ipairs(statement.destinations) do
+				emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+			end
+		end
+		return
 	end
 	
 	comment(statement.tag .. " ????")
@@ -453,6 +470,8 @@ return function(semantics, arguments)
 		void* data;                             \
 		returnType (*func)(void*, __VA_ARGS__); \
 	}
+
+#define CLOSURE_CALL(closure, ...) (closure.func(closure.data, __VA_ARGS__))
 ]])
 
 	local forwardSequence = {}
@@ -791,7 +810,7 @@ void* smol_static_core_Out_println(smol_String* message) {
 			local function emit(line)
 				table.insert(code, "\t" .. line)
 			end
-			generateStatement(func.body, emit, structScope, semantics)
+			generateStatement(func.body, emit, structScope, semantics, demandTuple)
 
 			-- Close function body
 			if func.body.returns ~= "yes" then

@@ -4,6 +4,13 @@ local filter = arg[1] or ""
 
 --------------------------------------------------------------------------------
 
+local function shell(command)
+	local status = os.execute(command)
+	return status == 0, status
+end
+
+--------------------------------------------------------------------------------
+
 local function printHeader(text, symbol, align)
 	symbol = symbol or "-"
 	align = align or "left"
@@ -133,7 +140,26 @@ for test in io.popen("ls tests-positive", "r"):lines() do
 		if status ~= 0 then
 			FAIL {name = test, expected = 0, got = status}
 		else
-			local generatedOkay = os.execute("lua output.lua > tests-positive/" .. test .. "/out.last")
+			local bin = "tests-positive/" .. test .. "/bin"
+			local compiles = shell("gcc -std=c99 -Werror output.c -o " .. bin)
+			if compiles then
+				local outFile = "tests-positive/" .. test .. "/out.last"
+				local runs = shell(bin .. " > " .. outFile)
+				if runs then
+					local correctFile = "tests-positive/" .. test .. "/out.correct"
+					local correct = shell("diff -w " .. correctFile .. " " .. outFile)
+					if correct then
+						PASS {name = test}
+					else
+						FAIL {name = test, expected = 0, got = 1, reason = "wrong output"}
+					end
+				else
+					FAIL {name = test, expected = 0, got = 1, reason = "bin failed"}
+				end
+			else
+				FAIL {name = test, expected = 0, got = 1, reason = "gcc rejected"}
+			end
+			--local generatedOkay = os.execute("lua output.lua > tests-positive/" .. test .. "/out.last")
 			--if generatedOkay ~= 0 then
 			--	FAIL {name = test, expected = status, got = status, reason = "runtime error"}
 			--else

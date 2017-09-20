@@ -1,3 +1,5 @@
 out.last
 output.lua
 output.c
+*.exe
+*.stackdump
