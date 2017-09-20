@@ -141,7 +141,7 @@ for test in io.popen("ls tests-positive", "r"):lines() do
 			FAIL {name = test, expected = 0, got = status}
 		else
 			local bin = "tests-positive/" .. test .. "/bin"
-			local compiles = shell("gcc -std=c99 -Werror output.c -o " .. bin)
+			local compiles = shell("gcc -pedantic -std=c99 -Werror output.c -o " .. bin)
 			if compiles then
 				local outFile = "tests-positive/" .. test .. "/out.last"
 				local runs = shell(bin .. " > " .. outFile)

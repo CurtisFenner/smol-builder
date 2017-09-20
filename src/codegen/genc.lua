@@ -78,14 +78,13 @@ local function cType(t, scope)
 end
 
 -- RETURNS a string representing a tuple type
+-- (even for 1 tuples, which may be inefficient, but is uniform)
 local function cTypeTuple(ts, demandTuple, scope)
 	assertis(ts, listType "Type+")
 	assertis(demandTuple, "function")
 	assert(#ts >= 1)
 	assertis(scope, mapType("string", "string"))
-	if #ts == 1 then
-		return cType(ts[1], scope)
-	end
+
 	local shown = table.map(cType, ts, scope)
 	return demandTuple(shown)
 end
@@ -159,6 +158,14 @@ local function variablesToLuaList(variables)
 	return table.concat(identifiers, ", ")
 end
 
+-- RETURNS a C struct field identifier
+-- name must be a constraint "name", e.g., "2_3"
+local function structConstraintField(name)
+	assert(name:match("^#%d+_%d+$"))
+
+	return "constraint_" .. name:sub(2)
+end
+
 -- RETURNS a string that is a Lua expression
 local function cConstraint(constraint, semantics)
 	assertis(constraint, "ConstraintIR")
@@ -204,17 +211,19 @@ local function preTupleName(list)
 	local values = {}
 	for _, element in ipairs(list) do
 		table.insert(values, (element:gsub("%*", "_ptr")))
+		assert(not element:find("%s"))
 	end
 	local name = "tuple" .. #list
 	for i, value in ipairs(values) do
 		name = name .. "_" .. i .. "_" .. value
 	end
+
 	return name
 end
 
 -- RETURNS a C function identifier
 local function cWrapperName(signature, class, interface)
-	return "wrapper_" .. luaizeName(signature) .. "_" .. signature .. "_is_" .. luaizeName(interface)
+	return "wrapper_" .. luaizeName(class) .. "_" .. luaizeName(signature) .. "_is_" .. luaizeName(interface)
 end
 
 local counter = 0
@@ -360,26 +369,21 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
 		end
 		for key, constraint in pairs(statement.constraints) do
-			local constraintField = "TODO"
+			local constraintField = structConstraintField(key)
 			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
 		end
 		return
 	elseif statement.tag == "return" then
 		comment("return ...;")
 
-		if #statement.sources == 1 then
-			emit("return " .. localName(statement.sources[1].name) .. ";")
-			return
-		else
-			local types = {}
-			for _, source in ipairs(statement.sources) do
-				table.insert(types, cType(source.type, structScope))
-			end
-			local tuple = preTupleName(types)
-			local values = table.map(function(v) return localName(v.name) end, statement.sources)
-			emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
-			return
+		local types = {}
+		for _, source in ipairs(statement.sources) do
+			table.insert(types, cType(source.type, structScope))
 		end
+		local tuple = preTupleName(types)
+		local values = table.map(function(v) return localName(v.name) end, statement.sources)
+		emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
+		return
 	elseif statement.tag == "if" then
 		-- emit("if " .. localName(statement.condition.name) .. " then")
 		-- generateStatement(statement.bodyThen, indentedEmitter(emit))
@@ -501,14 +505,16 @@ return function(semantics, arguments)
 		if not generatedTuples[name] then
 			generatedTuples[name] = true
 			local sequence = {}
-			table.insert(sequence, "typedef struct _" .. name .. " {")
+			-- Open struct impl
+			table.insert(sequence, "struct _" .. name .. " {")
 			local parameters = {}
 			for i = 1, #list do
 				table.insert(parameters, list[i] .. " _" .. i)
 				table.insert(sequence, "\t" .. list[i] .. " _" .. i .. ";")
 			end
 			table.insert(sequence, "\tchar _;")
-			table.insert(sequence, "} " .. name .. ";")
+			-- Close struct
+			table.insert(sequence, "};")
 			table.insert(sequence, "")
 
 			table.insert(sequence, name .. " " .. name .. "_make(" .. table.concat(parameters, ", ") .. ") {")
@@ -526,22 +532,22 @@ return function(semantics, arguments)
 	end
 
 	table.insert(code, [[
-typedef struct _smol_Unit {
+struct _smol_Unit {
 	void* nothing;
-} smol_Unit;
+};
 
-typedef struct _smol_Boolean {
+struct _smol_Boolean {
 	int value;
-} smol_Boolean;
+};
 
-typedef struct _smol_String {
+struct _smol_String {
 	size_t length;
 	char const* text;
-} smol_String;
+};
 
-typedef struct _smol_Number {
+struct _smol_Number {
 	double value;
-} smol_Number;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 ]])
@@ -562,7 +568,7 @@ typedef struct _smol_Number {
 	for _, interface in ipairs(semantics.interfaces) do
 		table.insert(code, "// interface " .. interface.name)
 		local structName = interfaceStructName(interface.name)
-		table.insert(code, "typedef struct _" .. structName .. " {")
+		table.insert(code, "struct _" .. structName .. " {")
 		for _, signature in ipairs(interface.signatures) do
 			local returns = cTypeTuple(signature.returnTypes, demandTuple, structScope)
 			local name = interfaceMember(signature.name)
@@ -578,7 +584,7 @@ typedef struct _smol_Number {
 			table.insert(code, "\tCLOSURE(" .. returns .. ", " .. prototype .. ") " .. name .. ";")
 		end
 		table.insert(code, "\tchar _;")
-		table.insert(code, "} " .. structName .. ";")
+		table.insert(code, "};")
 		forwardDeclareStruct("_" .. structName, structName)
 		table.insert(code, "")
 	end
@@ -597,12 +603,25 @@ void* smol_static_core_Out_println(smol_String* message) {
 	for _, class in ipairs(semantics.classes) do
 		table.insert(code, "// class " .. class.name)
 		local structName = classStructName(class.name)
-		table.insert(code, "typedef struct _" .. structName .. " {")
+		table.insert(code, "struct _" .. structName .. " {")
+
+		-- Generate all value fields
 		for _, field in ipairs(class.fields) do
 			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
 		end
+
+		-- Generate all constraint fields
+		for i, generic in ipairs(class.generics) do
+			for j, constraint in ipairs(generic.constraints) do
+				local t = interfaceStructName(constraint.interface.name) .. "*"
+				-- XXX: constraint key
+				local key = "#" .. i .. "_" .. j
+				table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+			end
+		end
+
 		table.insert(code, "\tchar _;")
-		table.insert(code, "} " .. structName .. ";")
+		table.insert(code, "};")
 		forwardDeclareStruct("_" .. structName, structName)
 		table.insert(code, "")
 	end
@@ -627,8 +646,11 @@ void* smol_static_core_Out_println(smol_String* message) {
 			end
 			table.sort(requirements, function(a, b) return a.name < b.name end)
 			local parameters = {}
+			local parameterTypes = {}
 			for _, p in ipairs(requirements) do
-				table.insert(parameters, interfaceStructName(p.constraint.name) .. " p" .. i)
+				local t = interfaceStructName(p.constraint.name) .. "*"
+				table.insert(parameters, t .. " p" .. i)
+				table.insert(parameterTypes, t)
 			end
 
 			local interface = table.findwith(semantics.interfaces, "name", implement.name)
@@ -637,20 +659,17 @@ void* smol_static_core_Out_println(smol_String* message) {
 			-- Generate the wrapper for each method part of the interface
 			local wrapped = {}
 			for _, signature in ipairs(interface.signatures) do
-				table.insert(code, "// for impl")
+				table.insert(code, "// wrapper for impl")
 
 				-- Collect the constraints
 				local constraints = {}
 				for i, generic in ipairs(definition.generics) do
-					for j, constraint in ipairs(definition.constraints) do
-						table.insert(constraints, interfaceStructName(constraint.interface.name))
+					for j, constraint in ipairs(generic.constraints) do
+						table.insert(constraints, interfaceStructName(constraint.interface.name) .. "*")
 					end
 				end
 
-				local dataTupleType = demandTuple(constraints)
-				if dataTupleType:sub(-1) ~= "*" then
-					dataTupleType = dataTupleType .. "*"
-				end
+				local dataTupleType = demandTuple(constraints) .. "*"
 
 				-- Get the out type from the interface
 				local wrapperName = cWrapperName(signature.name, definition.name, interface.name)
@@ -692,12 +711,8 @@ void* smol_static_core_Out_println(smol_String* message) {
 				-- Collect the constraint arguments for the implementation
 				if signature.modifier == "static" then
 					-- Only static functions take parameters
-					if #constraints ~= 1 then
-						for i, constraint in ipairs(constraints) do
-							table.insert(arguments, "data->_" .. i)
-						end
-					else
-						table.insert(arguments, "data")
+					for i, constraint in ipairs(constraints) do
+						table.insert(arguments, "data->_" .. i)
 					end
 				end
 
@@ -708,21 +723,16 @@ void* smol_static_core_Out_println(smol_String* message) {
 					implName = methodFunctionName(signature.name, definition.name)
 				end
 
-				-- TODO: convert out tuple types
 				local invocation = implName .. "(" .. table.concat(arguments, ", ") .. ")"
-				if #signature.returnTypes == 1 then
-					-- Return the plain value
-					table.insert(code, "\treturn " .. invocation .. ";")
-				else
-					-- May need to convert tuple types
-					local func = table.findwith(definition.signatures, "name", signature.name)
-					local defOut = cTypeTuple(func.returnTypes, demandTuple, structScope)
-					local intOut = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-					table.insert(code, "\t" .. defOut .. " concrete_out = " .. invocation .. ";")
-					table.insert(code, "\t" .. intOut .. " out;")
-					for i = 1, #signature.returnTypes do
-						table.insert(code, "\tout._" .. i .. " = concrete_out._" .. i .. ";")
-					end
+
+				-- May need to convert tuple types
+				local func = table.findwith(definition.signatures, "name", signature.name)
+				local defOut = cTypeTuple(func.returnTypes, demandTuple, structScope)
+				local intOut = cTypeTuple(signature.returnTypes, demandTuple, structScope)
+				table.insert(code, "\t" .. defOut .. " concrete_out = " .. invocation .. ";")
+				table.insert(code, "\t" .. intOut .. " out;")
+				for i = 1, #signature.returnTypes do
+					table.insert(code, "\tout._" .. i .. " = concrete_out._" .. i .. ";")
 				end
 				table.insert(code, "}")
 			end
@@ -732,10 +742,10 @@ void* smol_static_core_Out_println(smol_String* message) {
 			local outType = interfaceStructName(implement.name)
 			table.insert(code, "// " .. definition.name .. " implements " .. implement.name)
 			table.insert(code, outType .. " " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
-			local tuple = demandTuple(parameters)
+			local tuple = demandTuple(parameterTypes)
 			table.insert(code, "\t" .. tuple .. "* closed = ALLOCATE(" .. tuple .. ");")
 			for i = 1, #parameters do
-				table.insert(code, "\tclosed->_" .. i .. " = p" .. i)
+				table.insert(code, "\tclosed->_" .. i .. " = p" .. i .. ";")
 			end
 
 			table.insert(code, "\t" .. outType .. " out;")
@@ -796,7 +806,7 @@ void* smol_static_core_Out_println(smol_String* message) {
 					local interface = constraint.interface
 					assertis(interface, "InterfaceType+")
 
-					local t = interfaceStructName(interface.name)
+					local t = interfaceStructName(interface.name) .. "*"
 					local identifier = C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. i .. "_" .. j
 					table.insert(cParameters, t .. " " .. identifier)
 				end
@@ -814,7 +824,8 @@ void* smol_static_core_Out_println(smol_String* message) {
 
 			-- Close function body
 			if func.body.returns ~= "yes" then
-				table.insert(code, "\treturn NULL;")
+				-- TODO: assert that this is the correct return type
+				table.insert(code, "\treturn (tuple1_1_smol_Unit_ptr){NULL};")
 			end
 			table.insert(code, "}")
 		end
