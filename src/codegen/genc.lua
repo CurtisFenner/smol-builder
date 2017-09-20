@@ -280,6 +280,45 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		comment(statement.destination.name .. " = this;")
 		emit(localName(statement.destination.name) .. " = this;")
 		return
+	elseif statement.tag == "assign" then
+		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
+		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
+		return
+	elseif statement.tag == "new" then
+		comment(statement.destination.name .. " = new(...);")
+		local name = localName(statement.destination.name)
+		local cT = cType(statement.destination.type, structScope)
+		if cT:sub(-1) == "*" then
+			cT = cT:sub(1, -2)
+		end
+		emit(name .. " = ALLOCATE(" .. cT .. ");")
+		
+		for key, value in pairs(statement.fields) do
+			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
+		end
+		for key, constraint in pairs(statement.constraints) do
+			local constraintField = structConstraintField(key)
+			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
+		end
+		return
+	elseif statement.tag == "return" then
+		comment("return ...;")
+
+		local types = {}
+		for _, source in ipairs(statement.sources) do
+			table.insert(types, cType(source.type, structScope))
+		end
+		local tuple = preTupleName(types)
+		local values = table.map(function(v) return localName(v.name) end, statement.sources)
+		emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
+		return
+	elseif statement.tag == "if" then
+		-- emit("if " .. localName(statement.condition.name) .. " then")
+		-- generateStatement(statement.bodyThen, indentedEmitter(emit))
+		-- emit("else")
+		-- generateStatement(statement.bodyElse, indentedEmitter(emit))
+		-- emit("end")
+		-- return
 	elseif statement.tag == "static-call" then
 		comment("... = " .. showType(statement.baseType) .. "." .. statement.name .. "(...);")
 		-- Collect value arguments
@@ -327,45 +366,6 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
 		end
 		return
-	elseif statement.tag == "assign" then
-		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
-		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
-		return
-	elseif statement.tag == "new" then
-		comment(statement.destination.name .. " = new(...);")
-		local name = localName(statement.destination.name)
-		local cT = cType(statement.destination.type, structScope)
-		if cT:sub(-1) == "*" then
-			cT = cT:sub(1, -2)
-		end
-		emit(name .. " = ALLOCATE(" .. cT .. ");")
-		
-		for key, value in pairs(statement.fields) do
-			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
-		end
-		for key, constraint in pairs(statement.constraints) do
-			local constraintField = structConstraintField(key)
-			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
-		end
-		return
-	elseif statement.tag == "return" then
-		comment("return ...;")
-
-		local types = {}
-		for _, source in ipairs(statement.sources) do
-			table.insert(types, cType(source.type, structScope))
-		end
-		local tuple = preTupleName(types)
-		local values = table.map(function(v) return localName(v.name) end, statement.sources)
-		emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
-		return
-	elseif statement.tag == "if" then
-		-- emit("if " .. localName(statement.condition.name) .. " then")
-		-- generateStatement(statement.bodyThen, indentedEmitter(emit))
-		-- emit("else")
-		-- generateStatement(statement.bodyElse, indentedEmitter(emit))
-		-- emit("end")
-		-- return
 	elseif statement.tag == "method-call" then
 		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 		-- destinations = table.concat(destinations, ", ")
