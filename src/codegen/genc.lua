@@ -95,7 +95,7 @@ local function commented(message)
 end
 
 -- RETURNS a string
-local function luaEncodedString(value)
+local function cEncodedString(value)
 	assertis(value, "string")
 
 	local out = {}
@@ -104,7 +104,8 @@ local function luaEncodedString(value)
 		if value:sub(i, i):match(safe) then
 			table.insert(out, value:sub(i, i))
 		else
-			local digits = tostring(value:byte(i))
+			-- Convert to octal
+			local digits = string.format("%o", value:byte(i))
 			digits = string.rep("0", 3 - #digits) .. digits
 			table.insert(out, "\\" .. digits)
 		end
@@ -257,11 +258,11 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit(cType(statement.variable.type, structScope) .. " " .. localName(statement.variable.name) .. ";")
 		return
 	elseif statement.tag == "string" then
-		comment(statement.destination.name .. " = " .. luaEncodedString(statement.string) .. ";")
+		comment(statement.destination.name .. " = " .. cEncodedString(statement.string) .. ";")
 		local name = localName(statement.destination.name)
 		emit(name .. " = ALLOCATE(smol_String);")
 		emit(name .. "->length = " .. #statement.string .. ";")
-		emit(name .. "->text = " .. luaEncodedString(statement.string) .. ";")
+		emit(name .. "->text = " .. cEncodedString(statement.string) .. ";")
 		return
 	elseif statement.tag == "number" then
 		comment(statement.destination.name .. " = " .. statement.number .. ";")
@@ -565,6 +566,7 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 	for (size_t i = 0; i < message->length; i++) {
 		putchar(message->text[i]);
 	}
+	printf("\n");
 	return (tuple1_1_smol_Unit_ptr){0};
 }
 ]])
