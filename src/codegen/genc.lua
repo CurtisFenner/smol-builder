@@ -50,6 +50,7 @@ local LUA_CONSTRAINTS_FIELD = "constraintField"
 
 -- RETURNS a string representing a Lua identifier for a Smol variable or parameter
 local function localName(name)
+	assertis(name, "string")
 	assert(not name:find(":"))
 
 	return "smol_local_" .. name
@@ -337,14 +338,9 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 
 		-- Emit code
-		local destination = statement.destinations[1]
 		local invocation = staticFunctionName(statement.name, statement.baseType.name)
 		local arguments = table.concat(argumentNames, ", ")
 
-		local destinationTypes = {}
-		for _, destination in ipairs(statement.destinations) do
-			table.insert(destinationTypes, cType(destination.type, structScope))
-		end
 		local class = table.findwith(semantics.classes, "name", statement.baseType.name)
 		local union = table.findwith(semantics.unions, "name", statement.baseType.name)
 		local definition = class or union
@@ -367,6 +363,44 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 		return
 	elseif statement.tag == "method-call" then
+		comment("... = " .. statement.baseInstance.name .. "." .. statement.methodName .. "(...);")
+
+		-- Collect C arguments
+		local argumentNames = {}
+
+		-- Add the self argument
+		table.insert(argumentNames, localName(statement.baseInstance.name))
+
+		-- Add explicit value arguments
+		for _, argument in ipairs(statement.arguments) do
+			table.insert(argumentNames, localName(argument.name))
+		end
+		local arguments = table.concat(argumentNames, ", ")
+
+		-- Get the signature
+		local baseName = statement.baseInstance.type.name
+		local class = table.findwith(semantics.classes, "name", baseName)
+		local union = table.findwith(semantics.unions, "name", baseName)
+		local definition = class or union
+		assert(definition)
+		local signature = table.findwith(definition.signatures, "name", statement.methodName)
+		assert(signature)
+
+		-- Get the C return-type of the function (which may not be the same
+		-- as the definitions because of generics)
+		local destinationTypes = {}
+		for _, returnType in ipairs(signature.returnTypes) do
+			table.insert(destinationTypes, cType(returnType, structScope))
+		end
+
+		local tmp = "tmp" .. UID()
+
+		local tuple = preTupleName(destinationTypes)
+		local invocation = methodFunctionName(statement.methodName, baseName) .. "(" .. arguments .. ")"
+		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
+		for i, destination in ipairs(statement.destinations) do
+			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+		end
 		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 		-- destinations = table.concat(destinations, ", ")
 		-- local method = methodFunctionName(statement.name, statement.baseInstance.type.name)

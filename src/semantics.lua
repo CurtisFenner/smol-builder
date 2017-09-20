@@ -1673,7 +1673,7 @@ local function semanticsSmol(sources, main)
 				table.insert(evaluation, {
 					tag = "method-call",
 					baseInstance = baseInstance,
-					name = method.name,
+					methodName = method.name,
 					arguments = arguments,
 					destinations = destinations,
 					returns = "no"

@@ -981,7 +981,7 @@ EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "method-call",
 	baseInstance = "VariableIR",
-	name = "string",
+	methodName = "string",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
