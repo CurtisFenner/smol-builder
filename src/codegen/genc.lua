@@ -23,7 +23,7 @@ end
 
 -- RETURNS a string
 local function concreteConstraintFunctionName(definitionName, interfaceName)
-	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_is_" .. luaizeName(interfaceName)
+	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_for_" .. luaizeName(interfaceName)
 end
 
 -- RETURNS a string of smol representing the given type
@@ -300,58 +300,32 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local destination = statement.destinations[1]
 		local invocation = staticFunctionName(statement.name, statement.baseType.name)
 		local arguments = table.concat(argumentNames, ", ")
-		if #statement.destinations == 1 then
-			emit(localName(destination.name) .. " = " .. invocation .. "(" .. arguments .. ");")
-			return
-		else
-			assert(#statement.destinations >= 2)
-			local destinationTypes = {}
-			for _, destination in ipairs(statement.destinations) do
-				table.insert(destinationTypes, cType(destination.type, structScope))
-			end
-			local class = table.findwith(semantics.classes, "name", statement.baseType.name)
-			local union = table.findwith(semantics.unions, "name", statement.baseType.name)
-			local definition = class or union
-			assert(definition)
-			local signature = table.findwith(definition.signatures, "name", statement.name)
-			assert(signature)
 
-			local types = {}
-			for _, r in ipairs(signature.returnTypes) do
-				table.insert(types, cType(r, structScope))
-			end
-			local tuple = preTupleName(types)
-			local tmp = "_tmp" .. UID()
-			emit(tuple .. " " .. tmp .. " = " .. invocation .. "(" .. arguments .. ");")
-
-			-- Assign each resulting tuple
-			for i, destination in ipairs(statement.destinations) do
-				-- TODO: add explicit casts
-				emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
-			end
-			return
+		local destinationTypes = {}
+		for _, destination in ipairs(statement.destinations) do
+			table.insert(destinationTypes, cType(destination.type, structScope))
 		end
-		
-		-- local destinations = variablesToLuaList(statement.destinations)
-		-- emit(destinations .. " = " .. staticFunctionName(statement.name, statement.baseType.name) .. "(")
+		local class = table.findwith(semantics.classes, "name", statement.baseType.name)
+		local union = table.findwith(semantics.unions, "name", statement.baseType.name)
+		local definition = class or union
+		assert(definition)
+		local signature = table.findwith(definition.signatures, "name", statement.name)
+		assert(signature)
 
-		-- -- Collect constraint parameter map
-		-- local constraints = {}
-		-- for key, constraint in pairs(statement.constraints) do
-		-- 	table.insert(constraints, "[" .. luaEncodedString(key) .. "] = " .. cConstraint(constraint))
-		-- end
+		local types = {}
+		for _, r in ipairs(signature.returnTypes) do
+			table.insert(types, cType(r, structScope))
+		end
+		local tuple = preTupleName(types)
+		local tmp = "_tmp" .. UID()
+		emit(tuple .. " " .. tmp .. " = " .. invocation .. "(" .. arguments .. ");")
 
-		-- -- Collect real arguments and constraint parameters
-		-- local arguments = {}
-		-- for _, argument in ipairs(statement.arguments) do
-		-- 	table.insert(arguments, localName(argument.name))
-		-- end
-		-- local constraintsArgument = "{" .. table.concat(constraints, ", ") .. "}"
-		-- table.insert(arguments, constraintsArgument)
-		-- emit("\t" .. table.concat(arguments, ", "))
-
-		-- emit(")")
-		-- return
+		-- Assign each resulting tuple
+		for i, destination in ipairs(statement.destinations) do
+			-- TODO: add explicit casts
+			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+		end
+		return
 	elseif statement.tag == "assign" then
 		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
 		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
@@ -434,13 +408,9 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		local tmp = "_tmp" .. UID()
 		local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-		emit(outType .. " " .. tmp .. " = CLOSURE_CALL((" .. cConstraint(statement.constraint, semantics) .. ")." .. interfaceMember(statement.methodName) .. ", " .. arguments .. ");")
-		if #statement.destinations == 1 then
-			emit(localName(statement.destinations[1].name) .. " = " .. tmp .. ";")
-		else
-			for i, destination in ipairs(statement.destinations) do
-				emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
-			end
+		emit(outType .. " " .. tmp .. " = CLOSURE_CALL(" .. cConstraint(statement.constraint, semantics) .. "->" .. interfaceMember(statement.methodName) .. ", " .. arguments .. ");")
+		for i, destination in ipairs(statement.destinations) do
+			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
 		end
 		return
 	end
@@ -590,12 +560,12 @@ struct _smol_Number {
 	end
 
 table.insert(code, [[
-void* smol_static_core_Out_println(smol_String* message) {
+tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 	// TODO: allow nulls, etc.
 	for (size_t i = 0; i < message->length; i++) {
 		putchar(message->text[i]);
 	}
-	return NULL;
+	return (tuple1_1_smol_Unit_ptr){0};
 }
 ]])
 
@@ -739,20 +709,20 @@ void* smol_static_core_Out_println(smol_String* message) {
 
 			-- Generate the main function
 			local functionName = concreteConstraintFunctionName(definition.name, implement.name)
-			local outType = interfaceStructName(implement.name)
+			local outValueType = interfaceStructName(implement.name)
 			table.insert(code, "// " .. definition.name .. " implements " .. implement.name)
-			table.insert(code, outType .. " " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
+			table.insert(code, outValueType .. "* " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
 			local tuple = demandTuple(parameterTypes)
 			table.insert(code, "\t" .. tuple .. "* closed = ALLOCATE(" .. tuple .. ");")
 			for i = 1, #parameters do
 				table.insert(code, "\tclosed->_" .. i .. " = p" .. i .. ";")
 			end
 
-			table.insert(code, "\t" .. outType .. " out;")
+			table.insert(code, "\t" .. outValueType .. "* out = ALLOCATE(" .. outValueType .. ");")
 			for _, signature in ipairs(interface.signatures) do
-				table.insert(code, "\tout." .. interfaceMember(signature.name) .. ".data = closed;")
+				table.insert(code, "\tout->" .. interfaceMember(signature.name) .. ".data = closed;")
 				local func = wrapped[signature.name]
-				table.insert(code, "\tout." .. interfaceMember(signature.name) .. ".func = " .. func .. ";")
+				table.insert(code, "\tout->" .. interfaceMember(signature.name) .. ".func = " .. func .. ";")
 			end
 
 			table.insert(code, "\treturn out;")
