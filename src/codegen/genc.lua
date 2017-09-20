@@ -401,16 +401,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		for i, destination in ipairs(statement.destinations) do
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
 		end
-		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
-		-- destinations = table.concat(destinations, ", ")
-		-- local method = methodFunctionName(statement.name, statement.baseInstance.type.name)
-		-- emit(destinations .. " = " .. method .. "(")
-		-- emit("\t" .. localName(statement.baseInstance.name))
-		-- for _, argument in ipairs(statement.arguments) do
-		-- 	emit("\t," .. localName(argument.name))
-		-- end
-		-- emit(")")
-		-- return
+		return
 	elseif statement.tag == "field" then
 		comment(statement.destination.name .. " = " .. statement.base.name .. "." .. statement.name .. ";")
 		emit(localName(statement.destination.name) .. " = ")
