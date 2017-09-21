@@ -410,12 +410,11 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 	elseif statement.tag == "generic-static-call" then
 		comment("... = " .. "... ." .. statement.staticName .. "(...);")
 
+		-- Collect explicit arguments
 		local argumentValues = {}
-		-- TODO: argument values
 		for _, argument in ipairs(statement.arguments) do
 			table.insert(argumentValues, localName(argument.name))
 		end
-		
 
 		if #argumentValues < 1 then
 			-- Closure calls must be given at least one argument
@@ -732,8 +731,9 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 				-- Collect the value arguments for the implementation
 				local arguments = {}
 				if signature.modifier == "method" then
-					-- TODO: add explicit cast
-					table.insert(arguments, "this")
+					-- TODO: explicitly cast to correct type
+					local cast = "(void*)"
+					table.insert(arguments, cast .. "this")
 				end
 
 				for _, parameter in ipairs(signature.parameters) do

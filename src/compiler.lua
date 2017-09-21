@@ -39,7 +39,6 @@ import "types.lua"
 local parser = import "parser.lua"
 local calculateSemantics = import "semantics.lua"
 local codegen = {
-	lua = import "codegen/genlua.lua",
 	c = import "codegen/genc.lua",
 }
 
