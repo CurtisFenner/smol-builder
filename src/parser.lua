@@ -267,7 +267,6 @@ end
 -- RETURNS a parser
 function parser.query(query, tag)
 	local function describe(query)
-		-- TODO
 		return "(" .. query .. ")"
 	end
 

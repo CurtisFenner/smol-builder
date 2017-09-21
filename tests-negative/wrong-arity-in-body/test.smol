@@ -1,0 +1,13 @@
+package test;
+
+class Foo[#T] {
+	static ignore(value #T) Unit {
+	}
+}
+
+class Test {
+	static makeUnit() Unit {}
+	static main() Unit {
+		do Foo[Unit, Unit].ignore(Test.makeUnit());
+	}
+}

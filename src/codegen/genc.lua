@@ -857,7 +857,10 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 
 			-- Close function body
 			if func.body.returns ~= "yes" then
-				-- TODO: assert that this is the correct return type
+				assert(#func.returnTypes == 1)
+				assert(func.returnTypes[1].tag == "keyword-type+")
+				assert(func.returnTypes[1].name == "Unit")
+
 				table.insert(code, "\treturn (tuple1_1_smol_Unit_ptr){NULL};")
 			end
 			table.insert(code, "}")

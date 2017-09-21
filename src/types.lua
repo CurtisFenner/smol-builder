@@ -76,7 +76,7 @@ function pairs(object)
 	assert(isobject(object),
 		"object must be reference type in pairs();"
 		.. "\ngot `" .. type(object) .. "`")
-	-- TODO: deal with locked metatables
+
 	local metatable = getmetatable(object)
 	if metatable and metatable.__pairs then
 		return metatable.__pairs(object)

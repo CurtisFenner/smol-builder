@@ -489,16 +489,15 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
-				-- TODO: check arity
-				--[[
+				if #t.arguments ~= #definition.generics.parameters then
 					Report.WRONG_ARITY {
-						name = interface.name,
-						givenArity = #int.arguments,
-						expectedArity = #interface.generics,
-						location = int.location,
-						definitionLocation = interface.location,
+						name = fullName,
+						givenArity = #t.arguments,
+						expectedArity = #definition.generics.parameters,
+						location = t.location,
+						definitionLocation = definition.location,
 					}
-				]]
+				end
 
 				return {
 					tag = "concrete-type+",
@@ -572,16 +571,16 @@ local function semanticsSmol(sources, main)
 				}
 			end
 
-			-- TODO: check arity
-			--[[
+			-- Check arity
+			if #t.arguments ~= #definition.generics.parameters then
 				Report.WRONG_ARITY {
-					name = interface.name,
-					givenArity = #int.arguments,
-					expectedArity = #interface.generics,
-					location = int.location,
-					definitionLocation = interface.location,
+					name = definition.name,
+					givenArity = #t.arguments,
+					expectedArity = #definition.generics,
+					location = t.location,
+					definitionLocation = definition.location,
 				}
-			]]
+			end
 
 			return {
 				tag = "interface-type",

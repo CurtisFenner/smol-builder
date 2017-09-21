@@ -36,7 +36,8 @@ local function printHeader(text, symbol, align)
 end
 
 function string.spaces(s)
-	return (s:gsub("\t", "    ")) -- TODO
+	-- TODO: make tabs align to columns
+	return (s:gsub("\t", "    "))
 end
 
 local function printBox(lines)
