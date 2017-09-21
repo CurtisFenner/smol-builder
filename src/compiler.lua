@@ -832,7 +832,7 @@ REGISTER_TYPE("Semantics", recordType {
 	interfaces = listType "InterfaceIR",
 	unions = listType "UnionIR",
 	functions = listType "FunctionIR",
-	main = "string",
+	main = choiceType("string", constantType(false)),
 })
 
 REGISTER_TYPE("ClassIR", recordType {
@@ -1164,7 +1164,11 @@ end
 
 local semantics = calculateSemantics(sourceParses, mainFunction)
 
--- TODO: read target
-local arguments = {out = "output.c"}
-local TARGET = "c"
-codegen[TARGET](semantics, arguments)
+if semantics.main then
+	-- TODO: read target
+	local arguments = {out = "output.c"}
+	local TARGET = "c"
+	codegen[TARGET](semantics, arguments)
+else
+	print("Successfully compiled " .. #sourceFiles .. " file(s)")
+end

@@ -242,4 +242,17 @@ function Report.BANG_NOT_ALLOWED(p)
 		"\nHowever, you try to invoke one ", p.location)
 end
 
+function Report.NO_MAIN(p)
+	quit("There is no class `" .. p.name .. "`.")
+end
+
+function Report.NO_MAIN_STATIC(p)
+	quit("The class `" .. p.name .. "` is missing a `static main!()")
+end
+
+function Report.MAIN_MUST_NOT_BE_GENERIC(p)
+	quit("The class `" .. p.name .. "` is generic, so it cannot be used as",
+		" a main class.")
+end
+
 return Report

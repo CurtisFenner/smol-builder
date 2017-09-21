@@ -2193,7 +2193,31 @@ local function semanticsSmol(sources, main)
 	
 	assertis(functions, listType "FunctionIR")
 
-	-- TODO: check the main class exists
+	-- Check that the main class exists
+	if main == "skip" then
+		main = false
+	else
+		local mainClass = table.findwith(classes, "name", main)
+		if not mainClass then
+			Report.NO_MAIN {
+				name = main,
+			}
+		end
+		local mainStatic = table.findwith(mainClass.signatures, "name", "main")
+		if not mainStatic or mainStatic.modifier ~= "static" then
+			Report.NO_MAIN_STATIC {
+				name = main,
+			}
+		elseif #mainStatic.parameters ~= 0 then
+			Report.NO_MAIN_STATIC {
+				name = main,
+			}
+		elseif #mainClass.generics ~= 0 then
+			Report.MAIN_MUST_NOT_BE_GENERIC {
+				name = main,
+			}
+		end
+	end
 
 	return freeze {
 		classes = classes,
