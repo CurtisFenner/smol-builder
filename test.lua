@@ -142,7 +142,20 @@ for test in io.popen("ls tests-positive", "r"):lines() do
 			FAIL {name = test, expected = 0, got = status}
 		else
 			local bin = "tests-positive/" .. test .. "/bin"
-			local compiles = shell("gcc -g3 -pedantic -std=c99 -Werror output.c -o " .. bin)
+			local flags = {
+				"-g3",
+				"-pedantic",
+				"-std=c99",
+				"-Werror",
+				"-Wall",
+				"-Wextra",
+				"-Wconversion",
+				-- Disable unhelpful warnings
+				"-Wno-unused-parameter",
+				"-Wno-unused-but-set-variable",
+				"-Wno-unused-variable",
+			}
+			local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
 			if compiles then
 				local outFile = "tests-positive/" .. test .. "/out.last"
 				local runs = shell(bin .. " > " .. outFile)
