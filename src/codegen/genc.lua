@@ -314,12 +314,13 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
 		return
 	elseif statement.tag == "if" then
-		-- emit("if " .. localName(statement.condition.name) .. " then")
-		-- generateStatement(statement.bodyThen, indentedEmitter(emit))
-		-- emit("else")
-		-- generateStatement(statement.bodyElse, indentedEmitter(emit))
-		-- emit("end")
-		-- return
+		comment("if ... {")
+		emit("if (" .. localName(statement.condition.name) .. "->value) {")
+		generateStatement(statement.bodyThen, indentedEmitter(emit), structScope, semantics, demandTuple)
+		emit("} else {")
+		generateStatement(statement.bodyElse, indentedEmitter(emit), structScope, semantics, demandTuple)
+		emit("}")
+		return
 	elseif statement.tag == "static-call" then
 		comment("... = " .. showType(statement.baseType) .. "." .. statement.name .. "(...);")
 		-- Collect value arguments
