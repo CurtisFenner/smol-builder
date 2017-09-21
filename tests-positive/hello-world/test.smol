@@ -2,9 +2,9 @@ package test;
 import core;
 
 class Test {
-	static main() Unit {
-		do core:Out.println("Hello world!");
-		do core:Out.println("Hello\n\tworld!");
-		do core:Out.println("こんにちは世界");
+	static main!() Unit {
+		do core:Out.println!("Hello world!");
+		do core:Out.println!("Hello\n\tworld!");
+		do core:Out.println!("こんにちは世界");
 	}
 }

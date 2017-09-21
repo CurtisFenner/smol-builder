@@ -1199,10 +1199,16 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
+				local newTag
+				if definition.tag == "union" then
+					newTag = "new-union"
+				elseif definition.tag == "class" then
+					newTag = "new-class"
+				end
+
 				local newSt = {
-					tag = "new",
+					tag = newTag,
 					type = containerType,
-					fields = {},
 					returns = "no",
 					constraints = {},
 					destination = out,
@@ -1220,6 +1226,10 @@ local function semanticsSmol(sources, main)
 				end
 
 				local evaluation = {}
+
+				-- Map is a map from field name to value variable
+				local map = {}
+
 				-- Evaluate all arguments to new
 				for _, argument in ipairs(pExpression.arguments) do
 					local subEvaluation, subOut = compileExpression(argument.value, scope)
@@ -1244,7 +1254,6 @@ local function semanticsSmol(sources, main)
 						}
 					end
 
-
 					if not areTypesEqual(field.type, subOut[1].type) then
 						Report.TYPES_DONT_MATCH {
 							purpose = "field type",
@@ -1255,19 +1264,37 @@ local function semanticsSmol(sources, main)
 						}
 					end
 
-					newSt.fields[argument.name] = subOut[1]
+					map[argument.name] = subOut[1]
 				end
 
-				-- Check that no fields are missing
-				for _, field in ipairs(definition.fields) do
-					if not newSt.fields[field.name] then
-						Report.MISSING_VALUE {
-							purpose = "new " .. showType(containerType) .. " expression",
-							name = field.name,
+				-- Record the map as fields
+				if definition.tag == "union" then
+					newSt.field, newSt.value = next(map)
+
+					-- Verify that exactly one field is given for union new
+					if #pExpression.arguments ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "new union field list",
+							expectedCount = 1,
+							givenCount = #pExpression.arguments,
 							location = pExpression.location,
 						}
 					end
+				elseif definition.tag == "class" then
+					newSt.fields = map
+
+					-- Check that no fields are missing for class new
+					for _, field in ipairs(definition.fields) do
+						if not newSt.fields[field.name] then
+							Report.MISSING_VALUE {
+								purpose = "new " .. showType(containerType) .. " expression",
+								name = field.name,
+								location = pExpression.location,
+							}
+						end
+					end
 				end
+
 
 				local block = buildBlock(table.concatted(
 					evaluation, {localSt(out), newSt}

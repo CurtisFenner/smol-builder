@@ -893,7 +893,8 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"GenericStaticCallSt",
 	"LocalSt",
 	"MethodCallSt",
-	"NewSt",
+	"NewClassSt",
+	"NewUnionSt",
 	"NumberLoadSt",
 	"ReturnSt",
 	"IfSt",
@@ -958,10 +959,20 @@ EXTEND_TYPE("NumberLoadSt", "AbstractStatementIR", recordType {
 	returns = constantType "no",
 })
 
-EXTEND_TYPE("NewSt", "AbstractStatementIR", recordType {
-	tag = constantType "new",
+EXTEND_TYPE("NewClassSt", "AbstractStatementIR", recordType {
+	tag = constantType "new-class",
 	fields = mapType("string", "VariableIR"),
 	type = "ConcreteType+",
+	constraints = mapType("string", "ConstraintIR"),
+	destination = "VariableIR",
+	returns = constantType "no",
+})
+
+EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
+	tag = constantType "new-union",
+	type = "ConcreteType+",
+	field = "string",
+	value = "VariableIR",
 	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",

@@ -1,0 +1,34 @@
+package test;
+
+union Option[#T] {
+	var some #T;
+	var none Unit;
+
+	static makeSome(value #T) Option[#T] {
+		return new(some = value);
+	}
+
+	static makeNone() Option[#T] {
+		return new(none = unit);
+	}
+}
+
+class MinHeap[#T | #T is Orderable[#T]] {
+	var value Option[#T];
+	var left MinHeap[#T];
+	var right MinHeap[#T];
+
+	static make() MinHeap[#T] {
+		return new(value = Option[#T].makeNone(), left = Option[MinHeap[#T]].makeNone(), right = Option[MinHeap[#T]].makeNone());
+	}
+}
+
+interface Orderable[#T] {
+	method lessThan(other #T) Boolean;
+}
+
+class Test {
+	static main!() Unit {
+
+	}
+}

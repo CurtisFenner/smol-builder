@@ -285,7 +285,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
 		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
 		return
-	elseif statement.tag == "new" then
+	elseif statement.tag == "new-class" then
 		comment(statement.destination.name .. " = new(...);")
 		local name = localName(statement.destination.name)
 		local cT = cType(statement.destination.type, structScope)
@@ -608,7 +608,7 @@ struct _smol_Number {
 				table.insert(parameters, "void* /*this*/")
 			end
 			for _, parameter in ipairs(signature.parameters) do
-				table.insert(parameters, cType(parameter.type))
+				table.insert(parameters, cType(parameter.type, structScope))
 			end
 
 			local prototype = #parameters == 0 and "void* /*ignore*/ " or table.concat(parameters, ", ")
