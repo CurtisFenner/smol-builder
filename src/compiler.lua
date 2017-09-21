@@ -75,7 +75,17 @@ elseif not commandMap.sources or #commandMap.sources ~= 1 then
 	quitUsage()
 end
 
+local LOCATION_MODE = "column"
+if commandMap.location then
+	-- TODO: assert that it is correct
+	LOCATION_MODE = commandMap.location[1]
+end
 
+if commandMap.color then
+	ansi.enabled = true
+elseif commandMap.nocolor then
+	ansi.enabled = false
+end
 
 -- Lexer -----------------------------------------------------------------------
 
@@ -193,6 +203,9 @@ local function lexSmol(source, filename)
 	-- Track the location into the source file each token is
 	local line = 1
 	local column = 1
+	if LOCATION_MODE == "index" then
+		column = 0
+	end
 	local function advanceCursor(str)
 		assert(isstring(str))
 		for c in str:gmatch(".") do
@@ -201,7 +214,10 @@ local function lexSmol(source, filename)
 			elseif c == "\n" then
 				column = 1
 				line = line + 1
-			elseif c == "\t" then
+				if LOCATION_MODE == "index" then
+					column = 0
+				end
+			elseif c == "\t" and LOCATION_MODE ~= "index" then
 				-- XXX: This reports column (assuming tab = 4)
 				-- rather than character.
 				-- (VSCode default behavior when tabs are size 4)
@@ -220,6 +236,9 @@ local function lexSmol(source, filename)
 
 		local location = "at " .. filename .. ":" .. line .. ":" .. column
 			.. "\n" .. sourceContext .. "\n"
+		if LOCATION_MODE == "index" then
+			location = location .. "@" .. filename .. ":" .. line .. ":" .. column
+		end
 
 		-- Tokenize string literals
 		if source:sub(1, 1) == QUOTE then
