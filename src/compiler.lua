@@ -42,6 +42,41 @@ local codegen = {
 	c = import "codegen/genc.lua",
 }
 
+--------------------------------------------------------------------------------
+
+local function quitUsage()
+	quit("USAGE:\n", "\tlua compiler.lua"
+		.. " --sources <directory containing .smol files>"
+		.. " --main <mainpackage:Mainclass>"
+		.. "\n\n\tFor example, `lua compiler.lua --sources foo/ --main main:Main`")
+end
+
+local commandMap = {}
+local commandFlag = false
+for i = 1, #ARGV do
+	local flag = ARGV[i]:match("^%-%-(.*)$")
+	if flag then
+		if commandMap[flag] then
+			quitUsage()
+		end
+		commandMap[flag] = {}
+		commandFlag = flag
+	elseif not commandFlag then
+		quitUsage()
+	else
+		table.insert(commandMap[commandFlag], ARGV[i])
+	end
+end
+
+-- Check the command line arguments
+if not commandMap.main or #commandMap.main ~= 1 then
+	quitUsage()
+elseif not commandMap.sources or #commandMap.sources ~= 1 then
+	quitUsage()
+end
+
+
+
 -- Lexer -----------------------------------------------------------------------
 
 -- RETURNS a list of tokens.
@@ -1123,23 +1158,18 @@ REGISTER_TYPE("GenericType+", recordType {
 
 -- Main ------------------------------------------------------------------------
 
-if #arg ~= 2 then
-	quit("USAGE:\n", "\tlua compiler.lua"
-		.. " <directory containing .smol files>"
-		.. " <mainpackage:Mainclass>"
-		.. "\n\n\tFor example, `lua compiler.lua foo/ main:Main")
-end
-local directory = arg[1]
-local mainFunction = arg[2]
+
+local sourceDirectory = commandMap.sources[1]
+local mainFunction = commandMap.main[1]
 
 -- Collect a set of source files to compile
 local sourceFiles = {}
 -- XXX: portability
 local PATH_SEP = "/" -- XXX
-for line in io.popen("ls " .. directory):lines() do -- XXX
+for line in io.popen("ls " .. sourceDirectory:gsub("\\", "/")):lines() do -- XXX
 	if line:match("^.+%.smol$") then
 		table.insert(sourceFiles, {
-			path = directory .. PATH_SEP .. line,
+			path = sourceDirectory .. PATH_SEP .. line,
 			short = line,
 		})
 	end

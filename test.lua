@@ -109,8 +109,8 @@ local function compiler(sources, main)
 
 	local command = table.concat {
 		"lua src/compiler.lua",
-		" ", sources,
-		" ", main,
+		" --sources ", sources,
+		" --main ", main,
 	}
 
 	local status = os.execute(command)
