@@ -692,6 +692,9 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 		local structName = classStructName(class.name)
 		table.insert(code, "struct _" .. structName .. " {")
 
+		-- Add a foreign field
+		table.insert(code, "\tvoid* foreign;")
+
 		-- Generate all value fields
 		for _, field in ipairs(class.fields) do
 			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
@@ -707,7 +710,6 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 			end
 		end
 
-		table.insert(code, "\tchar _;")
 		table.insert(code, "};")
 		forwardDeclareStruct("_" .. structName, structName)
 		table.insert(code, "")
@@ -889,54 +891,53 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 	for _, func in ipairs(semantics.functions) do
 		local fullName = func.definitionName .. "." .. func.name
 		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
-		if func.signature.foreign then
-			table.insert(code, "// is foreign")
+
+		local thisType
+		local definition = table.findwith(semantics.classes, "name", func.definitionName)
+			or table.findwith(semantics.unions, "name", func.definitionName)
+		assert(definition)
+		if definition.tag == "class" then
+			thisType = classStructName(definition.name) .. "*"
+		elseif definition.tag == "union" then
+			thisType = unionStructName(definition.name) .. "*"
+		end
+		assert(definition)
+
+		-- Generate function header
+		local cFunctionName
+		local cParameters
+		if func.signature.modifier == "static" then
+			cFunctionName = staticFunctionName(func.name, func.definitionName)
+			cParameters = {}
 		else
-			local thisType
-			local definition = table.findwith(semantics.classes, "name", func.definitionName)
-				or table.findwith(semantics.unions, "name", func.definitionName)
-			assert(definition)
-			if definition.tag == "class" then
-				thisType = classStructName(definition.name) .. "*"
-			elseif definition.tag == "union" then
-				thisType = unionStructName(definition.name) .. "*"
-			end
-			assert(definition)
+			assert(func.signature.modifier == "method")
+			cFunctionName = methodFunctionName(func.name, func.definitionName)
+			cParameters = {thisType .. " " .. C_THIS_LOCAL}
+		end
 
-			-- Generate function header
-			local cFunctionName
-			local cParameters
-			if func.signature.modifier == "static" then
-				cFunctionName = staticFunctionName(func.name, func.definitionName)
-				cParameters = {}
-			else
-				assert(func.signature.modifier == "method")
-				cFunctionName = methodFunctionName(func.name, func.definitionName)
-				cParameters = {thisType .. " " .. C_THIS_LOCAL}
-			end
+		-- Add value parameters
+		for _, parameter in ipairs(func.parameters) do
+			table.insert(cParameters, cType(parameter.type, structScope) .. " " .. localName(parameter.name))
+		end
 
-			-- Add value parameters
-			for _, parameter in ipairs(func.parameters) do
-				table.insert(cParameters, cType(parameter.type, structScope) .. " " .. localName(parameter.name))
-			end
+		-- Add constraint parameters
+		for i, generic in ipairs(func.generics) do
+			for j, constraint in ipairs(generic.constraints) do
+				local interface = constraint.interface
+				assertis(interface, "InterfaceType+")
 
-			-- Add constraint parameters
-			for i, generic in ipairs(func.generics) do
-				for j, constraint in ipairs(generic.constraints) do
-					local interface = constraint.interface
-					assertis(interface, "InterfaceType+")
-
-					local t = interfaceStructName(interface.name) .. "*"
-					local identifier = C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. i .. "_" .. j
-					table.insert(cParameters, t .. " " .. identifier)
-				end
+				local t = interfaceStructName(interface.name) .. "*"
+				local identifier = C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. i .. "_" .. j
+				table.insert(cParameters, t .. " " .. identifier)
 			end
-			local outType = cTypeTuple(func.returnTypes, demandTuple, structScope)
-			local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
-			genPrototype(prototype .. ";")
+		end
+		local outType = cTypeTuple(func.returnTypes, demandTuple, structScope)
+		local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
+		genPrototype(prototype .. ";")
+
+		-- Generate function body
+		if not func.signature.foreign then
 			table.insert(code, prototype .. " {")
-
-			-- Generate function body
 			local function emit(line)
 				table.insert(code, "\t" .. line)
 			end
@@ -951,6 +952,8 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 				table.insert(code, "\treturn (tuple1_1_smol_Unit_ptr){NULL};")
 			end
 			table.insert(code, "}")
+		else
+			table.insert(code, "// is foreign")
 		end
 		table.insert(code, "")
 	end

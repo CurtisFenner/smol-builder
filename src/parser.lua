@@ -167,6 +167,17 @@ function parser.optional(object)
 	end
 end
 
+-- RETURNS a parser that consumes no input and produces `value`
+function parser.constant(value)
+	assert(value ~= nil)
+
+	return function(stream, grammar)
+		assert(grammar)
+
+		return value, stream
+	end
+end
+
 -- HELPER parsing `object` repeated several times, delimited by `delimiter`
 -- count: "N+" means "N or more things", N >= 0.
 function parser.delimited(object, count, delimiter, expected)

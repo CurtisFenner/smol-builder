@@ -1,6 +1,9 @@
 package core;
 
 class Out {
-	foreign static println!(message String) Unit {
-	}
+	foreign static println!(message String) Unit;
+}
+
+class Array[#T] {
+	foreign static make() Array[#T];
 }

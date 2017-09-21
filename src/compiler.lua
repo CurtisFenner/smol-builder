@@ -628,10 +628,24 @@ local function parseSmol(tokens)
 			{"_", K_SEMICOLON, "`;` after field type"},
 		},
 
-		["method-definition"] = parser.composite {
+		["method-definition"] = parser.choice {
+			parser.named "foreign-method-definition",
+			parser.named "real-method-definition",
+		},
+
+		["real-method-definition"] = parser.composite {
 			tag = "method-definition",
 			{"signature", parser.named "signature"},
 			{"body", parser.named "block", "a method body"},
+			{"foreign", parser.constant(false)},
+		},
+
+		["foreign-method-definition"] = parser.composite {
+			tag = "foreign-method-definition",
+			{"_", K_FOREIGN},
+			{"signature", parser.named "signature"},
+			{"_", K_SEMICOLON, "a `;` after foreign signature"},
+			{"foreign", parser.constant(true)},
 		},
 
 		["interface-signature"] = parser.composite {
@@ -644,7 +658,6 @@ local function parseSmol(tokens)
 		-- parameters, and return type.
 		["signature"] = parser.composite {
 			tag = "signature",
-			{"foreign", parser.query "`foreign`?"},
 			{"modifier", parser.named "method-modifier"},
 			{"name", T_IDENTIFIER, "a method name"},
 			{"bang", parser.optional(K_BANG)},
@@ -930,7 +943,7 @@ REGISTER_TYPE("FunctionIR", recordType {
 	parameters = listType "VariableIR",
 	generics = listType "TypeParameterIR",
 	returnTypes = listType "Type+",
-	body = "BlockSt",
+	body = choiceType(constantType(false), "BlockSt"),
 	signature = "Signature",
 	definitionName = "string",
 })

@@ -591,11 +591,12 @@ local function semanticsSmol(sources, main)
 		end
 
 		-- RETURNS a signature
-		local function compiledSignature(signature, scope)
+		local function compiledSignature(signature, scope, foreign)
 			assertis(scope, listType("TypeParameterIR"))
+			assertis(foreign, "boolean")
 
 			return freeze {
-				foreign = not not signature.foreign,
+				foreign = foreign,
 				modifier = signature.modifier.keyword,
 				name = signature.name,
 				returnTypes = table.map(resolveType, signature.returnTypes, scope),
@@ -706,7 +707,7 @@ local function semanticsSmol(sources, main)
 				end
 				memberLocationMap[name] = method.location
 				
-				local signature = compiledSignature(method.signature, generics)
+				local signature = compiledSignature(method.signature, generics, method.foreign)
 				signature = table.with(signature, "body", method.body)
 				signature = table.with(signature, "resolveType", resolveType)
 				signature = table.with(signature, "resolveInterface", resolveInterface)
@@ -745,7 +746,7 @@ local function semanticsSmol(sources, main)
 			local generics = compiledGenerics(definition.generics)
 
 			local signatures = table.map(function(raw)
-					local compiled = compiledSignature(raw, generics)
+					local compiled = compiledSignature(raw, generics, false)
 					return table.with(compiled, "container", name)
 				end, definition.signatures)
 
@@ -2155,25 +2156,28 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
-		local body = buildBlock {
-			initialization,
-			compileBlock(containingSignature.body, functionScope)
-		}
-		assertis(body, "StatementIR")
-		if body.returns ~= "yes" then
-			local returns = {}
-			for _, returnType in ipairs(containingSignature.returnTypes) do
-				table.insert(returns, showType(returnType))
-			end
-			returns = table.concat(returns, ", ")
+		local body = false
+		if not containingSignature.foreign then
+			body = buildBlock {
+				initialization,
+				compileBlock(containingSignature.body, functionScope)
+			}
+			assertis(body, "StatementIR")
+			if body.returns ~= "yes" then
+				local returns = {}
+				for _, returnType in ipairs(containingSignature.returnTypes) do
+					table.insert(returns, showType(returnType))
+				end
+				returns = table.concat(returns, ", ")
 
-			if returns ~= "Unit" then
-				Report.FUNCTION_DOESNT_RETURN {
-					name = containingSignature.container .. ":" .. containingSignature.name,
-					modifier = containingSignature.modifier,
-					location = containingSignature.body.location,
-					returns = returns,
-				}
+				if returns ~= "Unit" then
+					Report.FUNCTION_DOESNT_RETURN {
+						name = containingSignature.container .. ":" .. containingSignature.name,
+						modifier = containingSignature.modifier,
+						location = containingSignature.body.location,
+						returns = returns,
+					}
+				end
 			end
 		end
 
