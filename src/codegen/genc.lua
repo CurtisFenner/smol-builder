@@ -358,8 +358,8 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		-- Assign each resulting tuple
 		for i, destination in ipairs(statement.destinations) do
-			-- TODO: add explicit casts
-			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+			local cast = "(" .. cType(destination.type, structScope) .. ")"
+			emit(localName(destination.name) .. " = " .. cast .. tmp .. "._" .. i .. ";")
 		end
 		return
 	elseif statement.tag == "method-call" then
