@@ -85,6 +85,7 @@ local function lexSmol(source, filename)
 		["this"] = true,
 		["true"] = true,
 		["false"] = true,
+		["unit"] = true,
 	}
 
 	-- Define token parsing rules
@@ -354,6 +355,7 @@ local function parseSmol(tokens)
 	local K_RETURN = LEXEME "return"
 	local K_STATIC = LEXEME "static"
 	local K_THIS = LEXEME "this"
+	local K_UNIT_VALUE = LEXEME "unit"
 	local K_FALSE = LEXEME "false"
 	local K_TRUE = LEXEME "true"
 	local K_UNION = LEXEME "union"
@@ -361,7 +363,7 @@ local function parseSmol(tokens)
 
 	-- Built-in types
 	local K_STRING = LEXEME "String"
-	local K_UNIT = LEXEME "Unit"
+	local K_UNIT_TYPE = LEXEME "Unit"
 	local K_NEVER = LEXEME "Never"
 	local K_NUMBER = LEXEME "Number"
 	local K_BOOLEAN = LEXEME "Boolean"
@@ -507,7 +509,7 @@ local function parseSmol(tokens)
 		},
 
 		["generic-constraints"] = parser.composite {
-			tag = "***",
+			tag = "generic constraints",
 			{"_", K_PIPE},
 			{
 				"#constraints",
@@ -529,7 +531,7 @@ local function parseSmol(tokens)
 			K_STRING,
 			K_NUMBER,
 			K_BOOLEAN,
-			K_UNIT,
+			K_UNIT_TYPE,
 			K_NEVER,
 			-- User defined types
 			parser.map(T_GENERIC, function(x)
@@ -558,7 +560,7 @@ local function parseSmol(tokens)
 		},
 
 		["type-arguments"] = parser.composite {
-			tag = "***",
+			tag = "***list of type arguments",
 			{"_", K_SQUARE_OPEN},
 			{"#arguments", parser.query "type,1+", "type arguments"},
 			{"_", K_SQUARE_CLOSE, "`]`"},
@@ -793,6 +795,7 @@ local function parseSmol(tokens)
 			K_THIS,
 			K_TRUE,
 			K_FALSE,
+			K_UNIT_VALUE,
 			parser.map(T_STRING_LITERAL, function(v)
 				return {tag = "string-literal", value = v}
 			end),
@@ -901,6 +904,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"StaticCallSt",
 	"StringLoadSt",
 	"ThisSt",
+	"UnitSt",
 	"NothingSt"
 )))
 
@@ -1033,6 +1037,12 @@ EXTEND_TYPE("FieldSt", "AbstractStatementIR", recordType {
 
 EXTEND_TYPE("ThisSt", "AbstractStatementIR", recordType {
 	tag = constantType "this",
+	destination = "VariableIR",
+	returns = constantType "no",
+})
+
+EXTEND_TYPE("UnitSt", "AbstractStatementIR", recordType {
+	tag = constantType "unit",
 	destination = "VariableIR",
 	returns = constantType "no",
 })

@@ -255,7 +255,7 @@ function REGISTER_TYPE(name, t)
 	assert(isstring(name), "name must be a string")
 	assert(not _TYPE_SPEC_BY_NAME[name],
 		"Type `" .. name .. "` has already been defined")
-	assert(isobject(t))
+	assert(isobject(t), "type description must be an object")
 
 	local function describe()
 		return name

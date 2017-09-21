@@ -47,8 +47,9 @@ end
 local LUA_THIS_LOCAL = "this"
 local C_CONSTRAINT_PARAMETER_PREFIX = "cons"
 local LUA_CONSTRAINTS_FIELD = "constraintField"
+local TAG_FIELD = "tag"
 
--- RETURNS a string representing a Lua identifier for a Smol variable or parameter
+-- RETURNS a string representing a C identifier for a Smol variable or parameter
 local function localName(name)
 	assertis(name, "string")
 	assert(not name:find(":"))
@@ -56,11 +57,18 @@ local function localName(name)
 	return "smol_local_" .. name
 end
 
--- RETURNS a string representing a Lua identifier for a Smol field
+-- RETURNS a string representing a C identifier for a Smol field
 local function classFieldName(name)
 	assert(not name:find(":"))
 
 	return "smol_field_" .. name
+end
+
+-- RETURNS a string representing a C identifier for a Smol field
+local function unionFieldName(name)
+	assert(not name:find(":"))
+
+	return "smol_case_" .. name
 end
 
 -- RETURNS a string representing a C type
@@ -143,6 +151,14 @@ local function classStructName(name)
 	assert(name:find(":"))
 
 	return "smol_class_" .. name:gsub(":", "_") .. "_T"
+end
+
+-- RETURNS a C type name
+local function unionStructName(name)
+	assertis(name, "string")
+	assert(name:find(":"))
+
+	return "smol_union_" .. name:gsub(":", "_") .. "_T"
 end
 
 -- RETURNS a string that is a Lua identifier
@@ -281,17 +297,22 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		comment(statement.destination.name .. " = this;")
 		emit(localName(statement.destination.name) .. " = this;")
 		return
+	elseif statement.tag == "unit" then
+		comment(statement.destination.name .. " = unit;")
+		emit(localName(statement.destination.name) .. " = NULL;")
+		return
 	elseif statement.tag == "assign" then
 		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
 		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
 		return
 	elseif statement.tag == "new-class" then
 		comment(statement.destination.name .. " = new(...);")
+
+		-- Allocate a new instance
 		local name = localName(statement.destination.name)
 		local cT = cType(statement.destination.type, structScope)
-		if cT:sub(-1) == "*" then
-			cT = cT:sub(1, -2)
-		end
+		assert(cT:sub(-1) == "*")
+		cT = cT:sub(1, -2)
 		emit(name .. " = ALLOCATE(" .. cT .. ");")
 		
 		for key, value in pairs(statement.fields) do
@@ -301,6 +322,35 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 			local constraintField = structConstraintField(key)
 			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
 		end
+		return
+	elseif statement.tag == "new-union" then
+		comment(statement.destination.name .. " = new(" .. statement.field .. " = ...);")
+
+		-- Allocate a new instance
+		local destination = localName(statement.destination.name)
+		local cT = cType(statement.destination.type, structScope)
+		assert(cT:sub(-1) == "*")
+		cT = cT:sub(1, -2)
+
+		emit(destination .. " = ALLOCATE(" .. cT .. ");")
+
+		local union = table.findwith(semantics.unions, "name", statement.type.name)
+		assert(union)
+
+		-- Initialize the tag
+		local found = false
+		for i, field in ipairs(union.fields) do
+			if field.name == statement.field then
+				emit(destination .. "->" .. TAG_FIELD .. " = " .. i .. ";")
+				assert(not found)
+				found = true
+			end
+		end
+		assert(found)
+
+		-- Initialize the value
+		local value = localName(statement.value.name)
+		emit(destination .. "->" .. unionFieldName(statement.field) .. " = " .. value .. ";")
 		return
 	elseif statement.tag == "return" then
 		comment("return ...;")
@@ -592,7 +642,10 @@ struct _smol_Number {
 	local structScope = {}
 	for _, class in ipairs(semantics.classes) do
 		structScope[class.name] = classStructName(class.name)
-	end	
+	end
+	for _, union in ipairs(semantics.unions) do
+		structScope[union.name] = unionStructName(union.name)
+	end
 	structScope = freeze(structScope)
 
 	-- Generate a struct for each interface
@@ -659,6 +712,37 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 	end
 
 	-- TODO: generate a tagged union for each union
+	for _, union in ipairs(semantics.unions) do
+		-- Open struct definition
+		table.insert(code, "// union " .. union.name)
+		local structName = unionStructName(union.name)
+		table.insert(code, "struct _" .. structName .. "{")
+
+		-- Generate tag
+		assert(#union.fields < 64)
+		table.insert(code, "\tunsigned " .. TAG_FIELD .. ";")
+
+		-- TODO: generate a union
+		-- Generate all value fields
+		for _, field in ipairs(union.fields) do
+			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. unionFieldName(field.name) .. ";")
+		end
+
+		-- Generate all constraint fields
+		for i, generic in ipairs(union.generics) do
+			for j, constraint in ipairs(generic.constraints) do
+				local t = interfaceStructName(constraint.interface.name) .. "*"
+				-- XXX: constraint key
+				local key = "#" .. i .. "_" .. j
+				table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+			end
+		end
+
+		-- Close struct definition
+		table.insert(code, "};")
+		forwardDeclareStruct("_" .. structName, structName)
+		table.insert(code, "")
+	end
 
 	local prototypeSequence = {}
 	table.insert(code, prototypeSequence)
@@ -813,7 +897,7 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 			if definition.tag == "class" then
 				thisType = classStructName(definition.name) .. "*"
 			elseif definition.tag == "union" then
-				error "TODO"
+				thisType = unionStructName(definition.name) .. "*"
 			end
 			assert(definition)
 

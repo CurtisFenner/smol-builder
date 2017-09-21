@@ -15,8 +15,8 @@ union Option[#T] {
 
 class MinHeap[#T | #T is Orderable[#T]] {
 	var value Option[#T];
-	var left MinHeap[#T];
-	var right MinHeap[#T];
+	var left Option[MinHeap[#T]];
+	var right Option[MinHeap[#T]];
 
 	static make() MinHeap[#T] {
 		return new(value = Option[#T].makeNone(), left = Option[MinHeap[#T]].makeNone(), right = Option[MinHeap[#T]].makeNone());

@@ -1738,6 +1738,21 @@ local function semanticsSmol(sources, main)
 						},
 					}
 					return buildBlock(execution), {variable}
+				elseif pExpression.keyword == "unit" then
+					local variable = {
+						type = UNIT_TYPE,
+						name = generateLocalID("unit"),
+						location = pExpression.location,
+					}
+					local execution = {
+						localSt(variable),
+						{
+							tag = "unit",
+							destination = variable,
+							returns = "no",
+						}
+					}
+					return buildBlock(execution), {variable}
 				end
 				error("TODO: keyword `" .. pExpression.keyword .. "`")
 			elseif pExpression.tag == "field" then
