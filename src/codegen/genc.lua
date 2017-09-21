@@ -408,25 +408,60 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("\t" .. localName(statement.base.name) .. "->" .. classFieldName(statement.name) .. ";")
 		return
 	elseif statement.tag == "generic-static-call" then
-		-- local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
-		-- destinations = table.concat(destinations, ", ")
-		-- emit(destinations .. " = (" .. cConstraint(statement.constraint) .. ")." .. statement.staticName .. "(")
-		-- for i, argument in ipairs(statement.arguments) do
-		-- 	local comma = i == #statement.arguments and "" or ", "
-		-- 	emit("\t" .. localName(argument.name) .. comma)
-		-- end
-		-- emit(")")
-		-- return
+		comment("... = " .. "... ." .. statement.staticName .. "(...);")
+
+		local argumentValues = {}
+		-- TODO: argument values
+		for _, argument in ipairs(statement.arguments) do
+			table.insert(argumentValues, localName(argument.name))
+		end
+		
+
+		if #argumentValues < 1 then
+			-- Closure calls must be given at least one argument
+			table.insert(argumentValues, "NULL")
+		end
+		local arguments = table.concat(argumentValues, ", ")
+
+		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
+		assert(interface)
+		local signature = table.findwith(interface.signatures, "name", statement.staticName)
+		assert(signature)
+
+		local destinationTypes = {}
+		for _, returnType in ipairs(signature.returnTypes) do
+			table.insert(destinationTypes, cType(returnType, structScope))
+		end
+		local tuple = preTupleName(destinationTypes)
+
+		local constraint = cConstraint(statement.constraint, semantics)
+		local member = interfaceMember(statement.staticName)
+		local invocation = "CLOSURE_CALL(" .. constraint .. "->" .. member .. ", " .. arguments .. ")"
+		local tmp = "tmp" .. UID()
+		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
+
+		-- Assign from tmp
+		for i, destination in ipairs(statement.destinations) do
+			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+		end
+		return
 	elseif statement.tag == "generic-method-call" then
 		comment("... = " .. statement.baseInstance.name .. "." .. statement.methodName .. "(...);")
 		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 
 		-- Collect the arguments
 		local argumentValues = {}
+
 		-- The first argument is the implicit this
 		table.insert(argumentValues, localName(statement.baseInstance.name))
 
+		-- Add explicit arguments
+		for _, argument in ipairs(statement.arguments) do
+			table.insert(argumentValues, localName(argument.name))
+		end
+
 		local arguments = table.concat(argumentValues, ", ")
+
 		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
 		assert(interface)
 		local signature = table.findwith(interface.signatures, "name", statement.methodName)
@@ -731,6 +766,7 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 				for i = 1, #signature.returnTypes do
 					table.insert(code, "\tout._" .. i .. " = concrete_out._" .. i .. ";")
 				end
+				table.insert(code, "return out;")
 				table.insert(code, "}")
 			end
 
