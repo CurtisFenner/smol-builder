@@ -21,9 +21,18 @@ class MinHeap[#T | #T is Orderable[#T]] {
 	static make() MinHeap[#T] {
 		return new(value = Option[#T].makeNone(), left = Option[MinHeap[#T]].makeNone(), right = Option[MinHeap[#T]].makeNone());
 	}
+
+	static makeLeaf(value #T) MinHeap[#T] {
+		return new(value = Option[#T].makeSome(value), left = Option[MinHeap[#T]].makeNone(), right = Option[MinHeap[#T]].makeNone());
+	}
+
+	method insert(value #T) MinHeap[#T] {
+		return MinHeap[#T].makeLeaf(value);
+	}
 }
 
 interface Orderable[#T] {
+	// RETURNS true when this is smaller than other in this ordering.
 	method lessThan(other #T) Boolean;
 }
 

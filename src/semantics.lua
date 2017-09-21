@@ -1056,6 +1056,33 @@ local function semanticsSmol(sources, main)
 					concrete = implementer,
 					assignments = assignments,
 				}
+			elseif implementer.tag == "generic+" then
+				local name
+				for i, generic in ipairs(definition.generics) do
+					for j, c in ipairs(generic.constraints) do
+						if generic.name == implementer.name and c.interface.name == interface.name then
+							name = "#" .. i .. "_" .. j
+						end
+					end
+				end
+				assert(name)
+				if containingSignature.modifier == "static" then
+					-- Get a parameter constraint
+					return freeze {
+						tag = "parameter-constraint",
+						interface = interface,
+						name = name,
+					}
+				else
+					-- Get a this constraint
+					assert(thisVariable)
+					return freeze {
+						tag = "this-constraint",
+						instance = thisVariable,
+						interface = interface,
+						name = name,
+					}
+				end
 			end
 			print(show(interface))
 			print(show(implementer))

@@ -44,9 +44,8 @@ local function showType(t)
 	error("unknown Type+ tag `" .. t.tag .. "`")
 end
 
-local LUA_THIS_LOCAL = "this"
+local C_THIS_LOCAL = "this"
 local C_CONSTRAINT_PARAMETER_PREFIX = "cons"
-local LUA_CONSTRAINTS_FIELD = "constraintField"
 local TAG_FIELD = "tag"
 
 -- RETURNS a string representing a C identifier for a Smol variable or parameter
@@ -210,8 +209,11 @@ local function cConstraint(constraint, semantics)
 
 		local arguments = table.concat(argumentValues, ", ")
 		return func .. "(" .. arguments .. ")"
+	elseif constraint.tag == "this-constraint" then
+		return localName(constraint.instance.name) .. "->" .. structConstraintField(constraint.name)
 	end
-	error("unimplemented constraint tag `" .. constraint.tag .. "`")
+	print("unimplemented constraint tag `" .. constraint.tag .. "`")
+	return "TODO"
 end
 
 -- RETURNS a string representing a interface struct field name
@@ -795,7 +797,7 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 
 				-- Add implicit this parameter
 				if signature.modifier == "method" then
-					table.insert(cParameters, "void* this")
+					table.insert(cParameters, "void* " .. C_THIS_LOCAL)
 				end
 
 				-- Add explicit value parameters
@@ -818,7 +820,7 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 				if signature.modifier == "method" then
 					-- TODO: explicitly cast to correct type
 					local cast = "(void*)"
-					table.insert(arguments, cast .. "this")
+					table.insert(arguments, cast .. C_THIS_LOCAL)
 				end
 
 				for _, parameter in ipairs(signature.parameters) do
@@ -910,7 +912,7 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 			else
 				assert(func.signature.modifier == "method")
 				cFunctionName = methodFunctionName(func.name, func.definitionName)
-				cParameters = {thisType .. " " .. LUA_THIS_LOCAL}
+				cParameters = {thisType .. " " .. C_THIS_LOCAL}
 			end
 
 			-- Add value parameters
