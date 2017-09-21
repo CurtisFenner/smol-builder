@@ -27,9 +27,9 @@ function string.prepad(str, with, length)
 	assert(type(with) == "string", "with must be a string")
 	assert(type(length) == "number", "length must be an integer")
 	assert(length % 1 == 0, "length must be an integer")
-	assert(#with == 1, "TODO: support #with > 1")
 
-	return string.rep(with, length - #str) .. str
+	local paddingSize = length - #str
+	return string.rep(with, paddingSize):sub(1, paddingSize) .. str
 end
 
 -- RETURNS a list formed by the concatenation of the arguments
