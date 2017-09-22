@@ -346,9 +346,9 @@ local STRING_TYPE = freeze {
 	location = "???",
 }
 
-local NUMBER_TYPE = freeze {
+local INT_TYPE = freeze {
 	tag = "keyword-type+",
-	name = "Number",
+	name = "Int",
 	location = "???",
 }
 
@@ -1196,17 +1196,17 @@ local function semanticsSmol(sources, main)
 					},
 				}
 				return block, freeze {out}
-			elseif pExpression.tag == "number-literal" then
+			elseif pExpression.tag == "int-literal" then
 				local out = {
-					name = generateLocalID("numberliteral"),
-					type = NUMBER_TYPE,
+					name = generateLocalID("intliteral"),
+					type = INT_TYPE,
 					location = pExpression.location,
 				}
 
 				local block = buildBlock {
 					localSt(out),
 					{
-						tag = "number",
+						tag = "int",
 						number = pExpression.value,
 						destination = out,
 						returns = "no",

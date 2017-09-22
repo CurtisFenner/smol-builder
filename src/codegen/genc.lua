@@ -283,10 +283,10 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit(name .. "->length = " .. #statement.string .. ";")
 		emit(name .. "->text = " .. cEncodedString(statement.string) .. ";")
 		return
-	elseif statement.tag == "number" then
+	elseif statement.tag == "int" then
 		comment(statement.destination.name .. " = " .. statement.number .. ";")
 		local name = localName(statement.destination.name)
-		emit(name .. " = ALLOCATE(smol_Number);")
+		emit(name .. " = ALLOCATE(smol_Int);")
 		emit(name .. "->value = " .. luaEncodedNumber(statement.number) .. ";")
 		return
 	elseif statement.tag == "boolean" then
@@ -628,8 +628,8 @@ struct _smol_String {
 	char const* text;
 };
 
-struct _smol_Number {
-	double value;
+struct _smol_Int {
+	int64_t value;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -637,7 +637,7 @@ struct _smol_Number {
 
 	forwardDeclareStruct("_smol_Unit", "smol_Unit")
 	forwardDeclareStruct("_smol_Boolean", "smol_Boolean")
-	forwardDeclareStruct("_smol_Number", "smol_Number")
+	forwardDeclareStruct("_smol_Int", "smol_Int")
 	forwardDeclareStruct("_smol_String", "smol_String")
 
 	-- Build the struct scope map

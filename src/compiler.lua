@@ -122,8 +122,8 @@ local function lexSmol(source, filename)
 		["var"] = true,
 		-- built-in types
 		["Boolean"] = true,
+		["Int"] = true,
 		["Never"] = true,
-		["Number"] = true,
 		["String"] = true,
 		["Unit"] = true,
 		-- values
@@ -419,7 +419,7 @@ local function parseSmol(tokens)
 	local K_STRING = LEXEME "String"
 	local K_UNIT_TYPE = LEXEME "Unit"
 	local K_NEVER = LEXEME "Never"
-	local K_NUMBER = LEXEME "Number"
+	local K_INT = LEXEME "Int"
 	local K_BOOLEAN = LEXEME "Boolean"
 
 	-- PARSER for token tag ("typename", "identifier", "operator", etc)
@@ -583,7 +583,7 @@ local function parseSmol(tokens)
 		["type"] = parser.choice {
 			-- Built in special types
 			K_STRING,
-			K_NUMBER,
+			K_INT,
 			K_BOOLEAN,
 			K_UNIT_TYPE,
 			K_NEVER,
@@ -867,7 +867,7 @@ local function parseSmol(tokens)
 				return {tag = "string-literal", value = v}
 			end),
 			parser.map(T_INTEGER_LITERAL, function(v)
-				return {tag = "number-literal", value = v}
+				return {tag = "int-literal", value = v}
 			end),
 			parser.named "static-call",
 			parser.map(T_IDENTIFIER, function(n)
@@ -965,7 +965,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"MethodCallSt",
 	"NewClassSt",
 	"NewUnionSt",
-	"NumberLoadSt",
+	"IntLoadSt",
 	"ReturnSt",
 	"IfSt",
 	"StaticCallSt",
@@ -1023,8 +1023,8 @@ EXTEND_TYPE("IfSt", "AbstractStatementIR", recordType {
 	bodyElse = "StatementIR",
 })
 
-EXTEND_TYPE("NumberLoadSt", "AbstractStatementIR", recordType {
-	tag = constantType "number",
+EXTEND_TYPE("IntLoadSt", "AbstractStatementIR", recordType {
+	tag = constantType "int",
 	number = "number",
 	destination = "VariableIR",
 	returns = constantType "no",

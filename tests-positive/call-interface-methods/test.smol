@@ -1,12 +1,12 @@
 package test;
 
-class Foo is ConvertibleTo[Number] {
-	var value Number;
-	method toThing() Number {
+class Foo is ConvertibleTo[Int] {
+	var value Int;
+	method toThing() Int {
 		return this.value;
 	}
 
-	static make(value Number) Foo {
+	static make(value Int) Foo {
 		return new(value = value);
 	}
 }
@@ -25,6 +25,6 @@ class Test {
 	static main() Unit {
 		var foo Foo = Foo.make(7);
 
-		var x Number = Converter[Foo, Number].convert(foo);
+		var x Int = Converter[Foo, Int].convert(foo);
 	}
 }

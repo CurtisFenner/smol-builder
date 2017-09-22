@@ -4,12 +4,8 @@ class Out {
 	foreign static println!(message String) Unit;
 }
 
-class I64 {
-	foreign static make(number Number) I64;
-}
-
 class Array[#T] {
 	foreign static make() Array[#T];
-	foreign method get(index I64) #T;
-	foreign method set(index I64, value #T) Array[#T];
+	foreign method get(index Int) #T;
+	foreign method set(index Int, value #T) Array[#T];
 }

@@ -2,7 +2,7 @@ package test;
 
 class Test {
 	static main() Unit {
-		var v Number = 3;
-		var v Number = 4;
+		var v Int = 3;
+		var v Int = 4;
 	}
 }
