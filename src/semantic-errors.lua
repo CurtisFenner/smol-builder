@@ -28,13 +28,10 @@ function Report.MEMBER_DEFINED_TWICE(p)
 end
 
 function Report.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
-	p = freeze(p)
-	local name = p.name
-	local first = p.firstLocation
-	local second = p.secondLocation
-	assertis(name, "string")
-
-	quit("TYPE BROUGHT INTO SCOPE TWICE")
+	quit("The type `", p.name, "` was first brought into scope ",
+		p.firstLocation,
+		"\nHowever, you try to bring the name `", p.name, "` into scope again ",
+		p.secondLocation)
 end
 
 function Report.UNKNOWN_TYPE_IMPORTED(p)
@@ -134,8 +131,8 @@ end
 
 function Report.CONSTRAINTS_MUST_BE_INTERFACES(p)
 	quit("Constraints must be interfaces.",
-		"\nHowever, the ", p.is, " `", p.typeShown, "` is used as a constraint",
-		p.location)
+		"\nHowever, the ", p.is, " `", p.typeShown,
+		"` is used as a constraint ", p.location)
 end
 
 function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
@@ -154,7 +151,7 @@ end
 function Report.VARIABLE_DEFINED_TWICE(p)
 	quit("The variable `", p.name, "` is first defined ", p.first,
 		"While it is still in scope, you attempt to define another variable ",
-		"with the same name ", p.second)
+		"with the same name `", p.name, "` ", p.second)
 end
 
 function Report.INTERFACE_USED_AS_VALUE(p)
@@ -210,7 +207,7 @@ function Report.TYPE_MUST_BE_CLASS(p)
 end
 
 function Report.MISSING_VALUE(p)
-	quit("The ", p.purpose, " requires `", p.name, "` be provided.",
+	quit("The ", p.purpose, " requires a value for field `", p.name, "`.",
 		"\nHowever, it is missing ", p.location)
 end
 
