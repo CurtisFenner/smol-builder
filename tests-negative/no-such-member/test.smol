@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+	static make() Test {
+		return new();
+	}
+
+	static main!() Unit {
+		var test Test = Test.make();
+		do test.foo();
+	}
+}

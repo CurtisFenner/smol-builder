@@ -175,8 +175,13 @@ end
 -- in this instance
 local function getSubstituterFromConcreteType(type, allDefinitions)
 	-- XXX: This union is not a good thing
-	assertis(type, choiceType("ConcreteType+", "InterfaceType+"))
+	assertis(type, choiceType("ConcreteType+", "InterfaceType+", "KeywordType+"))
 	assertis(allDefinitions, listType "Definition")
+
+	if type.tag == "keyword-type+" then
+		return genericSubstituter({})
+	end
+	assertis(type, choiceType("ConcreteType+", "InterfaceType+"))
 
 	local definition = table.findwith(allDefinitions, "name", type.name)
 	assert(definition)
@@ -978,6 +983,41 @@ local function semanticsSmol(sources, main)
 	local function definitionFromType(t)
 		assertis(t, choiceType("ConcreteType+", "KeywordType+"))
 
+		if t.tag == "keyword-type+" then
+			if t.name == "Int" then
+				return {
+					tag = "builtin",
+					location = "???",
+					signatures = {},
+				}
+			elseif t.name == "String" then
+				return {
+					tag = "builtin",
+					location = "???",
+					signatures = {},
+				}
+			elseif t.name == "Boolean" then
+				return {
+					tag = "builtin",
+					location = "???",
+					signatures = {},
+				}
+			elseif t.name == "Unit" then
+				return {
+					tag = "builtin",
+					location = "???",
+					signatures = {},
+				}
+			elseif t.name == "Never" then
+				return {
+					tag = "builtin",
+					location = "???",
+					signatures = {},
+				}
+			end
+			assert(false)
+		end
+
 		local definition = table.findwith(allDefinitions, "name", t.name)
 		
 		-- Type Finder should verify that the type exists
@@ -1658,6 +1698,14 @@ local function semanticsSmol(sources, main)
 				
 				-- Find the definition of the method being invoked
 				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
+				if not method then
+					Report.NO_SUCH_METHOD {
+						type = showType(baseInstance.type),
+						modifier = "method",
+						name = pExpression.methodName,
+						location = pExpression.location,
+					}
+				end
 				assertis(method, "Signature")
 
 				local methodFullName = baseDefinition.name .. "." .. pExpression.methodName
