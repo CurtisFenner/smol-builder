@@ -1,5 +1,13 @@
 -- Curtis Fenner, copyright (C) 2017
 
+local BUILTIN_NAME_MAP = {
+	Int = true,
+	String = true,
+	Boolean = true,
+	Unit = true,
+	Never = true,
+}
+
 -- RETURNS a string
 local function luaizeName(name)
 	return name:gsub(":", "_"):gsub("#", "hash")
@@ -15,7 +23,7 @@ end
 local function methodFunctionName(name, definition)
 	assertis(name, "string")
 	assertis(definition, "string")
-	assert(definition:match(":"))
+	assert(definition:match(":") or BUILTIN_NAME_MAP[definition])
 	assert(definition:find("[A-Z]"))
 
 	return "smol_method_" .. luaizeName(definition) .. "_" .. luaizeName(name)
@@ -147,6 +155,10 @@ end
 -- RETURNS a C type name
 local function classStructName(name)
 	assertis(name, "string")
+
+	if BUILTIN_NAME_MAP[name] then
+		return "smol_" .. name
+	end
 	assert(name:find(":"))
 
 	return "smol_class_" .. name:gsub(":", "_") .. "_T"
@@ -683,31 +695,35 @@ struct _smol_Int {
 
 	-- Generate a struct for each class
 	for _, class in ipairs(semantics.classes) do
-		table.insert(code, "// class " .. class.name)
-		local structName = classStructName(class.name)
-		table.insert(code, "struct _" .. structName .. " {")
+		if class.builtin then
+			table.insert(code, "// builtin " .. class.name)
+		else
+			table.insert(code, "// class " .. class.name)
+			local structName = classStructName(class.name)
+			table.insert(code, "struct _" .. structName .. " {")
 
-		-- Add a foreign field
-		table.insert(code, "\tvoid* foreign;")
+			-- Add a foreign field
+			table.insert(code, "\tvoid* foreign;")
 
-		-- Generate all value fields
-		for _, field in ipairs(class.fields) do
-			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
-		end
-
-		-- Generate all constraint fields
-		for i, generic in ipairs(class.generics) do
-			for j, constraint in ipairs(generic.constraints) do
-				local t = interfaceStructName(constraint.interface.name) .. "*"
-				-- XXX: constraint key
-				local key = "#" .. i .. "_" .. j
-				table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+			-- Generate all value fields
+			for _, field in ipairs(class.fields) do
+				table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
 			end
-		end
 
-		table.insert(code, "};")
-		forwardDeclareStruct("_" .. structName, structName)
-		table.insert(code, "")
+			-- Generate all constraint fields
+			for i, generic in ipairs(class.generics) do
+				for j, constraint in ipairs(generic.constraints) do
+					local t = interfaceStructName(constraint.interface.name) .. "*"
+					-- XXX: constraint key
+					local key = "#" .. i .. "_" .. j
+					table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+				end
+			end
+
+			table.insert(code, "};")
+			forwardDeclareStruct("_" .. structName, structName)
+			table.insert(code, "")
+		end
 	end
 
 	-- TODO: generate a tagged union for each union
@@ -882,8 +898,26 @@ struct _smol_Int {
 	table.insert(code, string.rep("/", 80))
 	table.insert(code, "")
 
+	-- Generate the tuple types/prototypes for builtins
+	local builtinFuncs = {}
+	for _, class in ipairs(semantics.classes) do
+		if class.builtin then
+			for _, signature in ipairs(class.signatures) do
+				table.insert(builtinFuncs, {
+					name = signature.name,
+					parameters = signature.parameters,
+					definitionName = class.name,
+					generics = {},
+					returnTypes = signature.returnTypes,
+					body = false,
+					signature = signature,
+				})
+			end
+		end
+	end
+
 	-- Generate the body for each method and static
-	for _, func in ipairs(semantics.functions) do
+	for _, func in ipairs(table.concatted(semantics.functions, builtinFuncs)) do
 		local fullName = func.definitionName .. "." .. func.name
 		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
 
@@ -895,6 +929,10 @@ struct _smol_Int {
 			thisType = classStructName(definition.name) .. "*"
 		elseif definition.tag == "union" then
 			thisType = unionStructName(definition.name) .. "*"
+		elseif definition.tag == "builtin" then
+			thisType = "smol_" .. definition.name .. "*"
+		else
+			error("unknown definition tag `" .. definition.tag .. "`")
 		end
 		assert(definition)
 
@@ -954,6 +992,23 @@ struct _smol_Int {
 	end
 
 	table.insert(code, [[
+////////////////////////////////////////////////////////////////////////////////
+
+tuple1_1_smol_Boolean_ptr smol_method_Int_isPositive(smol_Int* this) {
+
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = this->value > 0;
+	return out;
+}
+
+tuple1_1_smol_Int_ptr smol_method_Int_negate(smol_Int* this) {
+	tuple1_1_smol_Int_ptr out;
+	out._1 = ALLOCATE(smol_Int);
+	out._1->value = -this->value;
+	return out;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {

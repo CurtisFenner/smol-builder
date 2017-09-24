@@ -371,6 +371,75 @@ local UNIT_TYPE = freeze {
 
 --------------------------------------------------------------------------------
 
+local BUILTIN_DEFINITIONS = freeze {
+	{
+		name = "Int",
+		tag = "builtin",
+		location = "???",
+		signatures = {
+			{
+				name = "isPositive",
+				parameters = {},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
+			{
+				name = "negate",
+				parameters = {},
+				returnTypes = {INT_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			}
+		},
+		builtin = true,
+		implements = {},
+		generics = {},
+	},
+	{
+		name = "String",
+		tag = "builtin",
+		location = "???",
+		signatures = {},
+		builtin = true,
+		implements = {},
+		generics = {},
+	},
+	{
+		name = "Boolean",
+		tag = "builtin",
+		location = "???",
+		signatures = {},
+		builtin = true,
+		implements = {},
+		generics = {},
+	},
+	{
+		name = "Unit",
+		tag = "builtin",
+		location = "???",
+		signatures = {},
+		builtin = true,
+		implements = {},
+		generics = {},
+	},
+	{
+		name = "Never",
+		tag = "builtin",
+		location = "???",
+		signatures = {},
+		builtin = true,
+		implements = {},
+		generics = {},
+	}
+}
+
+--------------------------------------------------------------------------------
+
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
 	assertis(main, "string")
@@ -740,6 +809,7 @@ local function semanticsSmol(sources, main)
 				implements = implements,
 				constraints = constraints,
 				location = definition.location,
+				builtin = false,
 			}
 		end
 
@@ -984,38 +1054,9 @@ local function semanticsSmol(sources, main)
 		assertis(t, choiceType("ConcreteType+", "KeywordType+"))
 
 		if t.tag == "keyword-type+" then
-			if t.name == "Int" then
-				return {
-					tag = "builtin",
-					location = "???",
-					signatures = {},
-				}
-			elseif t.name == "String" then
-				return {
-					tag = "builtin",
-					location = "???",
-					signatures = {},
-				}
-			elseif t.name == "Boolean" then
-				return {
-					tag = "builtin",
-					location = "???",
-					signatures = {},
-				}
-			elseif t.name == "Unit" then
-				return {
-					tag = "builtin",
-					location = "???",
-					signatures = {},
-				}
-			elseif t.name == "Never" then
-				return {
-					tag = "builtin",
-					location = "???",
-					signatures = {},
-				}
-			end
-			assert(false)
+			local builtin = table.findwith(BUILTIN_DEFINITIONS, "name", t.name)
+			assert(builtin)
+			return builtin
 		end
 
 		local definition = table.findwith(allDefinitions, "name", t.name)
@@ -2299,7 +2340,7 @@ local function semanticsSmol(sources, main)
 	end
 
 	return freeze {
-		classes = classes,
+		classes = table.concatted(classes, BUILTIN_DEFINITIONS),
 		unions = unions,
 		interfaces = interfaces,
 		functions = functions,

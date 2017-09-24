@@ -910,6 +910,7 @@ REGISTER_TYPE("ClassIR", recordType {
 	implements = listType "InterfaceType+",
 	signatures = listType "Signature",
 	constraints = mapType("string", "InterfaceType+"),
+	builtin = "boolean",
 })
 
 REGISTER_TYPE("UnionIR", recordType {
@@ -946,6 +947,16 @@ REGISTER_TYPE("FunctionIR", recordType {
 	body = choiceType(constantType(false), "BlockSt"),
 	signature = "Signature",
 	definitionName = "string",
+})
+
+REGISTER_TYPE("Signature", recordType {
+	name = "string",
+	parameters = listType "VariableIR",
+	returnTypes = listType "Type+",
+	modifier = choiceType(constantType "static", constantType "method"),
+	container = "string",
+	foreign = "boolean",
+	bang = "boolean",
 })
 
 REGISTER_TYPE("maybe", choiceType(
@@ -1112,16 +1123,6 @@ EXTEND_TYPE("UnitSt", "AbstractStatementIR", recordType {
 	tag = constantType "unit",
 	destination = "VariableIR",
 	returns = constantType "no",
-})
-
-REGISTER_TYPE("Signature", recordType {
-	name = "string",
-	parameters = listType "VariableIR",
-	returnTypes = listType "Type+",
-	modifier = choiceType(constantType "static", constantType "method"),
-	container = "string",
-	foreign = "boolean",
-	bang = "boolean",
 })
 
 REGISTER_TYPE("VariableIR", recordType {

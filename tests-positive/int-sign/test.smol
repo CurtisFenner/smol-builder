@@ -7,7 +7,17 @@ class Test {
 		if (1).isPositive() {
 			do core:Out.println!("1 is positive");
 		} else {
-			do core:Out.println!("1 is negative");
+			do core:Out.println!("1 is not positive");
+		}
+		if (1.negate()).isPositive() {
+			do core:Out.println!("-1 is positive");
+		} else {
+			do core:Out.println!("-1 is not positive");
+		}
+		if (0).isPositive() {
+			do core:Out.println!("0 is positive");
+		} else {
+			do core:Out.println!("0 is not positive");
 		}
 	}
 }
