@@ -369,13 +369,19 @@ local UNIT_TYPE = freeze {
 	location = "???",
 }
 
+local NEVER_TYPE = freeze {
+	tag = "keyword-type+",
+	name = "Never",
+	location = "???",
+}
+
 --------------------------------------------------------------------------------
 
 local BUILTIN_DEFINITIONS = freeze {
 	{
+		type = INT_TYPE,
 		name = "Int",
 		tag = "builtin",
-		location = "???",
 		signatures = {
 			{
 				name = "isPositive",
@@ -394,47 +400,41 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-			}
+			},
+			{
+				name = "lessThan",
+				parameters = {{location = "<builtin>", name = "one", type = INT_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
 		},
-		builtin = true,
-		implements = {},
-		generics = {},
 	},
 	{
+		type = STRING_TYPE,
 		name = "String",
 		tag = "builtin",
-		location = "???",
 		signatures = {},
-		builtin = true,
-		implements = {},
-		generics = {},
 	},
 	{
+		type = BOOLEAN_TYPE,
 		name = "Boolean",
 		tag = "builtin",
-		location = "???",
 		signatures = {},
-		builtin = true,
-		implements = {},
-		generics = {},
 	},
 	{
+		type = UNIT_TYPE,
 		name = "Unit",
 		tag = "builtin",
-		location = "???",
 		signatures = {},
-		builtin = true,
-		implements = {},
-		generics = {},
 	},
 	{
+		type = NEVER_TYPE,
 		name = "Never",
 		tag = "builtin",
-		location = "???",
 		signatures = {},
-		builtin = true,
-		implements = {},
-		generics = {},
 	}
 }
 
@@ -809,7 +809,6 @@ local function semanticsSmol(sources, main)
 				implements = implements,
 				constraints = constraints,
 				location = definition.location,
-				builtin = false,
 			}
 		end
 
@@ -2340,7 +2339,8 @@ local function semanticsSmol(sources, main)
 	end
 
 	return freeze {
-		classes = table.concatted(classes, BUILTIN_DEFINITIONS),
+		classes = classes,
+		builtins = BUILTIN_DEFINITIONS,
 		unions = unions,
 		interfaces = interfaces,
 		functions = functions,

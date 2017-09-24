@@ -446,7 +446,8 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local baseName = statement.baseInstance.type.name
 		local class = table.findwith(semantics.classes, "name", baseName)
 		local union = table.findwith(semantics.unions, "name", baseName)
-		local definition = class or union
+		local builtin = table.findwith(semantics.builtins, "name", baseName)
+		local definition = class or union or builtin
 		assert(definition)
 		local signature = table.findwith(definition.signatures, "name", statement.methodName)
 		assert(signature)
@@ -695,35 +696,31 @@ struct _smol_Int {
 
 	-- Generate a struct for each class
 	for _, class in ipairs(semantics.classes) do
-		if class.builtin then
-			table.insert(code, "// builtin " .. class.name)
-		else
-			table.insert(code, "// class " .. class.name)
-			local structName = classStructName(class.name)
-			table.insert(code, "struct _" .. structName .. " {")
+		table.insert(code, "// class " .. class.name)
+		local structName = classStructName(class.name)
+		table.insert(code, "struct _" .. structName .. " {")
 
-			-- Add a foreign field
-			table.insert(code, "\tvoid* foreign;")
+		-- Add a foreign field
+		table.insert(code, "\tvoid* foreign;")
 
-			-- Generate all value fields
-			for _, field in ipairs(class.fields) do
-				table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
-			end
-
-			-- Generate all constraint fields
-			for i, generic in ipairs(class.generics) do
-				for j, constraint in ipairs(generic.constraints) do
-					local t = interfaceStructName(constraint.interface.name) .. "*"
-					-- XXX: constraint key
-					local key = "#" .. i .. "_" .. j
-					table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
-				end
-			end
-
-			table.insert(code, "};")
-			forwardDeclareStruct("_" .. structName, structName)
-			table.insert(code, "")
+		-- Generate all value fields
+		for _, field in ipairs(class.fields) do
+			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
 		end
+
+		-- Generate all constraint fields
+		for i, generic in ipairs(class.generics) do
+			for j, constraint in ipairs(generic.constraints) do
+				local t = interfaceStructName(constraint.interface.name) .. "*"
+				-- XXX: constraint key
+				local key = "#" .. i .. "_" .. j
+				table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+			end
+		end
+
+		table.insert(code, "};")
+		forwardDeclareStruct("_" .. structName, structName)
+		table.insert(code, "")
 	end
 
 	-- TODO: generate a tagged union for each union
@@ -900,24 +897,33 @@ struct _smol_Int {
 
 	-- Generate the tuple types/prototypes for builtins
 	local builtinFuncs = {}
-	for _, class in ipairs(semantics.classes) do
-		if class.builtin then
-			for _, signature in ipairs(class.signatures) do
-				table.insert(builtinFuncs, {
-					name = signature.name,
-					parameters = signature.parameters,
-					definitionName = class.name,
-					generics = {},
-					returnTypes = signature.returnTypes,
-					body = false,
-					signature = signature,
-				})
+	for _, builtin in ipairs(semantics.builtins) do
+		for _, signature in ipairs(builtin.signatures) do
+			-- Generate function header
+			local cFunctionName
+			local cParameters
+			if signature.modifier == "static" then
+				cFunctionName = staticFunctionName(signature.name, builtin.name)
+				cParameters = {}
+			else
+				assert(signature.modifier == "method")
+				cFunctionName = methodFunctionName(signature.name, builtin.name)
+				cParameters = {"smol_" .. builtin.name .. "* " .. C_THIS_LOCAL}
 			end
+
+			-- Add value parameters
+			for _, parameter in ipairs(signature.parameters) do
+				table.insert(cParameters, cType(parameter.type, structScope) .. " " .. localName(parameter.name))
+			end
+
+			local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
+			local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
+			genPrototype(prototype .. ";")
 		end
 	end
 
 	-- Generate the body for each method and static
-	for _, func in ipairs(table.concatted(semantics.functions, builtinFuncs)) do
+	for _, func in ipairs(semantics.functions) do
 		local fullName = func.definitionName .. "." .. func.name
 		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
 

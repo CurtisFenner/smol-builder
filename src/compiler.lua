@@ -897,6 +897,12 @@ end
 REGISTER_TYPE("Semantics", recordType {
 	classes = listType "ClassIR",
 	interfaces = listType "InterfaceIR",
+	builtins = listType(recordType {
+		tag = constantType "builtin",
+		name = "string",
+		signatures = listType "Signature",
+		type = "KeywordType+",
+	}),
 	unions = listType "UnionIR",
 	functions = listType "FunctionIR",
 	main = choiceType("string", constantType(false)),
@@ -910,7 +916,7 @@ REGISTER_TYPE("ClassIR", recordType {
 	implements = listType "InterfaceType+",
 	signatures = listType "Signature",
 	constraints = mapType("string", "InterfaceType+"),
-	builtin = "boolean",
+	builtin = constantType(nil),
 })
 
 REGISTER_TYPE("UnionIR", recordType {
