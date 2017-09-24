@@ -1224,6 +1224,11 @@ class Array[#T] {
 	foreign method append(value #T) Array[#T];
 	foreign method size() Int;
 }
+
+class ASCII {
+	foreign static formatInt(value Int) String;
+}
+
 ]]
 })
 

@@ -1030,11 +1030,11 @@ tuple1_1_smol_Int_ptr smol_method_core_Array_size(smol_class_core_Array_T* this)
 	return (tuple1_1_smol_Int_ptr){out};
 }
 
-tuple1_1_smol_String_ptr smol_static_ascii_ASCII_formatInt(smol_Int* smol_local_value) {
+tuple1_1_smol_String_ptr smol_static_core_ASCII_formatInt(smol_Int* smol_local_value) {
 	tuple1_1_smol_String_ptr out;
 	out._1 = ALLOCATE(smol_String);
 	out._1->text = ALLOCATE_ARRAY(32, char);
-	out._1->length = (size_t)sprintf(out._1->text, PRId64, smol_local_value->value);
+	out._1->length = (size_t)sprintf(out._1->text, "%" PRId64, smol_local_value->value);
 	return out;
 }
 

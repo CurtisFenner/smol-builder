@@ -40,6 +40,9 @@ interface Orderable[#T] {
 
 class Test {
 	static main!() Unit {
-		do core:Out.println!(ascii:ASCII.formatInt(1));
+		do core:Out.println!(core:ASCII.formatInt(1));
+		do core:Out.println!(core:ASCII.formatInt(2));
+		do core:Out.println!(core:ASCII.formatInt(3));
+		do core:Out.println!(core:ASCII.formatInt(4));
 	}
 }
