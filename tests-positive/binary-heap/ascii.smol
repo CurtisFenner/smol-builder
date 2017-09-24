@@ -1,0 +1,5 @@
+package ascii;
+
+class ASCII {
+	foreign static formatInt(value Int) String;
+}

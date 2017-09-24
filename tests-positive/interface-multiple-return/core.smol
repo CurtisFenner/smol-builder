@@ -1,5 +1,0 @@
-package core;
-
-class Out {
-	foreign static println!(message String) Unit;
-}

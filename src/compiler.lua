@@ -1207,15 +1207,39 @@ for line in io.popen("ls " .. sourceDirectory:gsub("\\", "/")):lines() do -- XXX
 	end
 end
 
+table.insert(sourceFiles, {
+	path = "<compiler-core>",
+	short = "<compiler-core>",
+	contents = [[
+package core;
+
+class Out {
+	foreign static println!(message String) Unit;
+}
+
+class Array[#T] {
+	foreign static make() Array[#T];
+	foreign method get(index Int) #T;
+	foreign method set(index Int, value #T) Array[#T];
+	foreign method append(value #T) Array[#T];
+	foreign method size() Int;
+}
+]]
+})
+
 -- Load and parse source files
 local sourceParses = {}
 for _, sourceFile in ipairs(sourceFiles) do
-	local file = io.open(sourceFile.path, "r")
-	if not file then
-		quit("The compiler could not open source file `", sourceFile.path, "`")
+	local contents = sourceFile.contents
+	if not contents then
+		local file = io.open(sourceFile.path, "r")
+		if not file then
+			quit("The compiler could not open source file `", sourceFile.path, "`")
+		end
+		contents = file:read("*all")
+		file:close()
 	end
-	local contents = file:read("*all")
-	file:close()
+	assert(contents)
 
 	-- Lex contents
 	local tokens = lexSmol(contents, sourceFile.short)

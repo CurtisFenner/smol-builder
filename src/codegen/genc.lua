@@ -548,8 +548,11 @@ return function(semantics, arguments)
 #include "assert.h"
 #include "stdio.h"
 #include "stdlib.h"
+#include "stdint.h"
+#include "inttypes.h"
 
 #define ALLOCATE(T) ((T*)malloc(sizeof(T)))
+#define ALLOCATE_ARRAY(size, T) ((T*)malloc(size * sizeof(T)))
 
 // NOTE: closures must take at least one argument
 #define CLOSURE(returnType, ...)                \
@@ -595,7 +598,10 @@ return function(semantics, arguments)
 				table.insert(parameters, list[i] .. " _" .. i)
 				table.insert(sequence, "\t" .. list[i] .. " _" .. i .. ";")
 			end
-			table.insert(sequence, "\tchar _;")
+			if #list == 0 then
+				table.insert(sequence, "\tchar _;")
+			end
+
 			-- Close struct
 			table.insert(sequence, "};")
 			table.insert(sequence, "")
@@ -625,7 +631,7 @@ struct _smol_Boolean {
 
 struct _smol_String {
 	size_t length;
-	char const* text;
+	char* text;
 };
 
 struct _smol_Int {
@@ -674,17 +680,6 @@ struct _smol_Int {
 		forwardDeclareStruct("_" .. structName, structName)
 		table.insert(code, "")
 	end
-
-table.insert(code, [[
-tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
-	// TODO: allow nulls, etc.
-	for (size_t i = 0; i < message->length; i++) {
-		putchar(message->text[i]);
-	}
-	printf("\n");
-	return (tuple1_1_smol_Unit_ptr){0};
-}
-]])
 
 	-- Generate a struct for each class
 	for _, class in ipairs(semantics.classes) do
@@ -957,6 +952,97 @@ tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 		end
 		table.insert(code, "")
 	end
+
+	table.insert(code, [[
+////////////////////////////////////////////////////////////////////////////////
+
+tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
+	// TODO: allow nulls, etc.
+	for (size_t i = 0; i < message->length; i++) {
+		putchar(message->text[i]);
+	}
+	printf("\n");
+	return (tuple1_1_smol_Unit_ptr){0};
+}
+
+// <Arrays>
+typedef struct {
+	size_t size;
+	void** data;
+} realarray;
+
+tuple1_1_smol_class_core_Array_T_ptr smol_static_core_Array_make() {
+	realarray* real = ALLOCATE(realarray);
+	real->size = 0;
+	real->data = NULL;
+
+	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
+	out->foreign = real;
+	return (tuple1_1_smol_class_core_Array_T_ptr){out};
+}
+
+tuple1_1_void_ptr smol_method_core_Array_get(smol_class_core_Array_T* this, smol_Int* smol_local_index) {
+	realarray* real = this->foreign;
+	void* out = real->data[smol_local_index->value];
+	return (tuple1_1_void_ptr){out};
+}
+
+tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_set(smol_class_core_Array_T* this, smol_Int* smol_local_index, void* smol_local_value) {
+	realarray* old = this->foreign;
+	realarray* prime = ALLOCATE(realarray);
+	prime->size = old->size;
+	prime->data = ALLOCATE_ARRAY(prime->size, void*);
+	for (size_t i = 0; i < old->size; i++) {
+		prime->data[i] = old->data[i];
+	}
+
+	// Update the value
+	prime->data[smol_local_index->value] = smol_local_value;
+
+	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
+	out->foreign = prime;
+	
+	return (tuple1_1_smol_class_core_Array_T_ptr){out};
+}
+
+tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_append(smol_class_core_Array_T* this, void* smol_local_value) {
+	realarray* old = this->foreign;
+	realarray* prime = ALLOCATE(realarray);
+	prime->size = old->size + 1;
+	prime->data = ALLOCATE_ARRAY(prime->size, void*);
+	for (size_t i = 0; i < old->size; i++) {
+		prime->data[i] = old->data[i];
+	}
+
+	// Update the value
+	prime->data[old->size] = smol_local_value;
+
+	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
+	out->foreign = prime;
+	
+	return (tuple1_1_smol_class_core_Array_T_ptr){out};
+}
+
+tuple1_1_smol_Int_ptr smol_method_core_Array_size(smol_class_core_Array_T* this) {
+	realarray* real = this->foreign;
+	smol_Int* out = ALLOCATE(smol_Int);
+	out->value = (int64_t)real->size;
+	return (tuple1_1_smol_Int_ptr){out};
+}
+
+tuple1_1_smol_String_ptr smol_static_ascii_ASCII_formatInt(smol_Int* smol_local_value) {
+	tuple1_1_smol_String_ptr out;
+	out._1 = ALLOCATE(smol_String);
+	out._1->text = ALLOCATE_ARRAY(32, char);
+	out._1->length = (size_t)sprintf(out._1->text, PRId64, smol_local_value->value);
+	return out;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+]])
+
+	demandTuple {"smol_String*"}
+	demandTuple {"smol_class_core_Array_T*"}
 
 	-- Generate the main function
 	table.insert(code, "// Main " .. semantics.main)
