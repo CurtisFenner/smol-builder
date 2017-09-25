@@ -1,0 +1,12 @@
+package test;
+
+import core;
+
+class Test {
+	static main!() Unit {
+		var out String = "hello";
+		do core:Out.println!(out);
+		out = "goodbye";
+		do core:Out.println!(out);
+	}
+}

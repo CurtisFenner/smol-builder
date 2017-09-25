@@ -2204,6 +2204,7 @@ local function semanticsSmol(sources, main)
 						}
 					end
 					table.insert(out, {
+						tag = "assign",
 						source = valueOut[i],
 						destination = variable,
 						returns = "no",
