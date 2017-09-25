@@ -171,13 +171,15 @@ local function lexSmol(source, filename)
 			"[.,:;!|()%[%]{}]",
 			function(x) return {tag = "punctuation"} end
 		},
-		{ -- assignment
-			"=",
-			function(x) return {tag = "assign"} end
-		},
-		{ -- operators
-			"[+%-*/%^<>=]+",
-			function(x) return {tag = "operator"} end
+		{
+			-- operators and assignment
+			"[+%-*/<>=%%^]+",
+			function(x)
+				if x == "=" then
+					return {tag = "assign"}
+				end
+				return {tag = "operator"}
+			end
 		},
 		{ -- integer literals
 			"[0-9]+",
@@ -975,6 +977,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"AssignSt",
 	"BlockSt",
 	"BooleanLoadSt",
+	"EqSt",
 	"FieldSt",
 	"GenericMethodCallSt",
 	"GenericStaticCallSt",
@@ -1131,6 +1134,14 @@ EXTEND_TYPE("UnitSt", "AbstractStatementIR", recordType {
 	returns = constantType "no",
 })
 
+EXTEND_TYPE("EqSt", "AbstractStatementIR", recordType {
+	tag = constantType "eq",
+	destination = "VariableIR",
+	left = "VariableIR",
+	right = "VariableIR",
+	returns = constantType "no",
+})
+
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "Type+",
@@ -1230,6 +1241,10 @@ class Array[#T] {
 	foreign method set(index Int, value #T) Array[#T];
 	foreign method append(value #T) Array[#T];
 	foreign method size() Int;
+
+	method swap(a Int, b Int) Array[#T] {
+		return this.set(a, this.get(b)).set(b, this.get(a));
+	}
 }
 
 class ASCII {

@@ -575,6 +575,13 @@ return function(semantics, arguments)
 	}
 
 #define CLOSURE_CALL(closure, ...) (closure.func(closure.data, __VA_ARGS__))
+
+typedef struct {
+	void* instance;
+	(int *eq)(void*, void*);
+	(void *destruct)(void*);
+} object;
+
 ]])
 
 	local forwardSequence = {}

@@ -174,6 +174,12 @@ function Report.TYPES_DONT_MATCH(p)
 		"\nHowever, `", p.givenType, "` was provided at ", p.location)
 end
 
+function Report.EQ_TYPE_MISMATCH(p)
+	quit("The operands of `==` must be of the same type.",
+		"\nHowever, the left operand to `==` is of type `", p.leftType,
+		"` while the right operand is of type `", p.rightType, "` ", p.location)
+end
+
 function Report.NO_SUCH_FIELD(p)
 	quit("The type `", p.container, "` does not have a field called `",
 		p.name, "`",
@@ -250,6 +256,11 @@ end
 function Report.MAIN_MUST_NOT_BE_GENERIC(p)
 	quit("The class `" .. p.name .. "` is generic, so it cannot be used as",
 		" a main class.")
+end
+
+function Report.UNKNOWN_OPERATOR_USED(p)
+	quit("You try to use the undefined operator `", p.operator, "` ",
+		p.location)
 end
 
 return Report

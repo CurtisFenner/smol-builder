@@ -25,9 +25,21 @@ class MinHeap[#T | #T is Orderable[#T]] {
 		return new(sequence = sequence);
 	}
 
+	static bubbleUp(list core:Array[#T], index Int) core:Array[#T] {
+		if index == 0 {
+			return list;
+		}
+
+		var parent Int = index.divide(2);
+		if list.get(index).lessThan(list.get(parent)) {
+			return MinHeap[#T].bubbleUp(list.swap(index, parent), parent);
+		}
+		return list;
+	}
+
 	method insert(value #T) MinHeap[#T] {
 		var modified core:Array[#T] = this.sequence.append(value);
-		modified = MinHeap[#T].bubbleUp(modified, modified.size().lastIndex());
+		modified = MinHeap[#T].bubbleUp(modified, modified.size().minus(1));
 		return MinHeap[#T].makeArray(modified);
 	}
 }

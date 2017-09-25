@@ -1922,6 +1922,66 @@ local function semanticsSmol(sources, main)
 					returns = "no",
 				}
 				return buildBlock {baseEvaluation, localSt(result), accessStatement}, {result}
+			elseif pExpression.tag == "binary" then
+				-- Compile the two operands
+				local leftEvaluation, leftOut = compileExpression(pExpression.left, scope)
+				local rightEvaluation, rightOut = compileExpression(pExpression.right, scope)
+
+				-- Verify there is one value on each side
+				if #leftOut ~= 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "the left operand of `" .. pExpression.operator .. "`",
+						expectedCount = 1,
+						givenCount = #leftOut,
+						location = pExpression.left.location,
+					}
+				elseif #rightOut ~= 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "the right operand of `" .. pExpression.operator .. "`",
+						expectedCount = 1,
+						givenCount = #rightOut,
+						location = pExpression.right.location,
+					}
+				end
+
+				local left, right = leftOut[1], rightOut[1]
+
+				-- Handle specific operators
+				if pExpression.operator == "==" then
+					-- Check that the values are of the same type
+					if not areTypesEqual(left.type, right.type) then
+						Report.EQ_TYPE_MISMATCH {
+							leftType = showType(left.type),
+							rightType = showType(right.type),
+							location = pExpression.location,
+						}
+					end
+
+					-- Define the output variable
+					local out = {
+						type = BOOLEAN_TYPE,
+						name = generateLocalID("eq"),
+						location = pExpression.location,
+					}
+
+					-- Construct the eq statement
+					local eq = {
+						tag = "eq",
+						destination = out,
+						left = left,
+						right = right,
+						returns = "no",
+					}
+
+					local block = buildBlock {leftEvaluation, rightEvaluation, localSt(out), eq}
+					return block, {out}
+				end
+
+				print(show(pExpression))
+				return Report.UNKNOWN_OPERATOR_USED {
+					operator = pExpression.operator,
+					location = pExpression.location,
+				}
 			end
 
 			error("TODO expression: " .. show(pExpression))
