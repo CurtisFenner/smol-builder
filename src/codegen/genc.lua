@@ -1001,7 +1001,6 @@ struct _smol_Int {
 ////////////////////////////////////////////////////////////////////////////////
 
 tuple1_1_smol_Boolean_ptr smol_method_Int_isPositive(smol_Int* this) {
-
 	tuple1_1_smol_Boolean_ptr out;
 	out._1 = ALLOCATE(smol_Boolean);
 	out._1->value = this->value > 0;
@@ -1012,6 +1011,13 @@ tuple1_1_smol_Int_ptr smol_method_Int_negate(smol_Int* this) {
 	tuple1_1_smol_Int_ptr out;
 	out._1 = ALLOCATE(smol_Int);
 	out._1->value = -this->value;
+	return out;
+}
+
+tuple1_1_smol_Boolean_ptr smol_method_Int_lessThan(smol_Int* this, smol_Int* smol_local_one) {
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = this->value < smol_local_one->value;
 	return out;
 }
 

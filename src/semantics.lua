@@ -881,7 +881,7 @@ local function semanticsSmol(sources, main)
 				if not cSignature then
 					Report.INTERFACE_REQUIRES_MEMBER {
 						class = class.name,
-						interface = showType(int),
+						interface = showInterfaceType(int),
 						implementsLocation = int.location,
 						memberLocation = iSignature.location,
 						memberName = iSignature.name,
@@ -893,7 +893,7 @@ local function semanticsSmol(sources, main)
 					Report.INTERFACE_REQUIRES_MODIFIER {
 						name = cSignature.name,
 						class = class.name,
-						interface = showType(int),
+						interface = showInterfaceType(int),
 						classModifier = cSignature.modifier,
 						interfaceModifier = iSignature.modifier,
 						classLocation = cSignature.location,
@@ -907,7 +907,7 @@ local function semanticsSmol(sources, main)
 						class = class.name,
 						classLocation = cSignature.location,
 						classCount = #cSignature.parameters,
-						interface = showType(int),
+						interface = showInterfaceType(int),
 						interfaceLocation = iSignature.location,
 						interfaceCount = #iSignature.parameters,
 					}
@@ -922,7 +922,7 @@ local function semanticsSmol(sources, main)
 							class = class.name,
 							classLocation = cParameter.location,
 							classType = showType(cType),
-							interface = showType(int),
+							interface = showInterfaceType(int),
 							interfaceLocation = iParameter.location,
 							interfaceType = showType(iType),
 							index = k,
@@ -934,7 +934,7 @@ local function semanticsSmol(sources, main)
 				if #cSignature.returnTypes ~= #iSignature.returnTypes then
 					Report.INTERFACE_RETURN_COUNT_MISMATCH {
 						class = class.name,
-						interface = showType(int),
+						interface = showInterfaceType(int),
 						classLocation = cSignature.location,
 						interfaceLocation = iSignature.location,
 						classCount = #cSignature.returnTypes,
@@ -2172,6 +2172,45 @@ local function semanticsSmol(sources, main)
 				assertis(conditionEvaluation, "StatementIR")
 				assertis(ifSt, "StatementIR")
 				return buildBlock({conditionEvaluation, ifSt})
+			elseif pStatement.tag == "assign-statement" then
+				local out = {}
+
+				-- Evaluate the right-hand-side
+				local valueEvaluation, valueOut = compileExpression(pStatement.value, scope)
+				if #valueOut ~= #pStatement.variables then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "assignment statement",
+						expectedCount = #pStatement.variables,
+						givenCount = #valueOut,
+						location = pStatement.value.location,
+					}
+				end
+				table.insert(out, valueEvaluation)
+
+				-- Check the left hand side
+				for i, pVariable in ipairs(pStatement.variables) do
+					assertis(pVariable, "string")
+					local variable = getFromScope(scope, pVariable)
+					if not variable then
+						Report.NO_SUCH_VARIABLE {
+							name = pVariable,
+							location = pStatement.location,
+						}
+					elseif not areTypesEqual(valueOut[i].type, variable.type) then
+						Report.TYPES_DONT_MATCH {
+							purpose = string.ordinal(i) .. " value in the assignment statement",
+							expectedType = showType(variable.type),
+							expectedLocation = variable.location,
+						}
+					end
+					table.insert(out, {
+						source = valueOut[i],
+						destination = variable,
+						returns = "no",
+					})
+				end
+
+				return buildBlock(out)
 			end
 			error("TODO: compileStatement(" .. show(pStatement) .. ")")
 		end

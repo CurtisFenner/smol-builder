@@ -718,7 +718,7 @@ local function parseSmol(tokens)
 
 		["assign-statement"] = parser.composite {
 			tag = "assign-statement",
-			{"variables", parser.query "expression,1+"}, -- XXX: this should be a variable
+			{"variables", parser.delimited(T_IDENTIFIER, "1+", ",", "a variable name")},
 			{"_", K_EQUAL, "`=` after variable"},
 			{"value", parser.named "expression", "an expression after `=`"},
 			{"_", K_SEMICOLON, "`;` to end assign-statement"},
