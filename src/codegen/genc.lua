@@ -172,21 +172,6 @@ local function unionStructName(name)
 	return "smol_union_" .. name:gsub(":", "_") .. "_T"
 end
 
--- RETURNS a string that is a Lua identifier
-local function variableToLuaLocal(variable)
-	assertis(variable, "VariableIR")
-
-	return localName(variable.name)
-end
-
--- RETURNS a string
-local function variablesToLuaList(variables)
-	assertis(variables, listType "VariableIR")
-
-	local identifiers = table.map(variableToLuaLocal, variables)
-	return table.concat(identifiers, ", ")
-end
-
 -- RETURNS a C struct field identifier
 -- name must be a constraint "name", e.g., "2_3"
 local function structConstraintField(name)
@@ -578,9 +563,9 @@ return function(semantics, arguments)
 
 typedef struct {
 	void* instance;
-	(int *eq)(void*, void*);
-	(void *destruct)(void*);
-} object;
+	int (*eq)(void*, void*);
+	void (*destruct)(void*);
+} object_t;
 
 ]])
 

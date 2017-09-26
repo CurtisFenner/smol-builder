@@ -30,7 +30,7 @@ class MinHeap[#T | #T is Orderable[#T]] {
 			return list;
 		}
 
-		var parent Int = index.divide(2);
+		var parent Int = 0; //index.divide(2);
 		if list.get(index).lessThan(list.get(parent)) {
 			return MinHeap[#T].bubbleUp(list.swap(index, parent), parent);
 		}
@@ -39,7 +39,7 @@ class MinHeap[#T | #T is Orderable[#T]] {
 
 	method insert(value #T) MinHeap[#T] {
 		var modified core:Array[#T] = this.sequence.append(value);
-		modified = MinHeap[#T].bubbleUp(modified, modified.size().minus(1));
+		modified = MinHeap[#T].bubbleUp(modified, 0); //modified.size().minus(1));
 		return MinHeap[#T].makeArray(modified);
 	}
 }

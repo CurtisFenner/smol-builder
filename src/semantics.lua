@@ -1663,6 +1663,7 @@ local function semanticsSmol(sources, main)
 						pExpression.methodName,
 						pExpression.location
 					)
+					assertis(method.signature, "Signature")
 
 					local substituter = getSubstituterFromConcreteType(method.constraint, allDefinitions)
 					assertis(substituter, "function")
@@ -1681,12 +1682,12 @@ local function semanticsSmol(sources, main)
 
 					-- Verify the types of the arguments match the parameters
 					for i, argument in ipairs(arguments) do
-						local expectedType = substituter(method.parameters[i].type)
+						local expectedType = substituter(method.signature.parameters[i].type)
 						if not areTypesEqual(argument.type, expectedType) then
 							Report.TYPES_DONT_MATCH {
 								purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
 								expectedType =	showType(expectedType),
-								expectedLocation = method.parameters[i].location,
+								expectedLocation = method.signature.parameters[i].location,
 								givenType = showType(argument.type),
 								location = argument.location,
 							}
