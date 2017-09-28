@@ -1231,6 +1231,7 @@ class Array[#T] {
 	foreign method get(index Int) #T;
 	foreign method set(index Int, value #T) Array[#T];
 	foreign method append(value #T) Array[#T];
+	foreign method pop() Array[#T];
 	foreign method size() Int;
 
 	method swap(a Int, b Int) Array[#T] {
@@ -1240,6 +1241,27 @@ class Array[#T] {
 
 class ASCII {
 	foreign static formatInt(value Int) String;
+}
+
+class ArrayShower[#T | #T is Showable] {
+	static inner(array Array[#T], index Int) String {
+		if array.size() == index {
+			return "";
+		} elseif index == 0 {
+			return array.get(0).show() ++ ArrayShower[#T].inner(array, 1);
+		}
+		return (", " ++ array.get(index).show()) ++ ArrayShower[#T].inner(array, index + 1);
+	}
+
+	static show(array Array[#T]) String {
+		var inner String = ArrayShower[#T].inner(array, 0);
+		return ("[" ++ inner) ++ "]";
+	}
+}
+
+interface Showable {
+	static showType() String;
+	method show() String;
 }
 
 ]]

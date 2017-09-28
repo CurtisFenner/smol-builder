@@ -572,6 +572,8 @@ return function(semantics, arguments)
 #define ALLOCATE(T) ((T*)malloc(sizeof(T)))
 #define ALLOCATE_ARRAY(size, T) ((T*)malloc(size * sizeof(T)))
 
+#define PANIC(message) do { printf(message "\n"); exit(1); } while (0)
+
 // NOTE: closures must take at least one argument
 #define CLOSURE(returnType, ...)                \
 	struct {                                    \
@@ -1058,6 +1060,20 @@ tuple1_1_smol_Int_ptr smol_method_Int_difference(smol_Int* this, smol_Int* smol_
 	return out;
 }
 
+tuple1_1_smol_String_ptr smol_method_String_concatenate(smol_String* this, smol_String* other) {
+	tuple1_1_smol_String_ptr out;
+	out._1 = ALLOCATE(smol_String);
+	out._1->length = this->length + other->length;
+	out._1->text = ALLOCATE_ARRAY(out._1->length, char);
+	for (size_t i = 0; i < this->length; i++) {
+		out._1->text[i] = this->text[i];
+	}
+	for (size_t i = 0; i < other->length; i++) {
+		out._1->text[i + this->length] = other->text[i];
+	}
+	return out;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
@@ -1087,12 +1103,23 @@ tuple1_1_smol_class_core_Array_T_ptr smol_static_core_Array_make() {
 
 tuple1_1_void_ptr smol_method_core_Array_get(smol_class_core_Array_T* this, smol_Int* smol_local_index) {
 	realarray* real = this->foreign;
+	if (smol_local_index->value < 0) {
+		PANIC("negative array index");
+	} else if (smol_local_index->value >= (int)real->size) {
+		PANIC("past end array index");
+	}
 	void* out = real->data[smol_local_index->value];
 	return (tuple1_1_void_ptr){out};
 }
 
 tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_set(smol_class_core_Array_T* this, smol_Int* smol_local_index, void* smol_local_value) {
 	realarray* old = this->foreign;
+	if (smol_local_index->value < 0) {
+		PANIC("negative array index");
+	} else if (smol_local_index->value >= (int)old->size) {
+		PANIC("past end array index");
+	}
+
 	realarray* prime = ALLOCATE(realarray);
 	prime->size = old->size;
 	prime->data = ALLOCATE_ARRAY(prime->size, void*);
@@ -1120,6 +1147,21 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_append(smol_class_co
 
 	// Update the value
 	prime->data[old->size] = smol_local_value;
+
+	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
+	out->foreign = prime;
+	
+	return (tuple1_1_smol_class_core_Array_T_ptr){out};
+}
+
+tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_pop(smol_class_core_Array_T* this) {
+	realarray* old = this->foreign;
+	realarray* prime = ALLOCATE(realarray);
+	prime->size = old->size - 1;
+	prime->data = ALLOCATE_ARRAY(prime->size, void*);
+	for (size_t i = 0; i < old->size - 1; i++) {
+		prime->data[i] = old->data[i];
+	}
 
 	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
 	out->foreign = prime;

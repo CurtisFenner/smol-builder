@@ -461,7 +461,17 @@ local BUILTIN_DEFINITIONS = freeze {
 		type = STRING_TYPE,
 		name = "String",
 		tag = "builtin",
-		signatures = {},
+		signatures = {
+			{
+				name = "concatenate",
+				parameters = {{location = "<builtin>", name = "other", type = STRING_TYPE}},
+				returnTypes = {STRING_TYPE},
+				modifier = "method",
+				container = "String",
+				foreign = true,
+				bang = false,
+			},
+		},
 	},
 	{
 		type = BOOLEAN_TYPE,
@@ -2019,6 +2029,7 @@ local function semanticsSmol(sources, main)
 					["+"] = "sum",
 					["-"] = "difference",
 					["<"] = "lessThan",
+					["++"] = "concatenate",
 				}
 
 				local methodName = remap[pExpression.operator]
