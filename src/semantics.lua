@@ -1968,27 +1968,6 @@ local function semanticsSmol(sources, main)
 					}
 
 					return compileExpression(rewrite, scope)
-
-					--[[
-					-- Define the output variable
-					local out = {
-						type = BOOLEAN_TYPE,
-						name = generateLocalID("eq"),
-						location = pExpression.location,
-					}
-
-					-- Construct the eq statement
-					local eq = {
-						tag = "eq",
-						destination = out,
-						left = left,
-						right = right,
-						returns = "no",
-					}
-
-					local block = buildBlock {leftEvaluation, rightEvaluation, localSt(out), eq}
-					return block, {out}
-					]]
 				end
 
 				print(show(pExpression))
