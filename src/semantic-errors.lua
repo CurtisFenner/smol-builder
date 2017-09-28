@@ -263,4 +263,8 @@ function Report.UNKNOWN_OPERATOR_USED(p)
 		p.location)
 end
 
+function Report.THIS_USED_OUTSIDE_METHOD(p)
+	quit("You try to use `this` in a non-static function ", p.location)
+end
+
 return Report

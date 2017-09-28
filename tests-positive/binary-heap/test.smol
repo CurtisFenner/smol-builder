@@ -29,10 +29,28 @@ class MinBinaryHeap[#T | #T is Orderable[#T]] {
 		return true;
 	}
 
+	static zLeftChild(index Int) Int {
+		return index * 2;
+	}
+	static zRightChild(index Int) Int {
+		return (index * 2) + 1;
+	}
+	static zParent(index Int) Int {
+		return index / 2;
+	}
+
 	static bubbleUp(list core:Array[#T], index Int) core:Array[#T] {
-		var parent Int = 0; //index.divide(2);
-		if list.get(index).lessThan(list.get(parent)) {
-			return MinBinaryHeap[#T].bubbleUp(list.swap(index, parent), parent);
+		if index == 0 {
+			return list;
+		}
+
+
+		var parentIndex Int = MinBinaryHeap[#T].zParent(index);
+
+
+		if list.get(index) < list.get(parentIndex) {
+
+			return MinBinaryHeap[#T].bubbleUp(list.swap(index, parentIndex), parentIndex);
 		}
 		return list;
 	}
@@ -41,6 +59,10 @@ class MinBinaryHeap[#T | #T is Orderable[#T]] {
 		var modified core:Array[#T] = this.sequence.append(value);
 		modified = MinBinaryHeap[#T].bubbleUp(modified, 0); //modified.size().minus(1));
 		return MinBinaryHeap[#T].make(modified);
+	}
+
+	method remove() MinBinaryHeap[#T], #T {
+		return this, this.sequence.get(0);
 	}
 }
 
@@ -59,15 +81,45 @@ class N is Orderable[N] {
 	method lessThan(other N) Boolean {
 		return this.value.lessThan(other.value);
 	}
+
+	// RETURNS the value this represents
+	method get() Int {
+		return this.value;
+	}
 }
 
 class Test {
 	static main!() Unit {
 		var heap MinBinaryHeap[N] = MinBinaryHeap[N].makeEmpty();
+		heap = heap.insert(N.make(7));
+		heap = heap.insert(N.make(4));
+		heap = heap.insert(N.make(3));
+		heap = heap.insert(N.make(6));
+		heap = heap.insert(N.make(5));
+		heap = heap.insert(N.make(2));
+		heap = heap.insert(N.make(1));
 
-		do core:Out.println!(core:ASCII.formatInt(1));
-		do core:Out.println!(core:ASCII.formatInt(2));
-		do core:Out.println!(core:ASCII.formatInt(3));
-		do core:Out.println!(core:ASCII.formatInt(4));
+		var element N = N.make(1);
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
+
+		heap, element = heap.remove();
+		do core:Out.println!(core:ASCII.formatInt(element.get()));
 	}
 }

@@ -1030,6 +1030,34 @@ tuple1_1_smol_Boolean_ptr smol_method_Int_eq(smol_Int* this, smol_Int* smol_loca
 	return out;
 }
 
+tuple1_1_smol_Int_ptr smol_method_Int_quotient(smol_Int* this, smol_Int* smol_local_other) {
+	tuple1_1_smol_Int_ptr out;
+	out._1 = ALLOCATE(smol_Int);
+	out._1->value = this->value / smol_local_other->value;
+	return out;
+}
+
+tuple1_1_smol_Int_ptr smol_method_Int_product(smol_Int* this, smol_Int* smol_local_other) {
+	tuple1_1_smol_Int_ptr out;
+	out._1 = ALLOCATE(smol_Int);
+	out._1->value = this->value * smol_local_other->value;
+	return out;
+}
+
+tuple1_1_smol_Int_ptr smol_method_Int_sum(smol_Int* this, smol_Int* smol_local_other) {
+	tuple1_1_smol_Int_ptr out;
+	out._1 = ALLOCATE(smol_Int);
+	out._1->value = this->value + smol_local_other->value;
+	return out;
+}
+
+tuple1_1_smol_Int_ptr smol_method_Int_difference(smol_Int* this, smol_Int* smol_local_other) {
+	tuple1_1_smol_Int_ptr out;
+	out._1 = ALLOCATE(smol_Int);
+	out._1->value = this->value - smol_local_other->value;
+	return out;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {

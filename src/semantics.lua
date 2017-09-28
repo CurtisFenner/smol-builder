@@ -419,6 +419,42 @@ local BUILTIN_DEFINITIONS = freeze {
 				foreign = true,
 				bang = false,
 			},
+			{
+				name = "quotient",
+				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				returnTypes = {INT_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
+			{
+				name = "product",
+				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				returnTypes = {INT_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
+			{
+				name = "sum",
+				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				returnTypes = {INT_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
+			{
+				name = "difference",
+				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				returnTypes = {INT_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
 		},
 	},
 	{
@@ -1855,6 +1891,14 @@ local function semanticsSmol(sources, main)
 						name = generateLocalID("this"),
 						location = pExpression.location,
 					}
+
+					-- Check that this is a method
+					if containingSignature.modifier ~= "method" then
+						Report.THIS_USED_OUTSIDE_METHOD {
+							location = pExpression.location,
+						}
+					end
+
 					local execution = {
 						localSt(variable),
 						{
@@ -1966,24 +2010,36 @@ local function semanticsSmol(sources, main)
 							location = pExpression.location,
 						}
 					end
-
-					local rewrite = freeze {
-						tag = "method-call",
-						base = pExpression.left,
-						bang = false,
-						arguments = {pExpression.right},
-						methodName = "eq",
-						location = pExpression.location,
-					}
-
-					return compileExpression(rewrite, scope)
 				end
 
-				print(show(pExpression))
-				return Report.UNKNOWN_OPERATOR_USED {
-					operator = pExpression.operator,
+				local remap = {
+					["=="] = "eq",
+					["/"] = "quotient",
+					["*"] = "product",
+					["+"] = "sum",
+					["-"] = "difference",
+					["<"] = "lessThan",
+				}
+
+				local methodName = remap[pExpression.operator]
+				if not methodName then
+					return Report.UNKNOWN_OPERATOR_USED {
+						operator = pExpression.operator,
+						location = pExpression.location,
+					}
+				end
+
+				-- Rewrite the operations as a method call
+				local rewrite = freeze {
+					tag = "method-call",
+					base = pExpression.left,
+					bang = false,
+					arguments = {pExpression.right},
+					methodName = methodName,
 					location = pExpression.location,
 				}
+
+				return compileExpression(rewrite, scope)
 			end
 
 			error("TODO expression: " .. show(pExpression))
