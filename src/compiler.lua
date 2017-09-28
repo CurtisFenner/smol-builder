@@ -1264,6 +1264,30 @@ interface Showable {
 	method show() String;
 }
 
+union Option[#T] {
+	var some #T;
+	var none Unit;
+
+	static makeSome(value #T) Option[#T] {
+		return new(some = value);
+	}
+
+	static makeNone() Option[#T] {
+		return new(none = unit);
+	}
+}
+
+interface Orderable[#T] {
+	// RETURNS true when this is smaller than other in this ordering.
+	method lessThan(other #T) Boolean;
+}
+
+interface Eq[#T] {
+	// RETURNS true when these elements are equal such that
+	// (a == b) => f(a) == f(b)
+	method eq(other #T) Boolean;
+}
+
 ]]
 })
 

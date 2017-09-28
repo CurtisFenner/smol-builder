@@ -1,20 +1,7 @@
 package test;
 import core;
 
-union Option[#T] {
-	var some #T;
-	var none Unit;
-
-	static makeSome(value #T) Option[#T] {
-		return new(some = value);
-	}
-
-	static makeNone() Option[#T] {
-		return new(none = unit);
-	}
-}
-
-class MinBinaryHeap[#T | #T is Orderable[#T], #T is core:Showable] {
+class MinBinaryHeap[#T | #T is core:Orderable[#T], #T is core:Showable] {
 	var sequence core:Array[#T];
 
 	static makeEmpty() MinBinaryHeap[#T] {
@@ -89,12 +76,7 @@ class MinBinaryHeap[#T | #T is Orderable[#T], #T is core:Showable] {
 	}
 }
 
-interface Orderable[#T] {
-	// RETURNS true when this is smaller than other in this ordering.
-	method lessThan(other #T) Boolean;
-}
-
-class N is Orderable[N], core:Showable {
+class N is core:Orderable[N], core:Showable {
 	var value Int;
 
 	static make(value Int) N {
