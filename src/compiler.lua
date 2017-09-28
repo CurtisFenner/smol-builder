@@ -770,6 +770,11 @@ local function parseSmol(tokens)
 			-- XXX: no precedence yet; assume left-associative
 			local out = x.base
 			assertis(out.tag, "string")
+
+			if #x.operations >= 2 then
+				quit("You must explicitly parenthesize the operators ", x.operations[2].location)
+			end
+
 			for _, operation in ipairs(x.operations) do
 				out = {
 					tag = "binary",
@@ -778,11 +783,6 @@ local function parseSmol(tokens)
 					operator = operation.operator,
 				}
 				assert(isstring(out.operator))
-				if out.left.tag == "binary" then
-					if out.left.operator ~= out.operator then
-						print("warning: operator precedence is not yet implemented")
-					end
-				end
 			end
 			assert(out)
 			return out

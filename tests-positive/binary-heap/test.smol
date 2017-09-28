@@ -44,15 +44,37 @@ class MinBinaryHeap[#T | #T is Orderable[#T]] {
 			return list;
 		}
 
-
 		var parentIndex Int = MinBinaryHeap[#T].zParent(index);
 
-
 		if list.get(index) < list.get(parentIndex) {
-
 			return MinBinaryHeap[#T].bubbleUp(list.swap(index, parentIndex), parentIndex);
 		}
 		return list;
+	}
+
+	static bubbleDown(list core:Array[#T], index Int) core:Array[#T] {
+		var a Int = MinBinaryHeap[#T].zLeftChild(index);
+		var b Int = MinBinaryHeap[#T].zRightChild(index);
+		if (list.size() - 1) < a {
+			return list;
+		} elseif (list.size() - 1) < b {
+			if list.get(a) < list.get(index) {
+				return MinBinaryHeap[#T].bubbleDown(list.swap(index, a), a);
+			}
+			return list;
+		}
+
+		if list.get(a) < list.get(b) {
+			if list.get(a) < list.get(index) {
+				return MinBinaryHeap[#T].bubbleDown(list.swap(index, a), a);
+			}
+			return list;
+		} else {
+			if list.get(b) < list.get(index) {
+				return MinBinaryHeap[#T].bubbleDown(list.swap(index, b), b);
+			}
+			return list;
+		}
 	}
 
 	method insert(value #T) MinBinaryHeap[#T] {
@@ -62,7 +84,7 @@ class MinBinaryHeap[#T | #T is Orderable[#T]] {
 	}
 
 	method remove() MinBinaryHeap[#T], #T {
-		return this, this.sequence.get(0);
+		return MinBinaryHeap[#T].make(MinBinaryHeap[#T].bubbleDown(this.sequence.swap(0, this.sequence.size()-1), 0)), this.sequence.get(0);
 	}
 }
 
