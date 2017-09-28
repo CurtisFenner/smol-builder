@@ -203,7 +203,7 @@ local function cConstraint(constraint, semantics)
 	elseif constraint.tag == "concrete-constraint" then
 		local func = concreteConstraintFunctionName(constraint.concrete.name, constraint.interface.name)
 		local class = table.findwith(semantics.classes, "name", constraint.concrete.name)
-		local union = table.findwith(semantics.unions, "name"< constraint.concrete.name)
+		local union = table.findwith(semantics.unions, "name", constraint.concrete.name)
 		local definition = class or union
 		assertis(definition, recordType {generics = listType "TypeParameterIR"})
 

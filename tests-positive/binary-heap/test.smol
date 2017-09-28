@@ -14,33 +14,33 @@ union Option[#T] {
 	}
 }
 
-class MinHeap[#T | #T is Orderable[#T]] {
+class MinBinaryHeap[#T | #T is Orderable[#T]] {
 	var sequence core:Array[#T];
 
-	static make() MinHeap[#T] {
+	static makeEmpty() MinBinaryHeap[#T] {
 		return new(sequence = core:Array[#T].make());
 	}
 
-	static makeArray(sequence core:Array[#T]) MinHeap[#T] {
+	static make(sequence core:Array[#T]) MinBinaryHeap[#T] {
 		return new(sequence = sequence);
 	}
 
-	static bubbleUp(list core:Array[#T], index Int) core:Array[#T] {
-		if index == 0 {
-			return list;
-		}
+	static heapProperty(sequence core:Array[#T]) Boolean {
+		return true;
+	}
 
+	static bubbleUp(list core:Array[#T], index Int) core:Array[#T] {
 		var parent Int = 0; //index.divide(2);
 		if list.get(index).lessThan(list.get(parent)) {
-			return MinHeap[#T].bubbleUp(list.swap(index, parent), parent);
+			return MinBinaryHeap[#T].bubbleUp(list.swap(index, parent), parent);
 		}
 		return list;
 	}
 
-	method insert(value #T) MinHeap[#T] {
+	method insert(value #T) MinBinaryHeap[#T] {
 		var modified core:Array[#T] = this.sequence.append(value);
-		modified = MinHeap[#T].bubbleUp(modified, 0); //modified.size().minus(1));
-		return MinHeap[#T].makeArray(modified);
+		modified = MinBinaryHeap[#T].bubbleUp(modified, 0); //modified.size().minus(1));
+		return MinBinaryHeap[#T].make(modified);
 	}
 }
 
@@ -63,6 +63,8 @@ class N is Orderable[N] {
 
 class Test {
 	static main!() Unit {
+		var heap MinBinaryHeap[N] = MinBinaryHeap[N].makeEmpty();
+
 		do core:Out.println!(core:ASCII.formatInt(1));
 		do core:Out.println!(core:ASCII.formatInt(2));
 		do core:Out.println!(core:ASCII.formatInt(3));
