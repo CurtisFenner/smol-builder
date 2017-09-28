@@ -410,6 +410,15 @@ local BUILTIN_DEFINITIONS = freeze {
 				foreign = true,
 				bang = false,
 			},
+			{
+				name = "eq",
+				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Int",
+				foreign = true,
+				bang = false,
+			},
 		},
 	},
 	{
