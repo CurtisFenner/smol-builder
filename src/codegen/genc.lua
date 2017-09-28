@@ -172,6 +172,18 @@ local function unionStructName(name)
 	return "smol_union_" .. name:gsub(":", "_") .. "_T"
 end
 
+-- RETURNS a string representing a C type
+local function cDefinitionType(definition)
+	if definition.tag == "class" then
+		return classStructName(definition.name) .. "*"
+	elseif definition.tag == "union" then
+		return unionStructName(definition.name) .. "*"
+	elseif definition.tag == "builtin" then
+		return "smol_" .. definition.name .. "*"
+	end
+	error("unknown definition tag `" .. definition.tag .. "`")
+end
+
 -- RETURNS a C struct field identifier
 -- name must be a constraint "name", e.g., "2_3"
 local function structConstraintField(name)
@@ -528,6 +540,14 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 	
 	comment(statement.tag .. " ????")
 	print("unknown statement tag `" .. statement.tag .. "`")
+end
+
+-- RETURNS a C function identifier
+local function cEqMethodName(kind, name)
+	assert(kind == "class" or kind == "union")
+	assertis(name, "string")
+	
+	return "smol_eq_" .. kind .. "_" .. name:gsub(":", "_")
 end
 
 return function(semantics, arguments)
@@ -919,20 +939,10 @@ struct _smol_Int {
 		local fullName = func.definitionName .. "." .. func.name
 		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
 
-		local thisType
 		local definition = table.findwith(semantics.classes, "name", func.definitionName)
 			or table.findwith(semantics.unions, "name", func.definitionName)
 		assert(definition)
-		if definition.tag == "class" then
-			thisType = classStructName(definition.name) .. "*"
-		elseif definition.tag == "union" then
-			thisType = unionStructName(definition.name) .. "*"
-		elseif definition.tag == "builtin" then
-			thisType = "smol_" .. definition.name .. "*"
-		else
-			error("unknown definition tag `" .. definition.tag .. "`")
-		end
-		assert(definition)
+		local thisType = cDefinitionType(definition)
 
 		-- Generate function header
 		local cFunctionName

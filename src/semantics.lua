@@ -1958,6 +1958,18 @@ local function semanticsSmol(sources, main)
 						}
 					end
 
+					local rewrite = freeze {
+						tag = "method-call",
+						base = pExpression.left,
+						bang = false,
+						arguments = {pExpression.right},
+						methodName = "eq",
+						location = pExpression.location,
+					}
+
+					return compileExpression(rewrite, scope)
+
+					--[[
 					-- Define the output variable
 					local out = {
 						type = BOOLEAN_TYPE,
@@ -1976,6 +1988,7 @@ local function semanticsSmol(sources, main)
 
 					local block = buildBlock {leftEvaluation, rightEvaluation, localSt(out), eq}
 					return block, {out}
+					]]
 				end
 
 				print(show(pExpression))

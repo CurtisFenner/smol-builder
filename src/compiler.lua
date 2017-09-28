@@ -977,7 +977,6 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"AssignSt",
 	"BlockSt",
 	"BooleanLoadSt",
-	"EqSt",
 	"FieldSt",
 	"GenericMethodCallSt",
 	"GenericStaticCallSt",
@@ -1131,14 +1130,6 @@ EXTEND_TYPE("ThisSt", "AbstractStatementIR", recordType {
 EXTEND_TYPE("UnitSt", "AbstractStatementIR", recordType {
 	tag = constantType "unit",
 	destination = "VariableIR",
-	returns = constantType "no",
-})
-
-EXTEND_TYPE("EqSt", "AbstractStatementIR", recordType {
-	tag = constantType "eq",
-	destination = "VariableIR",
-	left = "VariableIR",
-	right = "VariableIR",
 	returns = constantType "no",
 })
 
