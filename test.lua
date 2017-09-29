@@ -113,6 +113,10 @@ local function compiler(sources, main)
 		" --main ", main,
 	}
 
+	local command = table.concat {
+		"smolc.bat ", sources, " ", main
+	}
+
 	local status = os.execute(command)
 	while status > 255 do
 		status = status / 256

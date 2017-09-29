@@ -46,9 +46,9 @@ local codegen = {
 
 local function quitUsage()
 	quit("USAGE:\n", "\tlua compiler.lua"
-		.. " --sources <directory containing .smol files>"
+		.. " --sources <sequence of one-or-more .smol files>"
 		.. " --main <mainpackage:Mainclass>"
-		.. "\n\n\tFor example, `lua compiler.lua --sources foo/ --main main:Main`")
+		.. "\n\n\tFor example, `lua compiler.lua --sources foo.smol --main main:Main`")
 end
 
 local commandMap = {}
@@ -71,7 +71,7 @@ end
 -- Check the command line arguments
 if not commandMap.main or #commandMap.main ~= 1 then
 	quitUsage()
-elseif not commandMap.sources or #commandMap.sources ~= 1 then
+elseif not commandMap.sources or #commandMap.sources == 0 then
 	quitUsage()
 end
 
@@ -1199,21 +1199,25 @@ REGISTER_TYPE("GenericType+", recordType {
 
 -- Main ------------------------------------------------------------------------
 
-
-local sourceDirectory = commandMap.sources[1]
-local mainFunction = commandMap.main[1]
-
--- Collect a set of source files to compile
-local sourceFiles = {}
--- XXX: portability
-local PATH_SEP = "/" -- XXX
-for line in io.popen("ls " .. sourceDirectory:gsub("\\", "/")):lines() do -- XXX
-	if line:match("^.+%.smol$") then
-		table.insert(sourceFiles, {
-			path = sourceDirectory .. PATH_SEP .. line,
-			short = line,
-		})
+local function commonPrefix(list)
+	assert(#list >= 1)
+	local out = list[1]
+	for i = 2, #list do
+		while list[i]:sub(1, #out) ~= out do
+			-- Shorten
+			out = out:sub(1, -2)
+		end
 	end
+	return out
+end
+
+local common = commonPrefix(commandMap.sources):gsub("[a-zA-Z_0-9]+$", "")
+local sourceFiles = {}
+for _, source in ipairs(commandMap.sources) do
+	table.insert(sourceFiles, {
+		path = source,
+		short = source:sub(#common + 1),
+	})
 end
 
 table.insert(sourceFiles, {
@@ -1296,12 +1300,15 @@ local sourceParses = {}
 for _, sourceFile in ipairs(sourceFiles) do
 	local contents = sourceFile.contents
 	if not contents then
-		local file = io.open(sourceFile.path, "r")
+		local file, err = io.open(sourceFile.path, "r")
 		if not file then
 			quit("The compiler could not open source file `", sourceFile.path, "`")
 		end
 		contents = file:read("*all")
 		file:close()
+		if not contents then
+			quit("The compiler could not read from the source file `", sourceFile.path, "`")
+		end
 	end
 	assert(contents)
 
@@ -1311,6 +1318,9 @@ for _, sourceFile in ipairs(sourceFiles) do
 	-- Parse contents
 	table.insert(sourceParses, parseSmol(tokens))
 end
+
+assert(#commandMap.main == 1)
+local mainFunction = commandMap.main[1]
 
 local semantics = calculateSemantics(sourceParses, mainFunction)
 
