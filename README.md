@@ -60,15 +60,15 @@ Hello
 $
 ```
 
-You can also use the `smolc.bat` helper script to automatically populate the list of smol files in a directory:
+You can also use the `smolc.sh` helper script to automatically populate the list of smol files in a directory:
 
 ```
-$ smolc.bat tests-positive/hello-world test:Test
+$ sh smolc.sh tests-positive/hello-world test:Test
 ```
 
-Add the smol-builder directory to your path so that you can use `smolc.bat` to compile your Smol projects.
+Add the smol-builder directory to your path so that you can use `smolc.sh` to compile your Smol projects.
 
-TODO: add `smolc.sh`
+`smolc.bat` is another script that invokes `sh smolc.sh`.
 
 ## Running the Smol compiler tests
 
@@ -105,7 +105,7 @@ My mission is to create a programming language that rigidly enforces the convent
 in designing maintainable software. These conventions include
 * Statically checked annotations (types)
 * Explicitness
-* Functional purity
+* Immutability
 * Familiarity
 * Totally defined behavior
 
