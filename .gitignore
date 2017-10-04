@@ -3,3 +3,6 @@ output.lua
 output.c
 *.exe
 *.stackdump
+
+smolc.sh
+smolc.bat
