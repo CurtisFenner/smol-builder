@@ -25,7 +25,7 @@ end
 -- RETURNS a parser of Bs
 -- REQUIRES `p` is a parser of As
 -- REQUIRES `f` is a map from As to Bs
-function parser.map(parser, f)
+function parser.map(parser, f, includeLocation)
 	assert(type(f) == "function")
 
 	return function(stream, grammar)
@@ -39,7 +39,7 @@ function parser.map(parser, f)
 		local out = f(object)
 		assert(out ~= nil)
 
-		if type(out) == "userdata" or type(out) == "table" then
+		if includeLocation then
 			out = table.with(out, "location", stream:location())
 		end
 		return out, rest
@@ -149,6 +149,20 @@ function parser.composite(components)
 		-- Successfully parsed all components
 		return object, stream
 	end
+end
+
+function parser.oneOrMore(object)
+	local composite = parser.composite {
+		tag = "_",
+		{"first", object},
+		{"rest", parser.zeroOrMore(object)},
+	}
+
+	local function f(object)
+		return {object.first, unpack(object.rest)}
+	end
+
+	return parser.map(composite, f)
 end
 
 -- RETURNS a parser for `object` or false
@@ -301,6 +315,8 @@ function parser.query(query, tag)
 			local before, delimiter, count = query:match "^(.+)(%A+)(%d+%+)$"
 			return parser.delimited(parser.query(before), count, delimiter,
 				describe(before))
+		elseif query:sub(-1) == "+" then
+			return parser.oneOrMore(parser.query(query:sub(1, -2)))
 		elseif query == query:lower() then
 			-- Named
 			return parser.named(query)

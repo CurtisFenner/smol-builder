@@ -396,6 +396,7 @@ local function parseSmol(tokens)
 	local K_SQUARE_OPEN = LEXEME "["
 	local K_SQUARE_CLOSE = LEXEME "]"
 
+	local K_CASE = LEXEME "case"
 	local K_CLASS = LEXEME "class"
 	local K_DO = LEXEME "do"
 	local K_ELSE = LEXEME "else"
@@ -405,6 +406,7 @@ local function parseSmol(tokens)
 	local K_IMPORT = LEXEME "import"
 	local K_INTERFACE = LEXEME "interface"
 	local K_IS = LEXEME "is"
+	local K_MATCH = LEXEME "match"
 	local K_METHOD = LEXEME "method"
 	local K_NEW = LEXEME "new"
 	local K_PACKAGE = LEXEME "package"
@@ -591,8 +593,8 @@ local function parseSmol(tokens)
 			K_NEVER,
 			-- User defined types
 			parser.map(T_GENERIC, function(x)
-				return {tag = "generic", name = x, location = "???"}
-			end),
+				return {tag = "generic", name = x}
+			end, true),
 			parser.named "concrete-type",
 		},
 
@@ -685,6 +687,7 @@ local function parseSmol(tokens)
 			parser.named "var-statement",
 			parser.named "assign-statement",
 			parser.named "if-statement",
+			parser.named "match-statement",
 		},
 
 		["block"] = parser.composite {
@@ -748,6 +751,23 @@ local function parseSmol(tokens)
 			{"else", parser.query "else-clause?"},
 		},
 
+		["match-statement"] = parser.composite {
+			tag = "match-statement",
+			{"_", K_MATCH},
+			{"base", parser.named "expression", "expected an expression to match on"},
+			{"_", K_CURLY_OPEN, "expected a `{`"},
+			{"cases", parser.query "case+", "expected at least one case"},
+			{"_", K_CURLY_CLOSE, "expected a `}`"},
+		},
+
+		["case"] = parser.composite {
+			tag = "case",
+			{"_", K_CASE},
+			{"variable", T_IDENTIFIER, "expected a variable name"},
+			{"variant", T_IDENTIFIER, "expected a union tag name"},
+			{"body", parser.named "block", "expected a block to follow case"},
+		},
+
 		["else-if-clause"] = parser.composite {
 			tag = "else-if-clause",
 			{"_", K_ELSEIF},
@@ -786,7 +806,7 @@ local function parseSmol(tokens)
 			end
 			assert(out)
 			return out
-		end),
+		end, true),
 
 		["operation"] = parser.composite {
 			tag = "***operation",
@@ -819,7 +839,7 @@ local function parseSmol(tokens)
 				out = table.with(access, "base", out)
 			end
 			return out
-		end),
+		end, true),
 
 		["method-access"] = parser.composite {
 			tag = "method-call",
@@ -867,14 +887,14 @@ local function parseSmol(tokens)
 			K_UNIT_VALUE,
 			parser.map(T_STRING_LITERAL, function(v)
 				return {tag = "string-literal", value = v}
-			end),
+			end, true),
 			parser.map(T_INTEGER_LITERAL, function(v)
 				return {tag = "int-literal", value = v}
-			end),
+			end, true),
 			parser.named "static-call",
 			parser.map(T_IDENTIFIER, function(n)
 				return {tag = "identifier", name = n}
-			end),
+			end, true),
 			parser.composite {
 				tag = "***parenthesized expression",
 				{"_", K_ROUND_OPEN},
