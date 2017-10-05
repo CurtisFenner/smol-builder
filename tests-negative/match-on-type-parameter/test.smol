@@ -1,0 +1,15 @@
+package test;
+
+class Foo[#T] {
+	static foo(t #T) Unit {
+		match t {
+			case x x {
+			}
+		}
+	}
+}
+
+class Test {
+	static main!() Unit {
+	}
+}

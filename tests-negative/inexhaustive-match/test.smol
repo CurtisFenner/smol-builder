@@ -1,0 +1,20 @@
+package test;
+
+union U {
+	var a Int;
+	var b Int;
+
+	static makeA() U {
+		return new(a = 1);
+	}
+}
+
+class Test {
+	static main!() Unit {
+		match U.makeA() {
+			case x b {
+
+			}
+		}
+	}
+}

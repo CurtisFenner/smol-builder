@@ -285,8 +285,8 @@ function Report.VARIANT_USED_TWICE(p)
 end
 
 function Report.INEXHAUSTIVE_MATCH(p)
-	quit("In a match statement on `", p.baseType, "` you are missing cases for",
-		"\n\t`", table.concat(p.missingCases, "`\n\t"), p.location)
+	quit("In a match statement on a `", p.baseType, "` you are missing cases for",
+		"\n\t`", table.concat(p.missingCases, "`\n\t"), "`\n", p.location)
 end
 
 return Report

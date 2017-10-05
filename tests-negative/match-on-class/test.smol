@@ -1,0 +1,16 @@
+package test;
+
+class C {
+	static make() C {
+		return new();
+	}
+}
+
+class Test {
+	static main!() Unit {
+		match C.make() {
+			case x x {
+			}
+		}
+	}
+}
