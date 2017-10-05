@@ -2229,7 +2229,7 @@ local function semanticsSmol(sources, main)
 						purpose = "if-statement condition",
 						expectedCount = 1,
 						givenCount = #conditionOut,
-						location = pStatement.location,
+						location = pStatement.condition.location,
 					}
 				elseif not areTypesEqual(conditionOut[1].type, BOOLEAN_TYPE) then
 					Report.TYPES_DONT_MATCH {
@@ -2301,6 +2301,160 @@ local function semanticsSmol(sources, main)
 				assertis(conditionEvaluation, "StatementIR")
 				assertis(ifSt, "StatementIR")
 				return buildBlock({conditionEvaluation, ifSt})
+			elseif pStatement.tag == "match-statement" then
+				-- Evaluate the base expression
+				local baseEvaluation, baseOuts = compileExpression(pStatement.base, scope)
+				if #baseOuts ~= 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "match-statement expression",
+						expectedCount = 1,
+						givenCount = #baseOuts,
+						location = pStatement.base.location,
+					}
+				end
+
+				local base = baseOuts[1]
+				assertis(base, "VariableIR")
+
+				-- Check that the base is a union
+				if base.type.tag ~= "concrete-type+" then
+					Report.TYPE_MUST_BE_UNION {
+						purpose = "expression in match-statement",
+						givenType = showType(base.type),
+						location = base.location,
+					}
+				end
+				local definition = definitionFromType(base.type)
+				if definition.tag ~= "union" then
+					Report.TYPE_MUST_BE_UNION {
+						purpose = "expression in match-statement",
+						givenType = showType(base.type),
+						location = base.location,
+					}
+				end
+				assertis(definition, "UnionIR")
+
+				-- Check that the fields exist and are distinct
+				local cases = {}
+				for _, case in ipairs(pStatement.cases) do
+					-- Create a subscope
+					table.insert(scope, {})
+					local sequence = {}
+
+					-- Verify that the variable name is not in scope
+					local previous = getFromScope(scope, case.variable)
+					if previous then
+						Report.VARIABLE_DEFINED_TWICE {
+							first = previous.location,
+							second = case.location,
+							name = case.variable,
+						}
+					end
+
+					-- Get the field
+					local field = table.findwith(definition.fields, "name", case.variant)
+					if not field then
+						Report.NO_SUCH_VARIANT {
+							container = showType(base.type),
+							name = case.variable,
+							location = case.location,
+						}
+					end
+					local previous = table.findwith(cases, "variant", field.name)
+					if previous then
+						Report.VARIANT_USED_TWICE {
+							variant = field.name,
+							firstLocation = previous.location,
+							secondLocation = case.location,
+						}
+					end
+
+					-- Add the variable to the current scope
+					local variable = {
+						name = case.variable,
+						type = field.type,
+						location = case.location,
+					}
+
+					scope[#scope][variable.name] = variable
+					table.insert(sequence, {
+						tag = "local",
+						variable = variable,
+						returns = "no",
+					})
+
+					table.insert(sequence, {
+						tag = "variant",
+						variant = case.variant,
+						base = base,
+						destination = variable,
+						returns = "no",
+					})
+
+					local sub = compileBlock(case.body, scope)
+					table.insert(sequence, sub)
+
+					table.remove(scope)
+					table.insert(cases, freeze {
+						variant = field.name,
+						location = case.location,
+						statement = buildBlock(sequence),
+					})
+				end
+
+				-- Sort cases by the field order
+				table.sort(cases, function(a, b)
+					local va = table.findwith(definition.fields, "name", a.variant)
+					local vb = table.findwith(definition.fields, "name", b.variant)
+					local ia = table.indexof(definition.fields, va)
+					local ib = table.indexof(definition.fields, vb)
+					return ia < ib
+				end)
+
+				-- Check exhaustivity
+				local unhandledVariants = {}
+				for _, field in ipairs(definition.fields) do
+					if not table.findwith(cases, "variant", field.name) then
+						table.insert(unhandledVariants, field.name)
+					end
+				end
+				if #unhandledVariants ~= 0 then
+					Report.INEXHAUSTIVE_MATCH {
+						location = pStatement.location,
+						missingCases = unhandledVariants,
+						baseType = showType(base.type),
+					}
+				end
+
+				-- Determine if this match returns or not
+				local yesCount = 0
+				local noCount = 0
+				for _, case in ipairs(cases) do
+					if case.statement.returns == "yes" then
+						yesCount = yesCount + 1
+					elseif case.statement.returns == "no" then
+						noCount = noCount + 1
+					else
+						assert(case.statement.returns == "maybe")
+					end
+				end
+				local returns
+				if noCount == #cases then
+					returns = "no"
+				elseif yesCount == #cases then
+					returns = "yes"
+				else
+					returns = "maybe"
+				end
+
+				local match = {
+					tag = "match",
+					base = base,
+					cases = cases,
+					returns = returns,
+				}
+				assertis(match, "MatchSt")
+				return buildBlock {baseEvaluation, match}
 			elseif pStatement.tag == "assign-statement" then
 				local out = {}
 

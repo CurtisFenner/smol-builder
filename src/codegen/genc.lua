@@ -536,6 +536,25 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
 		end
 		return
+	elseif statement.tag == "match" then
+		comment("match " .. statement.base.name .. " {")
+		for i, case in ipairs(statement.cases) do
+			if i > 1 then
+				emit("else")
+			end
+			local id = tostring(i)
+			comment("case ? " .. case.variant)
+			emit("if (" .. localName(statement.base.name) .. "->" .. TAG_FIELD .. " == " .. id .. ") {")
+			generateStatement(case.statement, indentedEmitter(emit), structScope, semantics, demandTuple)	
+			emit("}")
+		end
+		comment("}")
+		return
+	elseif statement.tag == "variant" then
+		comment(statement.destination.name .. " = " .. statement.base.name .. "." .. statement.variant .. "; (union)")
+		emit(localName(statement.destination.name) .. " = ")
+		emit("\t" .. localName(statement.base.name) .. "->" .. unionFieldName(statement.variant) .. ";")
+		return
 	end
 	
 	comment(statement.tag .. " ????")

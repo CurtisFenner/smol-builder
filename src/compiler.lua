@@ -1001,6 +1001,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"GenericMethodCallSt",
 	"GenericStaticCallSt",
 	"LocalSt",
+	"MatchSt",
 	"MethodCallSt",
 	"NewClassSt",
 	"NewUnionSt",
@@ -1011,6 +1012,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"StringLoadSt",
 	"ThisSt",
 	"UnitSt",
+	"VariantSt",
 	"NothingSt"
 )))
 
@@ -1151,6 +1153,23 @@ EXTEND_TYPE("UnitSt", "AbstractStatementIR", recordType {
 	tag = constantType "unit",
 	destination = "VariableIR",
 	returns = constantType "no",
+})
+
+EXTEND_TYPE("VariantSt", "AbstractStatementIR", recordType {
+	tag = constantType "variant",
+	destination = "VariableIR",
+	base = "VariableIR",
+	variant = "string",
+	returns = constantType "no",
+})
+
+EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
+	tag = constantType "match",
+	base = "VariableIR",
+	cases = listType(recordType {
+		variant = "string",
+		statement = "StatementIR",
+	}),
 })
 
 REGISTER_TYPE("VariableIR", recordType {

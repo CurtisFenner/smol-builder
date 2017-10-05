@@ -186,6 +186,12 @@ function Report.NO_SUCH_FIELD(p)
 		"\nHowever, you try to access `", p.name, "` ", p.location)
 end
 
+function Report.NO_SUCH_VARIANT(p)
+	quit("The type `", p.container, "` does not have a variant called `",
+		p.name, "`",
+		"\nHowever, you try to access `", p.name, "` ", p.location)
+end
+
 function Report.NO_SUCH_VARIABLE(p)
 	quit("There is no variable named `", p.name, "` in scope ", p.location)
 end
@@ -209,6 +215,11 @@ end
 
 function Report.TYPE_MUST_BE_CLASS(p)
 	quit("The ", p.purpose, " must be a class instance. However, it is a ",
+		p.givenType, " ", p.location)
+end
+
+function Report.TYPE_MUST_BE_UNION(p)
+	quit("The ", p.purpose, " must be a union instance. However, it is a ",
 		p.givenType, " ", p.location)
 end
 
@@ -265,6 +276,17 @@ end
 
 function Report.THIS_USED_OUTSIDE_METHOD(p)
 	quit("You try to use `this` in a non-static function ", p.location)
+end
+
+function Report.VARIANT_USED_TWICE(p)
+	quit("You use the variant `", p.variant, "` twice in a single match;",
+		"\nYou use `", p.variant, "` first ", p.firstLocation,
+		"\nYou use `", p.variant, "` a second time ", p.secondLocation)
+end
+
+function Report.INEXHAUSTIVE_MATCH(p)
+	quit("In a match statement on `", p.baseType, "` you are missing cases for",
+		"\n\t`", table.concat(p.missingCases, "`\n\t"), p.location)
 end
 
 return Report
