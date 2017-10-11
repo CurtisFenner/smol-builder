@@ -1250,7 +1250,7 @@ local function commonPrefix(list)
 	return out
 end
 
-local common = commonPrefix(commandMap.sources):gsub("[a-zA-Z_0-9]+$", "")
+local common = commonPrefix(commandMap.sources):gsub("%.[a-zA-Z0-9]+$", ""):gsub("[a-zA-Z_0-9]+$", "")
 local sourceFiles = {}
 for _, source in ipairs(commandMap.sources) do
 	table.insert(sourceFiles, {
