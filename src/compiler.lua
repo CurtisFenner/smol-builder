@@ -41,6 +41,7 @@ local calculateSemantics = import "semantics.lua"
 local codegen = {
 	c = import "codegen/genc.lua",
 }
+local verify = import "verify.lua"
 
 --------------------------------------------------------------------------------
 
@@ -120,12 +121,19 @@ local function lexSmol(source, filename)
 		["static"] = true,
 		["union"] = true,
 		["var"] = true,
+
+		-- verification
+		["assert"] = true,
+		["ensures"] = true,
+		["requires"] = true,
+		
 		-- built-in types
 		["Boolean"] = true,
 		["Int"] = true,
 		["Never"] = true,
 		["String"] = true,
 		["Unit"] = true,
+
 		-- values
 		["this"] = true,
 		["true"] = true,
@@ -419,6 +427,10 @@ local function parseSmol(tokens)
 	local K_UNION = LEXEME "union"
 	local K_VAR = LEXEME "var"
 
+	local K_REQUIRES = LEXEME "requires"
+	local K_ASSERT = LEXEME "assert"
+	local K_ENSURES = LEXEME "ensures"
+
 	-- Built-in types
 	local K_STRING = LEXEME "String"
 	local K_UNIT_TYPE = LEXEME "Unit"
@@ -673,6 +685,19 @@ local function parseSmol(tokens)
 				parser.query "type,1+",
 				"a return type"
 			},
+			{"requires", parser.zeroOrMore(parser.named "requires")},
+			{"ensures", parser.zeroOrMore(parser.named "ensures")},
+		},
+
+		["requires"] = parser.composite {
+			tag = "requires",
+			{"_", K_REQUIRES},
+			{"#expression", parser.named "expression", "an expression"},
+		},
+		["ensures"] = parser.composite {
+			tag = "ensures",
+			{"_", K_ENSURES},
+			{"#expression", parser.named "expression", "an expression"},
 		},
 
 		["method-modifier"] = parser.choice {
@@ -901,6 +926,7 @@ local function parseSmol(tokens)
 				{"#expression", parser.named "expression", "expression"},
 				{"_", K_ROUND_CLOSE, "`)`"},
 			},
+			K_RETURN,
 		},
 	}
 
@@ -985,6 +1011,13 @@ REGISTER_TYPE("Signature", recordType {
 	container = "string",
 	foreign = "boolean",
 	bang = "boolean",
+	requires = listType "ASTExpression",
+	ensures = listType "ASTExpression",
+})
+
+REGISTER_TYPE("ASTExpression", recordType {
+	tag = "string",
+	-- TODO
 })
 
 REGISTER_TYPE("maybe", choiceType(
@@ -994,6 +1027,7 @@ REGISTER_TYPE("maybe", choiceType(
 ))
 
 REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
+	-- Execution
 	"AssignSt",
 	"BlockSt",
 	"BooleanLoadSt",
@@ -1013,12 +1047,28 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"ThisSt",
 	"UnitSt",
 	"VariantSt",
+
+	-- Verification
+	"AssumeSt",
+	"VerifySt",
+
+	-- Nothing
 	"NothingSt"
 )))
 
 REGISTER_TYPE("AbstractStatementIR", recordType {
 	tag = "string",
 	returns = "maybe",
+})
+
+EXTEND_TYPE("AssumeSt", "AbstractStatementIR", recordType {
+	tag = constantType "assume",
+	variable = "VariableIR",
+})
+
+EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
+	tag = constantType "verify",
+	variable = "VariableIR",
 })
 
 EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {
@@ -1361,7 +1411,9 @@ end
 assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
-local semantics = calculateSemantics(sourceParses, mainFunction)
+local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
+
+verify(semantics)
 
 if semantics.main then
 	-- TODO: read target

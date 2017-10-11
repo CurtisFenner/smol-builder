@@ -391,6 +391,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "negate",
@@ -400,6 +402,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "lessThan",
@@ -409,6 +413,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "eq",
@@ -418,6 +424,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "quotient",
@@ -427,6 +435,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "product",
@@ -436,6 +446,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "sum",
@@ -445,6 +457,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 			{
 				name = "difference",
@@ -454,6 +468,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 		},
 	},
@@ -470,6 +486,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "String",
 				foreign = true,
 				bang = false,
+				ensures = {},
+				requires = {},
 			},
 		},
 	},
@@ -494,6 +512,24 @@ local BUILTIN_DEFINITIONS = freeze {
 }
 
 --------------------------------------------------------------------------------
+
+-- RETURNS a Definition
+local function definitionFromTypeSemantics(t, allDefinitions)
+	assertis(t, choiceType("ConcreteType+", "KeywordType+"))
+
+	if t.tag == "keyword-type+" then
+		local builtin = table.findwith(BUILTIN_DEFINITIONS, "name", t.name)
+		assert(builtin)
+		return builtin
+	end
+
+	local definition = table.findwith(allDefinitions, "name", t.name)
+	
+	-- Type Finder should verify that the type exists
+	assert(definition, "definition must exist")
+
+	return definition
+end
 
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
@@ -719,7 +755,7 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
-		-- RETURNS a signature
+		-- RETURNS a Signature
 		local function compiledSignature(signature, scope, foreign)
 			assertis(scope, listType("TypeParameterIR"))
 			assertis(foreign, "boolean")
@@ -738,6 +774,9 @@ local function semanticsSmol(sources, main)
 				end, signature.parameters),
 				location = signature.location,
 				bang = signature.bang,
+				ensures = signature.ensures,
+				requires = signature.requires,
+				scope = scope,
 			}
 		end
 
@@ -1103,22 +1142,8 @@ local function semanticsSmol(sources, main)
 
 	-- (5) Compile all code bodies
 
-	-- RETURNS a Definition
 	local function definitionFromType(t)
-		assertis(t, choiceType("ConcreteType+", "KeywordType+"))
-
-		if t.tag == "keyword-type+" then
-			local builtin = table.findwith(BUILTIN_DEFINITIONS, "name", t.name)
-			assert(builtin)
-			return builtin
-		end
-
-		local definition = table.findwith(allDefinitions, "name", t.name)
-		
-		-- Type Finder should verify that the type exists
-		assert(definition, "definition must exist")
-
-		return definition
+		return definitionFromTypeSemantics(t, allDefinitions)
 	end
 
 	-- RETURNS a Definition
@@ -2680,4 +2705,7 @@ local function semanticsSmol(sources, main)
 	}
 end
 
-return semanticsSmol
+return {
+	semantics = semanticsSmol,
+	definitionFromTypeSemantics = definitionFromTypeSemantics,
+}
