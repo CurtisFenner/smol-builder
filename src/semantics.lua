@@ -1266,6 +1266,9 @@ local function semanticsSmol(sources, main)
 				end
 			end
 
+			-- TODO: get alternatives
+			local alternatives = {"???"}
+
 			-- Verify exactly one constraint supplies this method name
 			if #matches == 0 then
 				Report.NO_SUCH_METHOD {
@@ -1274,6 +1277,7 @@ local function semanticsSmol(sources, main)
 					name = name,
 					definitionLocation = parameter.location,
 					location = location,
+					alternatives = alternatives,
 				}
 			elseif #matches > 1 then
 				Report.CONFLICTING_INTERFACES {
@@ -1588,12 +1592,14 @@ local function semanticsSmol(sources, main)
 				local method = table.findwith(baseDefinition.signatures,
 					"name", pExpression.funcName)
 				
+				local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
 				if not method or method.modifier ~= "static" then
 					Report.NO_SUCH_METHOD {
 						modifier = "static",
 						type = showType(t),
 						name = pExpression.funcName,
 						definitionLocation = baseDefinition.location,
+						alternatives = alternatives,
 						location = pExpression.location,
 					}
 				end
@@ -1794,11 +1800,13 @@ local function semanticsSmol(sources, main)
 				
 				-- Find the definition of the method being invoked
 				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
+				local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
 				if not method then
 					Report.NO_SUCH_METHOD {
 						type = showType(baseInstance.type),
 						modifier = "method",
 						name = pExpression.methodName,
+						alternatives = alternatives,
 						location = pExpression.location,
 					}
 				end
@@ -1811,6 +1819,7 @@ local function semanticsSmol(sources, main)
 						type = showType(baseInstance.type),
 						name = pExpression.name,
 						definitionLocation = baseDefinition.location,
+						alternatives = alternatives,
 						location = pExpression.location,
 					}
 				end

@@ -203,7 +203,9 @@ end
 
 function Report.NO_SUCH_METHOD(p)
 	quit("The type `", p.type, "` does not have a ", p.modifier, " called `",
-		p.name, "`",
+		p.name, "`.",
+		"\nAvailable members include ",
+		"\n\t", table.concat(p.alternatives, ", "),
 		"\nHowever, you try to call `", p.type, ".", p.name, "` ", p.location)
 end
 

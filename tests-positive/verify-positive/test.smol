@@ -1,0 +1,46 @@
+package test;
+import core;
+
+class Box {
+	var size Int;
+
+	method isSmall() Boolean {
+		return this.size == 10;
+	}
+
+	static makeBigBox() Box {
+		return new(size = 200);
+	}
+
+	static makeSmallBox() Box {
+		return new(size = 10);
+	}
+}
+
+class Truck {
+	var boxes Int;
+
+	method boxCount() Int {
+		return this.boxes;
+	}
+
+	static make() Truck {
+		return new(boxes = 0);
+	}
+	
+	static loaded(previous Truck, box Box) Truck
+	requires box.isSmall() {
+		return new(boxes = previous.boxes + 1);
+	}
+
+}
+
+class Test {
+
+	static main!() Unit {
+		var truck Truck = Truck.make();
+		truck = Truck.loaded(truck, Box.makeSmallBox());
+		do core:Out.println!(core:ASCII.formatInt(truck.boxCount()));
+	}
+}
+
