@@ -511,11 +511,21 @@ local BUILTIN_DEFINITIONS = freeze {
 	}
 }
 
---------------------------------------------------------------------------------
+-- RETURNS a Definition
+local function interfaceDefinitionFromConstraint(t, allDefinitions)
+	assertis(t, "InterfaceType+")
+	assertis(allDefinitions, listType "Definition")
+
+	local definition = table.findwith(allDefinitions, "name", t.name)
+	assert(definition and definition.tag == "interface")
+
+	return definition
+end
 
 -- RETURNS a Definition
-local function definitionFromTypeSemantics(t, allDefinitions)
+local function definitionFromType(t, allDefinitions)
 	assertis(t, choiceType("ConcreteType+", "KeywordType+"))
+	assertis(allDefinitions, listType(recordType {name = "string"}))
 
 	if t.tag == "keyword-type+" then
 		local builtin = table.findwith(BUILTIN_DEFINITIONS, "name", t.name)
@@ -530,6 +540,998 @@ local function definitionFromTypeSemantics(t, allDefinitions)
 
 	return definition
 end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS TODO
+local function findConstraintByMember(genericType, modifier, name, location, generics, allDefinitions, containingSignature)
+	assertis(genericType, "GenericType+")
+	assertis(modifier, choiceType(constantType "static", constantType "method"))
+	assertis(name, "string")
+	assertis(location, "string")
+	assert(name:sub(1, 1):lower() == name:sub(1, 1))
+	assertis(generics, listType "TypeParameterIR")
+	assertis(allDefinitions, listType "Definition")
+	assertis(containingSignature, "Signature")
+
+	local parameter, pi = table.findwith(generics, "name", genericType.name)
+	assert(parameter)
+
+	local matches = {}
+	for ci, constraint in ipairs(parameter.constraints) do
+		local interface = interfaceDefinitionFromConstraint(constraint.interface, allDefinitions)
+		local signature = table.findwith(interface.signatures, "name", name)
+		if signature then
+			local constraintIR = {
+				tag = "parameter-constraint",
+				name = "#" .. pi .. "_" .. ci,
+				location = constraint.location,
+				interface = constraint.interface,
+			}
+			if containingSignature.modifier == "method" then
+				constraintIR = {
+					tag = "this-constraint",
+					instance = thisVariable,
+					name = "#" .. pi .. "_" .. ci,
+					interface = constraint.interface,
+				}
+			end
+
+			table.insert(matches, freeze {
+				signature = signature,
+				interface = interface,
+				constraint = constraint.interface,
+				constraintIR = constraintIR,
+			})
+		end
+	end
+
+	-- TODO: get alternatives
+	local alternatives = {"???"}
+
+	-- Verify exactly one constraint supplies this method name
+	if #matches == 0 then
+		Report.NO_SUCH_METHOD {
+			modifier = modifier,
+			type = showType(genericType),
+			name = name,
+			definitionLocation = parameter.location,
+			location = location,
+			alternatives = alternatives,
+		}
+	elseif #matches > 1 then
+		Report.CONFLICTING_INTERFACES {
+			method = name,
+			interfaceOne = showType(matches[1].interface),
+			interfaceTwo = showType(matches[2].interface),
+			location = location,
+		}
+	end
+
+	-- Verify the method's modifier matches
+	local method = matches[1]
+	if method.signature.modifier ~= modifier then
+		Report.WRONG_MODIFIER {
+			signatureModifier = method.signature.modifier,
+			signatureLocation = method.signature.location,
+			callModifier = modifier,
+			location = location,
+		}
+	end
+
+	local methodFullName = method.interface.name .. "." .. method.signature.name
+	local out = table.with(method, "fullName", methodFullName)
+	assertis(out, recordType {
+		interface = "InterfaceIR",
+		signature = "Signature",
+		constraint = "InterfaceType+",
+		constraintIR = "ConstraintIR",
+		fullName = "string",
+	})
+	return out
+end
+
+-- RETURNS a ConstraintIR
+local function constraintFromStruct(interface, implementer, generics, containingSignature, thisVariable)
+	assertis(interface, "InterfaceType+")
+	assertis(implementer, "Type+")
+	assertis(generics, listType "TypeParameterIR")
+	assertis(containingSignature, "Signature")
+
+	if implementer.tag == "concrete-type+" then
+		local assignments = {}
+		if #implementer.arguments > 0 then
+			-- Fill assignments
+			error "TODO"
+		end
+		return freeze {
+			tag = "concrete-constraint",
+			interface = interface,
+			concrete = implementer,
+			assignments = assignments,
+		}
+	elseif implementer.tag == "generic+" then
+		local name
+		for i, generic in ipairs(generics) do
+			for j, c in ipairs(generic.constraints) do
+				if generic.name == implementer.name and c.interface.name == interface.name then
+					name = "#" .. i .. "_" .. j
+				end
+			end
+		end
+		assert(name)
+		if containingSignature.modifier == "static" then
+			-- Get a parameter constraint
+			return freeze {
+				tag = "parameter-constraint",
+				interface = interface,
+				name = name,
+			}
+		else
+			-- Get a this constraint
+			assertis(thisVariable, "VariableIR")
+			return freeze {
+				tag = "this-constraint",
+				instance = thisVariable,
+				interface = interface,
+				name = name,
+			}
+		end
+	end
+	print(show(interface))
+	print(show(implementer))
+	print(string.rep(".", 80))
+	error("unhandled tag: " .. show(implementer))
+end
+
+--------------------------------------------------------------------------------
+
+local compileExpression
+
+local function generatePreconditionVerify(expression, method, environment)
+	assertis(expression, "any")
+	assertis(method, "Signature")
+	assertis(environment, recordType {})
+	
+	local scope = {}
+	assertis(scope, listType(mapType("string", "VariableIR")))
+
+	local evaluation, out = compileExpression(expression, scope, environment)
+	error "TODO generate pre condition verify st"
+end
+
+local function generatePostconditionAssume(expression, method, environment)
+	assertis(expression, "any")
+	assertis(method, "Signature")
+
+	error "TODO: generate post condition assume st"
+end
+
+-- RETURNS StatementIR, [Variable]
+function compileExpression(pExpression, scope, environment)
+	assertis(pExpression, recordType {
+		tag = "string"
+	})
+	assertis(scope, listType(mapType("string", "VariableIR")))
+	assertis(environment, recordType {
+		resolveType = "function",
+		containerType = "Type+",
+		containingSignature = "Signature",
+		allDefinitions = listType "Definition",
+		thisVariable = choiceType("false", "VariableIR"),
+	})
+	local resolveType = environment.resolveType
+	local containerType = environment.containerType
+	local containingSignature = environment.containingSignature
+	local allDefinitions = environment.allDefinitions
+	local containingDefinition = definitionFromType(containerType, allDefinitions)
+
+	if pExpression.tag == "string-literal" then
+		local out = {
+			name = generateLocalID("stringliteral"),
+			type = STRING_TYPE,
+			location = pExpression.location,
+		}
+
+		local block = buildBlock {
+			localSt(out),
+			{
+				tag = "string",
+				string = pExpression.value,
+				destination = out,
+				returns = "no",
+			},
+		}
+		return block, freeze {out}
+	elseif pExpression.tag == "int-literal" then
+		local out = {
+			name = generateLocalID("intliteral"),
+			type = INT_TYPE,
+			location = pExpression.location,
+		}
+
+		local block = buildBlock {
+			localSt(out),
+			{
+				tag = "int",
+				number = pExpression.value,
+				destination = out,
+				returns = "no",
+			}
+		}
+		return block, freeze {out}
+	elseif pExpression.tag == "new-expression" then
+		local out = {
+			name = generateLocalID("new"),
+			type = containerType,
+			location = pExpression.location .. ">"
+		}
+		assertis(out.type, "ConcreteType+")
+
+		if containingSignature.modifier ~= "static" then
+			Report.NEW_USED_OUTSIDE_STATIC {
+				location = pExpression.location,
+			}
+		end
+
+		local newTag
+		if containingDefinition.tag == "union" then
+			newTag = "new-union"
+		elseif containingDefinition.tag == "class" then
+			newTag = "new-class"
+		end
+
+		local newSt = {
+			tag = newTag,
+			type = containerType,
+			returns = "no",
+			constraints = {},
+			destination = out,
+		}
+
+		-- All of the constraints are provided as arguments to this
+		-- static function
+		for constraintName, interface in pairs(containingDefinition.constraints) do
+			newSt.constraints[constraintName] = freeze {
+				tag = "parameter-constraint",
+				name = constraintName,
+				location = pExpression.location,
+				interface = interface,
+			}
+		end
+
+		local evaluation = {}
+
+		-- Map is a map from field name to value variable
+		local map = {}
+
+		-- Evaluate all arguments to new
+		for _, argument in ipairs(pExpression.arguments) do
+			local subEvaluation, subOut = compileExpression(argument.value, scope, environment)
+			if #subOut ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "field value",
+					expectedCount = 1,
+					givenCount = #subOut,
+					location = argument.location,
+				}
+			end
+			
+			table.insert(evaluation, subEvaluation)
+			assertis(evaluation, listType "StatementIR")
+
+			local field = table.findwith(containingDefinition.fields, "name", argument.name)
+			if not field then
+				Report.NO_SUCH_FIELD {
+					name = argument.name,
+					container = showType(containerType),
+					location = argument.location,
+				}
+			end
+
+			if not areTypesEqual(field.type, subOut[1].type) then
+				Report.TYPES_DONT_MATCH {
+					purpose = "field type",
+					expectedType = showType(field.type),
+					expectedLocation = field.location,
+					givenType = showType(subOut[1].type),
+					location = argument.location,
+				}
+			end
+
+			map[argument.name] = subOut[1]
+		end
+
+		-- Record the map as fields
+		if containingDefinition.tag == "union" then
+			newSt.field, newSt.value = next(map)
+
+			-- Verify that exactly one field is given for union new
+			if #pExpression.arguments ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "new union field list",
+					expectedCount = 1,
+					givenCount = #pExpression.arguments,
+					location = pExpression.location,
+				}
+			end
+		elseif containingDefinition.tag == "class" then
+			newSt.fields = map
+
+			-- Check that no fields are missing for class new
+			for _, field in ipairs(containingDefinition.fields) do
+				if not newSt.fields[field.name] then
+					Report.MISSING_VALUE {
+						purpose = "new " .. showType(containerType) .. " expression",
+						name = field.name,
+						location = pExpression.location,
+					}
+				end
+			end
+		end
+
+
+		local block = buildBlock(table.concatted(
+			evaluation, {localSt(out), newSt}
+		))
+		return block, freeze {out}
+	elseif pExpression.tag == "identifier" then
+		local block = buildBlock({})
+		local out = nil
+		for i = #scope, 1, -1 do
+			out = out or scope[i][pExpression.name]
+		end
+		if not out then
+			Report.NO_SUCH_VARIABLE {
+				name = pExpression.name,
+				location = pExpression.location,
+			}
+		end
+		return block, freeze {out}
+	elseif pExpression.tag == "static-call" then
+		local t = resolveType(pExpression.baseType)
+
+		-- Evaluate the arguments
+		local evaluation = {}
+		local argumentSources = {}
+		for _, argument in ipairs(pExpression.arguments) do
+			local subEvaluation, outs = compileExpression(
+				argument, scope, environment
+			)
+
+			-- Verify each argument has exactly one value
+			if #outs ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "static argument",
+					expectedCount = 1,
+					givenCount = #outs,
+					location = argument.location,
+				}
+			end
+
+			table.insert(argumentSources, outs[1])
+			table.insert(evaluation, subEvaluation)
+		end
+
+		if t.tag == "generic+" then
+			-- Generic static function
+			local static = findConstraintByMember(t, "static", pExpression.funcName, t.location, containingDefinition.generics, allDefinitions, containingSignature)
+			assert(static and static.signature.modifier == "static")
+			assertis(static.constraint, "InterfaceType+")
+
+			-- Map type variables to the type-values used for this instantiation
+			local substituter = getSubstituterFromConcreteType(static.constraint, allDefinitions)
+
+			-- Check the number of parameters
+			if #static.signature.parameters ~= #pExpression.arguments then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "static function `" .. static.fullName .. "`",
+					expectedCount = #static.signature.parameters,
+					givenCount = #pExpression.arguments,
+					location = pExpression.location,
+				}
+			end
+
+			-- Verify the argument types match the parameter types
+			for i, argument in ipairs(argumentSources) do
+				local parameterType = substituter(static.signature.parameters[i].type)
+				if not areTypesEqual(argument.type, parameterType) then
+					Report.TYPES_DONT_MATCH {
+						purpose = string.ordinal(i) .. " argument to " .. fullName,
+						expectedLocation = static.signature.parameters[i].location,
+						givenType = showType(argument.type),
+						location = argument.location,
+						expectedType = showType(parameterType)
+					}
+				end
+			end
+
+			-- Create variables for the output
+			local destinations = {}
+			for _, returnType in pairs(static.signature.returnTypes) do
+				local returnVariable = {
+					name = generateLocalID("return"),
+					type = substituter(returnType),
+					location = pExpression.location,
+				}
+				table.insert(destinations, returnVariable)
+				table.insert(evaluation, localSt(returnVariable))
+			end
+
+			-- Verify the bang matches
+			if not static.signature.bang ~= not pExpression.bang then
+				Report.BANG_MISMATCH {
+					modifier = static.signature.modifier,
+					fullName = fullName,
+					expected = static.signature.bang,
+					given = pExpression.bang,
+					signatureLocation = static.signature.location,
+					location = pExpression.location,
+				}
+			elseif static.signature.bang and not containingSignature.bang then
+				local fullName = definition.name .. "." .. containingSignature.name
+				Report.BANG_NOT_ALLOWED {
+					context = containingSignature.modifier .. " " .. fullName,
+					location = pExpression.location,
+				}
+			end
+
+			-- Generate Verify statements
+			for _, require in ipairs(static.signature.requires) do
+				local verification = generatePreconditionVerify(require, static.signature, environment)
+				table.insert(evaluation, verification)
+			end
+
+			local callSt = {
+				tag = "generic-static-call",
+				constraint = static.constraintIR,
+				staticName = pExpression.funcName,
+				arguments = argumentSources,
+				destinations = destinations,
+				returns = "no",
+			}
+			assertis(callSt, "StatementIR")
+			table.insert(evaluation, callSt)
+
+			-- Generate Assume statements
+			for _, ensure in ipairs(static.signature.ensures) do
+				local assumption = generatePostconditionAssume(ensure, static.signature, environment)
+				table.insert(evaluation, assumption)
+			end
+
+			return buildBlock(evaluation), destinations
+		end
+
+		local baseDefinition = definitionFromType(t, allDefinitions)
+
+		local fullName = showType(t) .. "." .. pExpression.funcName
+
+		-- Map type variables to the type-values used for this instantiation
+		local substituter = getSubstituterFromConcreteType(t, allDefinitions)
+
+		local method = table.findwith(baseDefinition.signatures,
+			"name", pExpression.funcName)
+		
+		local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
+		if not method or method.modifier ~= "static" then
+			Report.NO_SUCH_METHOD {
+				modifier = "static",
+				type = showType(t),
+				name = pExpression.funcName,
+				definitionLocation = baseDefinition.location,
+				alternatives = alternatives,
+				location = pExpression.location,
+			}
+		end
+
+		-- Check the number of parameters
+		if #method.parameters ~= #pExpression.arguments then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "static function `" .. fullName .. "`",
+				expectedCount = #method.parameters,
+				givenCount = #pExpression.arguments,
+				location = pExpression.location,
+			}
+		end
+
+		-- Verify the argument types match the parameter types
+		for i, argument in ipairs(argumentSources) do
+			local parameterType = substituter(method.parameters[i].type)
+			if not areTypesEqual(argument.type, parameterType) then
+				Report.TYPES_DONT_MATCH {
+					purpose = string.ordinal(i) .. " argument to " .. fullName,
+					expectedLocation = method.parameters[i].location,
+					givenType = showType(argument.type),
+					location = argument.location,
+					expectedType = showType(parameterType)
+				}
+			end
+		end
+
+		-- Collect the constraints
+		local constraints = {}
+		for gi, generic in ipairs(baseDefinition.generics) do
+			for ci, constraint in ipairs(generic.constraints) do
+				local key = "#" .. gi .. "_" .. ci
+				constraints[key] = constraintFromStruct(
+					constraint.interface,
+					t.arguments[gi],
+					containingDefinition.generics,
+					containingSignature,
+					environment.thisVariable
+				)
+			end
+		end
+
+		-- Verify the bang matches
+		if not method.bang ~= not pExpression.bang then
+			Report.BANG_MISMATCH {
+				modifier = method.modifier,
+				fullName = fullName,
+				expected = method.bang,
+				given = pExpression.bang,
+				signatureLocation = method.location,
+				location = pExpression.location,
+			}
+		elseif method.bang and not containingSignature.bang then
+			local fullName = containerType.name .. "." .. containingSignature.name
+			Report.BANG_NOT_ALLOWED {
+				context = containingSignature.modifier .. " " .. fullName,
+				location = pExpression.location,
+			}
+		end
+
+		-- Create variables for the output
+		local outs = {}
+		for _, returnType in pairs(method.returnTypes) do
+			local returnVariable = {
+				name = generateLocalID("return"),
+				type = substituter(returnType),
+				location = pExpression.location,
+			}
+			table.insert(outs, returnVariable)
+			table.insert(evaluation, localSt(returnVariable))
+		end
+
+		-- Generate Verify statements
+		for _, require in ipairs(method.requires) do
+			local verification = generatePreconditionVerify(require, method, environment)
+			table.insert(evaluation, verification)
+		end
+
+		local call = {
+			tag = "static-call",
+			baseType = t,
+			name = method.name,
+			arguments = argumentSources,
+			constraints = constraints,
+			destinations = outs,
+			returns = "no",
+		}
+		assertis(call, "StaticCallSt")
+		table.insert(evaluation, call)
+
+		-- Generate Assume statements
+		for _, ensure in ipairs(method.ensures) do
+			local assumption = generatePostconditionAssume(ensure, method, environment)
+			table.insert(evaluation, assumption)
+		end
+		
+		return buildBlock(evaluation), freeze(outs)
+	elseif pExpression.tag == "method-call" then
+		-- Compile the base instance
+		local baseEvaluation, baseInstanceValues = compileExpression(
+			pExpression.base, scope, environment
+		)
+		if #baseInstanceValues ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "method base expression",
+				expectedCount = 1,
+				givenCount = #baseInstanceValues,
+				location = pExpression.location,
+			}
+		end
+		local evaluation = {baseEvaluation}
+		local baseInstance = baseInstanceValues[1]
+
+		-- Evaluate the arguments
+		local arguments = {}
+		for i, pArgument in ipairs(pExpression.arguments) do
+			local subEvaluation, outs = compileExpression(pArgument, scope, environment)
+			
+			-- Verify each argument has exactly one value
+			if #outs ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "method argument",
+					expectedCount = 1,
+					givenCount = #outs,
+					location = pArgument.location,
+				}
+			end
+
+			table.insert(arguments, table.with(outs[1], "location", pArgument.location))
+			table.insert(evaluation, subEvaluation)
+		end
+		assertis(evaluation, listType "StatementIR")
+		assertis(arguments, listType "VariableIR")
+
+		if baseInstance.type.tag == "generic+" then
+			-- Generic instance
+			local method = findConstraintByMember(
+				baseInstance.type,
+				"method",
+				pExpression.methodName,
+				pExpression.location,
+				containingDefinition.generics,
+				allDefinitions,
+				containingSignature
+			)
+			assertis(method.signature, "Signature")
+
+			local substituter = getSubstituterFromConcreteType(method.constraint, allDefinitions)
+			assertis(substituter, "function")
+
+			local methodFullName = method.fullName
+
+			-- Verify the correct number of arguments is provided
+			if #arguments ~= #method.signature.parameters then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "interface method " .. methodFullName,
+					expectedCount = #method.signature.parameters,
+					givenCount = #arguments,
+					location = pExpression.location,
+				}
+			end
+
+			-- Verify the types of the arguments match the parameters
+			for i, argument in ipairs(arguments) do
+				local expectedType = substituter(method.signature.parameters[i].type)
+				if not areTypesEqual(argument.type, expectedType) then
+					Report.TYPES_DONT_MATCH {
+						purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
+						expectedType =	showType(expectedType),
+						expectedLocation = method.signature.parameters[i].location,
+						givenType = showType(argument.type),
+						location = argument.location,
+					}
+				end
+			end
+
+			-- Verify the bang matches
+			if not method.signature.bang ~= not pExpression.bang then
+				Report.BANG_MISMATCH {
+					modifier = method.signature.modifier,
+					fullName = methodFullName,
+					expected = method.signature.bang,
+					given = pExpression.bang,
+					signatureLocation = method.signature.location,
+					location = pExpression.location,
+				}
+			end
+
+			-- Create destinations for each return value
+			local destinations = {}
+			for _, returnType in ipairs(method.signature.returnTypes) do
+				local destination = {
+					name = generateLocalID("return"),
+					type = substituter(returnType),
+					location = pExpression.location,
+				}
+				table.insert(destinations, destination)
+				table.insert(evaluation, localSt(destination))
+			end
+
+			-- Generate Verify statements
+			for _, require in ipairs(method.signature.requires) do
+				local verification = generatePreconditionVerify(require, method.signature, environment)
+				table.insert(evaluation, verification)
+			end
+			
+			local callSt = {
+				tag = "generic-method-call",
+				baseInstance = baseInstance,
+				constraint = method.constraintIR,
+				methodName = pExpression.methodName,
+				arguments = arguments,
+				destinations = destinations,
+				returns = "no",
+			}
+			assertis(callSt, "StatementIR")
+			table.insert(evaluation, callSt)
+			
+			-- Generate Assume statements
+			for _, ensure in ipairs(method.signature.ensures) do
+				local assumption = generatePostconditionAssume(ensure, method.signature, environment)
+				table.insert(evaluation, assumption)
+			end
+
+			return buildBlock(evaluation), destinations
+		end
+
+		-- Concrete instance
+		local baseDefinition = definitionFromType(baseInstance.type, allDefinitions)
+		local substituter = getSubstituterFromConcreteType(baseInstance.type, allDefinitions)
+		
+		-- Find the definition of the method being invoked
+		local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
+		local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
+		if not method then
+			Report.NO_SUCH_METHOD {
+				type = showType(baseInstance.type),
+				modifier = "method",
+				name = pExpression.methodName,
+				alternatives = alternatives,
+				location = pExpression.location,
+			}
+		end
+		assertis(method, "Signature")
+
+		local methodFullName = baseDefinition.name .. "." .. pExpression.methodName
+		if not method or method.modifier ~= "method" then
+			Report.NO_SUCH_METHOD {
+				modifier = "method",
+				type = showType(baseInstance.type),
+				name = pExpression.name,
+				definitionLocation = baseDefinition.location,
+				alternatives = alternatives,
+				location = pExpression.location,
+			}
+		end
+
+		-- Verify the correct number of arguments is provided
+		if #arguments ~= #method.parameters then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "interface method " .. methodFullName,
+				expectedCount = #method.parameters,
+				givenCount = #arguments,
+				location = pExpression.location,
+			}
+		end
+
+		-- Verify the types of the arguments match the parameters
+		for i, argument in ipairs(arguments) do
+			if not areTypesEqual(argument.type, substituter(method.parameters[i].type)) then
+				Report.TYPES_DONT_MATCH {
+					purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
+					expectedType =	showType(method.parameters[i].type),
+					expectedLocation = method.parameters[i].location,
+					givenType = showType(argument.type),
+					location = argument.location,
+				}
+			end
+		end
+
+		-- Verify the bang matches
+		assertis(method, "Signature")
+		if not method.bang ~= not pExpression.bang then
+			Report.BANG_MISMATCH {
+				modifier = method.modifier,
+				fullName = methodFullName,
+				expected = method.bang,
+				given = pExpression.bang,
+				signatureLocation = method.location,
+				location = pExpression.location,
+			}
+		elseif method.bang and not containingSignature.bang then
+			Report.BANG_NOT_ALLOWED {
+				context = containingSignature.modifier .. " " .. definition.name .. "." .. containingSignature.name,
+				location = pExpression.location,
+			}
+		end
+
+		-- Create destinations for each return value
+		local destinations = {}
+		for _, returnType in ipairs(method.returnTypes) do
+			local destination = {
+				name = generateLocalID("return"),
+				type = substituter(returnType),
+				location = pExpression.location,
+			}
+			table.insert(destinations, destination)
+			table.insert(evaluation, localSt(destination))
+		end
+
+		-- Generate Verify statements
+		for _, require in ipairs(method.requires) do
+			local verification = generatePreconditionVerify(require, method, environment)
+			table.insert(evaluation, verification)
+		end
+
+		table.insert(evaluation, {
+			tag = "method-call",
+			baseInstance = baseInstance,
+			methodName = method.name,
+			arguments = arguments,
+			destinations = destinations,
+			returns = "no"
+		})
+
+		-- Generate Assume statements
+		for _, ensure in ipairs(method.ensures) do
+			local assumption = generatePostconditionAssume(ensure, method, environment)
+			table.insert(evaluation, assumption)
+		end
+
+		return buildBlock(evaluation), destinations
+	elseif pExpression.tag == "keyword" then
+		if pExpression.keyword == "false" or pExpression.keyword == "true" then
+			local boolean = {
+				type = BOOLEAN_TYPE,
+				name = generateLocalID("booleanliteral"),
+				location = pExpression.location,
+			}
+			local execution = {
+				localSt(boolean),
+				{
+					tag = "boolean",
+					boolean = pExpression.keyword == "true",
+					destination = boolean,
+					returns = "no",
+				},
+			}
+			return buildBlock(execution), {boolean}
+		elseif pExpression.keyword == "this" then
+			local variable = {
+				type = containerType,
+				name = generateLocalID("this"),
+				location = pExpression.location,
+			}
+
+			-- Check that this is a method
+			if containingSignature.modifier ~= "method" then
+				Report.THIS_USED_OUTSIDE_METHOD {
+					location = pExpression.location,
+				}
+			end
+
+			local execution = {
+				localSt(variable),
+				{
+					tag = "this",
+					destination = variable,
+					returns = "no",
+				},
+			}
+			return buildBlock(execution), {variable}
+		elseif pExpression.keyword == "unit" then
+			local variable = {
+				type = UNIT_TYPE,
+				name = generateLocalID("unit"),
+				location = pExpression.location,
+			}
+			local execution = {
+				localSt(variable),
+				{
+					tag = "unit",
+					destination = variable,
+					returns = "no",
+				}
+			}
+			return buildBlock(execution), {variable}
+		end
+		error("TODO: keyword `" .. pExpression.keyword .. "`")
+	elseif pExpression.tag == "field" then
+		local baseEvaluation, bases = compileExpression(pExpression.base, scope, environment)
+		if #bases ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "base of a `." .. pExpression.field .. "` field access",
+				givenCount = #bases,
+				expectedCount = 1,
+				location = pExpression.location,
+			}
+		end
+
+		local base = bases[1]
+		if base.type.tag ~= "concrete-type+" then
+			Report.TYPE_MUST_BE_CLASS {
+				givenType = showType(base.type),
+				location = pExpression.location,
+			}
+		end
+
+		local definition = definitionFromType(base.type, allDefinitions)
+		if definition.tag ~= "class" then
+			Report.TYPE_MUST_BE_CLASS {
+				givenType = showType(base.type),
+				location = pExpression.location,
+			}
+		end
+
+		local field = table.findwith(definition.fields, "name", pExpression.field)
+		if not field then
+			Report.NO_SUCH_FIELD {
+				container = showType(base.type),
+				name = pExpression.field,
+				location = pExpression.location,
+			}
+		end
+
+		-- TODO: verify that access is to the current class
+
+		local result = {
+			type = field.type,
+			name = generateLocalID("field"),
+			location = pExpression.location,
+		}
+		local accessStatement = {
+			tag = "field",
+			name = pExpression.field,
+			base = base,
+			destination = result,
+			returns = "no",
+		}
+		return buildBlock {baseEvaluation, localSt(result), accessStatement}, {result}
+	elseif pExpression.tag == "binary" then
+		-- Compile the two operands
+		local leftEvaluation, leftOut = compileExpression(pExpression.left, scope, environment)
+		local rightEvaluation, rightOut = compileExpression(pExpression.right, scope, environment)
+
+		-- Verify there is one value on each side
+		if #leftOut ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "the left operand of `" .. pExpression.operator .. "`",
+				expectedCount = 1,
+				givenCount = #leftOut,
+				location = pExpression.left.location,
+			}
+		elseif #rightOut ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "the right operand of `" .. pExpression.operator .. "`",
+				expectedCount = 1,
+				givenCount = #rightOut,
+				location = pExpression.right.location,
+			}
+		end
+
+		local left, right = leftOut[1], rightOut[1]
+
+		-- Handle specific operators
+		if pExpression.operator == "==" then
+			-- Check that the values are of the same type
+			if not areTypesEqual(left.type, right.type) then
+				Report.EQ_TYPE_MISMATCH {
+					leftType = showType(left.type),
+					rightType = showType(right.type),
+					location = pExpression.location,
+				}
+			end
+		end
+
+		local remap = {
+			["=="] = "eq",
+			["/"] = "quotient",
+			["*"] = "product",
+			["+"] = "sum",
+			["-"] = "difference",
+			["<"] = "lessThan",
+			["++"] = "concatenate",
+		}
+
+		local methodName = remap[pExpression.operator]
+		if not methodName then
+			return Report.UNKNOWN_OPERATOR_USED {
+				operator = pExpression.operator,
+				location = pExpression.location,
+			}
+		end
+
+		-- Rewrite the operations as a method call
+		local rewrite = freeze {
+			tag = "method-call",
+			base = pExpression.left,
+			bang = false,
+			arguments = {pExpression.right},
+			methodName = methodName,
+			location = pExpression.location,
+		}
+
+		return compileExpression(rewrite, scope, environment)
+	end
+
+	error("TODO expression: " .. show(pExpression))
+end
+
+--------------------------------------------------------------------------------
 
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
@@ -1142,20 +2144,6 @@ local function semanticsSmol(sources, main)
 
 	-- (5) Compile all code bodies
 
-	local function definitionFromType(t)
-		return definitionFromTypeSemantics(t, allDefinitions)
-	end
-
-	-- RETURNS a Definition
-	local function interfaceDefinitionFromConstraint(t)
-		assertis(t, "InterfaceType+")
-
-		local definition = table.findwith(allDefinitions, "name", t.name)
-		assert(definition and definition.tag == "interface")
-
-		return definition
-	end
-
 	-- RETURNS a FunctionIR
 	local function compileFunctionFromStruct(definition, containingSignature)
 		assertis(definition, choiceType("ClassIR", "UnionIR"))
@@ -1174,7 +2162,7 @@ local function semanticsSmol(sources, main)
 			location = definition.location,
 		}
 
-		local thisVariable = nil
+		local thisVariable = false
 		if containingSignature.modifier == "method" then
 			thisVariable = {
 				name = "this",
@@ -1182,7 +2170,7 @@ local function semanticsSmol(sources, main)
 				location = containingSignature.location,
 			}
 		end
-		assertis(thisVariable, nullableType "VariableIR")
+		assertis(thisVariable, choiceType("false", "VariableIR"))
 
 		-- RETURNS a (verified) Type+
 		local function resolveType(parsedType)
@@ -1200,895 +2188,13 @@ local function semanticsSmol(sources, main)
 			return outType
 		end
 
-		-- RETURNS a ConstraintIR
-		local function constraintFromStruct(interface, implementer)
-			assertis(interface, "InterfaceType+")
-			assertis(implementer, "Type+")
-
-			if implementer.tag == "concrete-type+" then
-				local assignments = {}
-				if #implementer.arguments > 0 then
-					-- Fill assignments
-					error "TODO"
-				end
-				return freeze {
-					tag = "concrete-constraint",
-					interface = interface,
-					concrete = implementer,
-					assignments = assignments,
-				}
-			elseif implementer.tag == "generic+" then
-				local name
-				for i, generic in ipairs(definition.generics) do
-					for j, c in ipairs(generic.constraints) do
-						if generic.name == implementer.name and c.interface.name == interface.name then
-							name = "#" .. i .. "_" .. j
-						end
-					end
-				end
-				assert(name)
-				if containingSignature.modifier == "static" then
-					-- Get a parameter constraint
-					return freeze {
-						tag = "parameter-constraint",
-						interface = interface,
-						name = name,
-					}
-				else
-					-- Get a this constraint
-					assert(thisVariable)
-					return freeze {
-						tag = "this-constraint",
-						instance = thisVariable,
-						interface = interface,
-						name = name,
-					}
-				end
-			end
-			print(show(interface))
-			print(show(implementer))
-			print(string.rep(".", 80))
-			error("unhandled tag: " .. show(implementer))
-		end
-
-		-- RETURNS TODO
-		local function findConstraintByMember(genericType, modifier, name, location)
-			assertis(genericType, "GenericType+")
-			assertis(modifier, choiceType(constantType "static", constantType "method"))
-			assertis(name, "string")
-			assertis(location, "string")
-			assert(name:sub(1, 1):lower() == name:sub(1, 1))
-
-			local parameter, pi = table.findwith(definition.generics, "name", genericType.name)
-			assert(parameter)
-
-			local matches = {}
-			for ci, constraint in ipairs(parameter.constraints) do
-				local interface = interfaceDefinitionFromConstraint(constraint.interface)
-				local signature = table.findwith(interface.signatures, "name", name)
-				if signature then
-					local constraintIR = {
-						tag = "parameter-constraint",
-						name = "#" .. pi .. "_" .. ci,
-						location = constraint.location,
-						interface = constraint.interface,
-					}
-					if containingSignature.modifier == "method" then
-						constraintIR = {
-							tag = "this-constraint",
-							instance = thisVariable,
-							name = "#" .. pi .. "_" .. ci,
-							interface = constraint.interface,
-						}
-					end
-
-					table.insert(matches, freeze {
-						signature = signature,
-						interface = interface,
-						constraint = constraint.interface,
-						constraintIR = constraintIR,
-					})
-				end
-			end
-
-			-- TODO: get alternatives
-			local alternatives = {"???"}
-
-			-- Verify exactly one constraint supplies this method name
-			if #matches == 0 then
-				Report.NO_SUCH_METHOD {
-					modifier = modifier,
-					type = showType(genericType),
-					name = name,
-					definitionLocation = parameter.location,
-					location = location,
-					alternatives = alternatives,
-				}
-			elseif #matches > 1 then
-				Report.CONFLICTING_INTERFACES {
-					method = name,
-					interfaceOne = showType(matches[1].interface),
-					interfaceTwo = showType(matches[2].interface),
-					location = location,
-				}
-			end
-
-			-- Verify the method's modifier matches
-			local method = matches[1]
-			if method.signature.modifier ~= modifier then
-				Report.WRONG_MODIFIER {
-					signatureModifier = method.signature.modifier,
-					signatureLocation = method.signature.location,
-					callModifier = modifier,
-					location = location,
-				}
-			end
-
-			local methodFullName = method.interface.name .. "." .. method.signature.name
-			local out = table.with(method, "fullName", methodFullName)
-			assertis(out, recordType {
-				interface = "InterfaceIR",
-				signature = "Signature",
-				constraint = "InterfaceType+",
-				constraintIR = "ConstraintIR",
-				fullName = "string",
-			})
-			return out
-		end
-
-		-- RETURNS StatementIR, [Variable]
-		local function compileExpression(pExpression, scope)
-			assertis(pExpression, recordType {
-				tag = "string"
-			})
-			assertis(scope, listType(mapType("string", "VariableIR")))
-
-			if pExpression.tag == "string-literal" then
-				local out = {
-					name = generateLocalID("stringliteral"),
-					type = STRING_TYPE,
-					location = pExpression.location,
-				}
-
-				local block = buildBlock {
-					localSt(out),
-					{
-						tag = "string",
-						string = pExpression.value,
-						destination = out,
-						returns = "no",
-					},
-				}
-				return block, freeze {out}
-			elseif pExpression.tag == "int-literal" then
-				local out = {
-					name = generateLocalID("intliteral"),
-					type = INT_TYPE,
-					location = pExpression.location,
-				}
-
-				local block = buildBlock {
-					localSt(out),
-					{
-						tag = "int",
-						number = pExpression.value,
-						destination = out,
-						returns = "no",
-					}
-				}
-				return block, freeze {out}
-			elseif pExpression.tag == "new-expression" then
-				local out = {
-					name = generateLocalID("new"),
-					type = containerType,
-					location = pExpression.location .. ">"
-				}
-				assertis(out.type, "ConcreteType+")
-
-				if containingSignature.modifier ~= "static" then
-					Report.NEW_USED_OUTSIDE_STATIC {
-						location = pExpression.location,
-					}
-				end
-
-				local newTag
-				if definition.tag == "union" then
-					newTag = "new-union"
-				elseif definition.tag == "class" then
-					newTag = "new-class"
-				end
-
-				local newSt = {
-					tag = newTag,
-					type = containerType,
-					returns = "no",
-					constraints = {},
-					destination = out,
-				}
-
-				-- All of the constraints are provided as arguments to this
-				-- static function
-				for constraintName, interface in pairs(definition.constraints) do
-					newSt.constraints[constraintName] = freeze {
-						tag = "parameter-constraint",
-						name = constraintName,
-						location = pExpression.location,
-						interface = interface,
-					}
-				end
-
-				local evaluation = {}
-
-				-- Map is a map from field name to value variable
-				local map = {}
-
-				-- Evaluate all arguments to new
-				for _, argument in ipairs(pExpression.arguments) do
-					local subEvaluation, subOut = compileExpression(argument.value, scope)
-					if #subOut ~= 1 then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "field value",
-							expectedCount = 1,
-							givenCount = #subOut,
-							location = argument.location,
-						}
-					end
-					
-					table.insert(evaluation, subEvaluation)
-					assertis(evaluation, listType "StatementIR")
-
-					local field = table.findwith(definition.fields, "name", argument.name)
-					if not field then
-						Report.NO_SUCH_FIELD {
-							name = argument.name,
-							container = showType(containerType),
-							location = argument.location,
-						}
-					end
-
-					if not areTypesEqual(field.type, subOut[1].type) then
-						Report.TYPES_DONT_MATCH {
-							purpose = "field type",
-							expectedType = showType(field.type),
-							expectedLocation = field.location,
-							givenType = showType(subOut[1].type),
-							location = argument.location,
-						}
-					end
-
-					map[argument.name] = subOut[1]
-				end
-
-				-- Record the map as fields
-				if definition.tag == "union" then
-					newSt.field, newSt.value = next(map)
-
-					-- Verify that exactly one field is given for union new
-					if #pExpression.arguments ~= 1 then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "new union field list",
-							expectedCount = 1,
-							givenCount = #pExpression.arguments,
-							location = pExpression.location,
-						}
-					end
-				elseif definition.tag == "class" then
-					newSt.fields = map
-
-					-- Check that no fields are missing for class new
-					for _, field in ipairs(definition.fields) do
-						if not newSt.fields[field.name] then
-							Report.MISSING_VALUE {
-								purpose = "new " .. showType(containerType) .. " expression",
-								name = field.name,
-								location = pExpression.location,
-							}
-						end
-					end
-				end
-
-
-				local block = buildBlock(table.concatted(
-					evaluation, {localSt(out), newSt}
-				))
-				return block, freeze {out}
-			elseif pExpression.tag == "identifier" then
-				local block = buildBlock({})
-				local out = nil
-				for i = #scope, 1, -1 do
-					out = out or scope[i][pExpression.name]
-				end
-				if not out then
-					Report.NO_SUCH_VARIABLE {
-						name = pExpression.name,
-						location = pExpression.location,
-					}
-				end
-				return block, freeze {out}
-			elseif pExpression.tag == "static-call" then
-				local t = resolveType(pExpression.baseType)
-
-				-- Evaluate the arguments
-				local evaluation = {}
-				local argumentSources = {}
-				for _, argument in ipairs(pExpression.arguments) do
-					local subEvaluation, outs = compileExpression(
-						argument, scope
-					)
-
-					-- Verify each argument has exactly one value
-					if #outs ~= 1 then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "static argument",
-							expectedCount = 1,
-							givenCount = #outs,
-							location = argument.location,
-						}
-					end
-
-					table.insert(argumentSources, outs[1])
-					table.insert(evaluation, subEvaluation)
-				end
-
-				if t.tag == "generic+" then
-					-- Generic static function
-					local static = findConstraintByMember(t, "static", pExpression.funcName, t.location)
-					assert(static and static.signature.modifier == "static")
-					assertis(static.constraint, "InterfaceType+")
-
-					-- Map type variables to the type-values used for this instantiation
-					local substituter = getSubstituterFromConcreteType(static.constraint, allDefinitions)
-
-					-- Check the number of parameters
-					if #static.signature.parameters ~= #pExpression.arguments then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "static function `" .. static.fullName .. "`",
-							expectedCount = #static.signature.parameters,
-							givenCount = #pExpression.arguments,
-							location = pExpression.location,
-						}
-					end
-
-					-- Verify the argument types match the parameter types
-					for i, argument in ipairs(argumentSources) do
-						local parameterType = substituter(static.signature.parameters[i].type)
-						if not areTypesEqual(argument.type, parameterType) then
-							Report.TYPES_DONT_MATCH {
-								purpose = string.ordinal(i) .. " argument to " .. fullName,
-								expectedLocation = static.signature.parameters[i].location,
-								givenType = showType(argument.type),
-								location = argument.location,
-								expectedType = showType(parameterType)
-							}
-						end
-					end
-
-					-- Create variables for the output
-					local destinations = {}
-					for _, returnType in pairs(static.signature.returnTypes) do
-						local returnVariable = {
-							name = generateLocalID("return"),
-							type = substituter(returnType),
-							location = pExpression.location,
-						}
-						table.insert(destinations, returnVariable)
-						table.insert(evaluation, localSt(returnVariable))
-					end
-
-					-- Verify the bang matches
-					if not static.signature.bang ~= not pExpression.bang then
-						Report.BANG_MISMATCH {
-							modifier = static.signature.modifier,
-							fullName = fullName,
-							expected = static.signature.bang,
-							given = pExpression.bang,
-							signatureLocation = static.signature.location,
-							location = pExpression.location,
-						}
-					elseif static.signature.bang and not containingSignature.bang then
-						local fullName = definition.name .. "." .. containingSignature.name
-						Report.BANG_NOT_ALLOWED {
-							context = containingSignature.modifier .. " " .. fullName,
-							location = pExpression.location,
-						}
-					end
-
-					local callSt = {
-						tag = "generic-static-call",
-						constraint = static.constraintIR,
-						staticName = pExpression.funcName,
-						arguments = argumentSources,
-						destinations = destinations,
-						returns = "no",
-					}
-					assertis(callSt, "StatementIR")
-					table.insert(evaluation, callSt)
-
-					return buildBlock(evaluation), destinations
-				end
-
-				local baseDefinition = definitionFromType(t)
-
-				local fullName = showType(t) .. "." .. pExpression.funcName
-
-				-- Map type variables to the type-values used for this instantiation
-				local substituter = getSubstituterFromConcreteType(t, allDefinitions)
-
-				local method = table.findwith(baseDefinition.signatures,
-					"name", pExpression.funcName)
-				
-				local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
-				if not method or method.modifier ~= "static" then
-					Report.NO_SUCH_METHOD {
-						modifier = "static",
-						type = showType(t),
-						name = pExpression.funcName,
-						definitionLocation = baseDefinition.location,
-						alternatives = alternatives,
-						location = pExpression.location,
-					}
-				end
-
-				-- Check the number of parameters
-				if #method.parameters ~= #pExpression.arguments then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "static function `" .. fullName .. "`",
-						expectedCount = #method.parameters,
-						givenCount = #pExpression.arguments,
-						location = pExpression.location,
-					}
-				end
-
-				-- Verify the argument types match the parameter types
-				for i, argument in ipairs(argumentSources) do
-					local parameterType = substituter(method.parameters[i].type)
-					if not areTypesEqual(argument.type, parameterType) then
-						Report.TYPES_DONT_MATCH {
-							purpose = string.ordinal(i) .. " argument to " .. fullName,
-							expectedLocation = method.parameters[i].location,
-							givenType = showType(argument.type),
-							location = argument.location,
-							expectedType = showType(parameterType)
-						}
-					end
-				end
-
-				-- Collect the constraints
-				local constraints = {}
-				for gi, generic in ipairs(baseDefinition.generics) do
-					for ci, constraint in ipairs(generic.constraints) do
-						local key = "#" .. gi .. "_" .. ci
-						constraints[key] = constraintFromStruct(constraint.interface, t.arguments[gi])
-					end
-				end
-
-				-- Verify the bang matches
-				if not method.bang ~= not pExpression.bang then
-					Report.BANG_MISMATCH {
-						modifier = method.modifier,
-						fullName = fullName,
-						expected = method.bang,
-						given = pExpression.bang,
-						signatureLocation = method.location,
-						location = pExpression.location,
-					}
-				elseif method.bang and not containingSignature.bang then
-					local fullName = definition.name .. "." .. containingSignature.name
-					Report.BANG_NOT_ALLOWED {
-						context = containingSignature.modifier .. " " .. fullName,
-						location = pExpression.location,
-					}
-				end
-
-				-- Create variables for the output
-				local outs = {}
-				for _, returnType in pairs(method.returnTypes) do
-					local returnVariable = {
-						name = generateLocalID("return"),
-						type = substituter(returnType),
-						location = pExpression.location,
-					}
-					table.insert(outs, returnVariable)
-					table.insert(evaluation, localSt(returnVariable))
-				end
-
-				local call = {
-					tag = "static-call",
-					baseType = t,
-					name = method.name,
-					arguments = argumentSources,
-					constraints = constraints,
-					destinations = outs,
-					returns = "no",
-				}
-				assertis(call, "StaticCallSt")
-				table.insert(evaluation, call)
-				
-				return buildBlock(evaluation), freeze(outs)
-			elseif pExpression.tag == "method-call" then
-				-- Compile the base instance
-				local baseEvaluation, baseInstanceValues =
-					compileExpression(pExpression.base, scope)
-				if #baseInstanceValues ~= 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "method base expression",
-						expectedCount = 1,
-						givenCount = #baseInstanceValues,
-						location = pExpression.location,
-					}
-				end
-				local evaluation = {baseEvaluation}
-				local baseInstance = baseInstanceValues[1]
-
-				-- Evaluate the arguments
-				local arguments = {}
-				for i, pArgument in ipairs(pExpression.arguments) do
-					local subEvaluation, outs = compileExpression(pArgument, scope)
-					
-					-- Verify each argument has exactly one value
-					if #outs ~= 1 then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "method argument",
-							expectedCount = 1,
-							givenCount = #outs,
-							location = pArgument.location,
-						}
-					end
-
-					table.insert(arguments, table.with(outs[1], "location", pArgument.location))
-					table.insert(evaluation, subEvaluation)
-				end
-				assertis(evaluation, listType "StatementIR")
-				assertis(arguments, listType "VariableIR")
-
-				if baseInstance.type.tag == "generic+" then
-					-- Generic instance
-					local method = findConstraintByMember(
-						baseInstance.type,
-						"method",
-						pExpression.methodName,
-						pExpression.location
-					)
-					assertis(method.signature, "Signature")
-
-					local substituter = getSubstituterFromConcreteType(method.constraint, allDefinitions)
-					assertis(substituter, "function")
-
-					local methodFullName = method.fullName
-
-					-- Verify the correct number of arguments is provided
-					if #arguments ~= #method.signature.parameters then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "interface method " .. methodFullName,
-							expectedCount = #method.signature.parameters,
-							givenCount = #arguments,
-							location = pExpression.location,
-						}
-					end
-
-					-- Verify the types of the arguments match the parameters
-					for i, argument in ipairs(arguments) do
-						local expectedType = substituter(method.signature.parameters[i].type)
-						if not areTypesEqual(argument.type, expectedType) then
-							Report.TYPES_DONT_MATCH {
-								purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
-								expectedType =	showType(expectedType),
-								expectedLocation = method.signature.parameters[i].location,
-								givenType = showType(argument.type),
-								location = argument.location,
-							}
-						end
-					end
-
-					-- Verify the bang matches
-					if not method.signature.bang ~= not pExpression.bang then
-						Report.BANG_MISMATCH {
-							modifier = method.signature.modifier,
-							fullName = methodFullName,
-							expected = method.signature.bang,
-							given = pExpression.bang,
-							signatureLocation = method.signature.location,
-							location = pExpression.location,
-						}
-					end
-
-					-- Create destinations for each return value
-					local destinations = {}
-					for _, returnType in ipairs(method.signature.returnTypes) do
-						local destination = {
-							name = generateLocalID("return"),
-							type = substituter(returnType),
-							location = pExpression.location,
-						}
-						table.insert(destinations, destination)
-						table.insert(evaluation, localSt(destination))
-					end
-
-					local callSt = {
-						tag = "generic-method-call",
-						baseInstance = baseInstance,
-						constraint = method.constraintIR,
-						methodName = pExpression.methodName,
-						arguments = arguments,
-						destinations = destinations,
-						returns = "no",
-					}
-					assertis(callSt, "StatementIR")
-					table.insert(evaluation, callSt)
-
-					return buildBlock(evaluation), destinations
-				end
-
-				-- Concrete instance
-				local baseDefinition = definitionFromType(baseInstance.type)
-				local substituter = getSubstituterFromConcreteType(baseInstance.type, allDefinitions)
-				
-				-- Find the definition of the method being invoked
-				local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
-				local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
-				if not method then
-					Report.NO_SUCH_METHOD {
-						type = showType(baseInstance.type),
-						modifier = "method",
-						name = pExpression.methodName,
-						alternatives = alternatives,
-						location = pExpression.location,
-					}
-				end
-				assertis(method, "Signature")
-
-				local methodFullName = baseDefinition.name .. "." .. pExpression.methodName
-				if not method or method.modifier ~= "method" then
-					Report.NO_SUCH_METHOD {
-						modifier = "method",
-						type = showType(baseInstance.type),
-						name = pExpression.name,
-						definitionLocation = baseDefinition.location,
-						alternatives = alternatives,
-						location = pExpression.location,
-					}
-				end
-
-				-- Verify the correct number of arguments is provided
-				if #arguments ~= #method.parameters then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "interface method " .. methodFullName,
-						expectedCount = #method.parameters,
-						givenCount = #arguments,
-						location = pExpression.location,
-					}
-				end
-
-				-- Verify the types of the arguments match the parameters
-				for i, argument in ipairs(arguments) do
-					if not areTypesEqual(argument.type, substituter(method.parameters[i].type)) then
-						Report.TYPES_DONT_MATCH {
-							purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
-							expectedType =	showType(method.parameters[i].type),
-							expectedLocation = method.parameters[i].location,
-							givenType = showType(argument.type),
-							location = argument.location,
-						}
-					end
-				end
-
-				-- Verify the bang matches
-				assertis(method, "Signature")
-				if not method.bang ~= not pExpression.bang then
-					Report.BANG_MISMATCH {
-						modifier = method.modifier,
-						fullName = methodFullName,
-						expected = method.bang,
-						given = pExpression.bang,
-						signatureLocation = method.location,
-						location = pExpression.location,
-					}
-				elseif method.bang and not containingSignature.bang then
-					Report.BANG_NOT_ALLOWED {
-						context = containingSignature.modifier .. " " .. definition.name .. "." .. containingSignature.name,
-						location = pExpression.location,
-					}
-				end
-
-				-- Create destinations for each return value
-				local destinations = {}
-				for _, returnType in ipairs(method.returnTypes) do
-					local destination = {
-						name = generateLocalID("return"),
-						type = substituter(returnType),
-						location = pExpression.location,
-					}
-					table.insert(destinations, destination)
-					table.insert(evaluation, localSt(destination))
-				end
-
-				table.insert(evaluation, {
-					tag = "method-call",
-					baseInstance = baseInstance,
-					methodName = method.name,
-					arguments = arguments,
-					destinations = destinations,
-					returns = "no"
-				})
-
-				return buildBlock(evaluation), destinations
-			elseif pExpression.tag == "keyword" then
-				if pExpression.keyword == "false" or pExpression.keyword == "true" then
-					local boolean = {
-						type = BOOLEAN_TYPE,
-						name = generateLocalID("booleanliteral"),
-						location = pExpression.location,
-					}
-					local execution = {
-						localSt(boolean),
-						{
-							tag = "boolean",
-							boolean = pExpression.keyword == "true",
-							destination = boolean,
-							returns = "no",
-						},
-					}
-					return buildBlock(execution), {boolean}
-				elseif pExpression.keyword == "this" then
-					local variable = {
-						type = containerType,
-						name = generateLocalID("this"),
-						location = pExpression.location,
-					}
-
-					-- Check that this is a method
-					if containingSignature.modifier ~= "method" then
-						Report.THIS_USED_OUTSIDE_METHOD {
-							location = pExpression.location,
-						}
-					end
-
-					local execution = {
-						localSt(variable),
-						{
-							tag = "this",
-							destination = variable,
-							returns = "no",
-						},
-					}
-					return buildBlock(execution), {variable}
-				elseif pExpression.keyword == "unit" then
-					local variable = {
-						type = UNIT_TYPE,
-						name = generateLocalID("unit"),
-						location = pExpression.location,
-					}
-					local execution = {
-						localSt(variable),
-						{
-							tag = "unit",
-							destination = variable,
-							returns = "no",
-						}
-					}
-					return buildBlock(execution), {variable}
-				end
-				error("TODO: keyword `" .. pExpression.keyword .. "`")
-			elseif pExpression.tag == "field" then
-				local baseEvaluation, bases = compileExpression(pExpression.base, scope)
-				if #bases ~= 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "base of a `." .. pExpression.field .. "` field access",
-						givenCount = #bases,
-						expectedCount = 1,
-						location = pExpression.location,
-					}
-				end
-
-				local base = bases[1]
-				if base.type.tag ~= "concrete-type+" then
-					Report.TYPE_MUST_BE_CLASS {
-						givenType = showType(base.type),
-						location = pExpression.location,
-					}
-				end
-
-				local definition = definitionFromType(base.type)
-				if definition.tag ~= "class" then
-					Report.TYPE_MUST_BE_CLASS {
-						givenType = showType(base.type),
-						location = pExpression.location,
-					}
-				end
-
-				local field = table.findwith(definition.fields, "name", pExpression.field)
-				if not field then
-					Report.NO_SUCH_FIELD {
-						container = showType(base.type),
-						name = pExpression.field,
-						location = pExpression.location,
-					}
-				end
-
-				-- TODO: verify that access is to the current class
-
-				local result = {
-					type = field.type,
-					name = generateLocalID("field"),
-					location = pExpression.location,
-				}
-				local accessStatement = {
-					tag = "field",
-					name = pExpression.field,
-					base = base,
-					destination = result,
-					returns = "no",
-				}
-				return buildBlock {baseEvaluation, localSt(result), accessStatement}, {result}
-			elseif pExpression.tag == "binary" then
-				-- Compile the two operands
-				local leftEvaluation, leftOut = compileExpression(pExpression.left, scope)
-				local rightEvaluation, rightOut = compileExpression(pExpression.right, scope)
-
-				-- Verify there is one value on each side
-				if #leftOut ~= 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "the left operand of `" .. pExpression.operator .. "`",
-						expectedCount = 1,
-						givenCount = #leftOut,
-						location = pExpression.left.location,
-					}
-				elseif #rightOut ~= 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "the right operand of `" .. pExpression.operator .. "`",
-						expectedCount = 1,
-						givenCount = #rightOut,
-						location = pExpression.right.location,
-					}
-				end
-
-				local left, right = leftOut[1], rightOut[1]
-
-				-- Handle specific operators
-				if pExpression.operator == "==" then
-					-- Check that the values are of the same type
-					if not areTypesEqual(left.type, right.type) then
-						Report.EQ_TYPE_MISMATCH {
-							leftType = showType(left.type),
-							rightType = showType(right.type),
-							location = pExpression.location,
-						}
-					end
-				end
-
-				local remap = {
-					["=="] = "eq",
-					["/"] = "quotient",
-					["*"] = "product",
-					["+"] = "sum",
-					["-"] = "difference",
-					["<"] = "lessThan",
-					["++"] = "concatenate",
-				}
-
-				local methodName = remap[pExpression.operator]
-				if not methodName then
-					return Report.UNKNOWN_OPERATOR_USED {
-						operator = pExpression.operator,
-						location = pExpression.location,
-					}
-				end
-
-				-- Rewrite the operations as a method call
-				local rewrite = freeze {
-					tag = "method-call",
-					base = pExpression.left,
-					bang = false,
-					arguments = {pExpression.right},
-					methodName = methodName,
-					location = pExpression.location,
-				}
-
-				return compileExpression(rewrite, scope)
-			end
-
-			error("TODO expression: " .. show(pExpression))
-		end
+		local environment = freeze {
+			resolveType = resolveType,
+			containerType = containerType,
+			containingSignature = containingSignature,
+			allDefinitions = allDefinitions,
+			thisVariable = thisVariable,
+		}
 
 		local compileBlock
 
@@ -2126,8 +2232,7 @@ local function semanticsSmol(sources, main)
 				end
 
 				-- Evaluate the right hand side
-				local evaluation, values =
-					compileExpression(pStatement.value, scope) 
+				local evaluation, values = compileExpression(pStatement.value, scope, environment) 
 
 				-- Check the return types match the value types
 				if #values ~= #declarations then
@@ -2176,7 +2281,8 @@ local function semanticsSmol(sources, main)
 				if #pStatement.values == 1 then
 					-- A single value must have exactly the target multiplicity
 					local subEvaluation, subsources = compileExpression(
-						pStatement.values[1], scope)
+						pStatement.values[1], scope, environment
+					)
 					
 					if #subsources ~= #containingSignature.returnTypes then
 						Report.RETURN_COUNT_MISMATCH {
@@ -2191,7 +2297,7 @@ local function semanticsSmol(sources, main)
 				else
 					-- If multiple values are given, each must be a 1-tuple
 					for _, value in ipairs(pStatement.values) do
-						local subevaluation, subsources = compileExpression(value, scope)
+						local subevaluation, subsources = compileExpression(value, scope, environment)
 						if #subsources ~= 1 then
 							Report.WRONG_VALUE_COUNT {
 								purpose = "value in multiple-value return statement",
@@ -2234,7 +2340,8 @@ local function semanticsSmol(sources, main)
 			elseif pStatement.tag == "do-statement" then
 				local evaluation, out = compileExpression(
 					pStatement.expression,
-					scope
+					scope,
+					environment
 				)
 				assert(#out ~= 0)
 				if #out > 1 then
@@ -2256,7 +2363,7 @@ local function semanticsSmol(sources, main)
 
 				return evaluation
 			elseif pStatement.tag == "if-statement" then
-				local conditionEvaluation, conditionOut = compileExpression(pStatement.condition, scope)
+				local conditionEvaluation, conditionOut = compileExpression(pStatement.condition, scope, environment)
 				assert(#conditionOut ~= 0)
 				if #conditionOut > 1 then
 					Report.WRONG_VALUE_COUNT {
@@ -2288,7 +2395,7 @@ local function semanticsSmol(sources, main)
 							return buildBlock({})
 						end
 					end
-					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(pStatement.elseifs[i].condition, scope)
+					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(pStatement.elseifs[i].condition, scope, environment)
 					assert(#elseIfConditionOut ~= 0)
 					if #elseIfConditionOut > 1 then
 						Report.WRONG_VALUE_COUNT {
@@ -2337,7 +2444,7 @@ local function semanticsSmol(sources, main)
 				return buildBlock({conditionEvaluation, ifSt})
 			elseif pStatement.tag == "match-statement" then
 				-- Evaluate the base expression
-				local baseEvaluation, baseOuts = compileExpression(pStatement.base, scope)
+				local baseEvaluation, baseOuts = compileExpression(pStatement.base, scope, environment)
 				if #baseOuts ~= 1 then
 					Report.WRONG_VALUE_COUNT {
 						purpose = "match-statement expression",
@@ -2358,7 +2465,7 @@ local function semanticsSmol(sources, main)
 						location = base.location,
 					}
 				end
-				local definition = definitionFromType(base.type)
+				local definition = definitionFromType(base.type, allDefinitions)
 				if definition.tag ~= "union" then
 					Report.TYPE_MUST_BE_UNION {
 						purpose = "expression in match-statement",
@@ -2493,7 +2600,7 @@ local function semanticsSmol(sources, main)
 				local out = {}
 
 				-- Evaluate the right-hand-side
-				local valueEvaluation, valueOut = compileExpression(pStatement.value, scope)
+				local valueEvaluation, valueOut = compileExpression(pStatement.value, scope, environment)
 				if #valueOut ~= #pStatement.variables then
 					Report.WRONG_VALUE_COUNT {
 						purpose = "assignment statement",
@@ -2707,5 +2814,5 @@ end
 
 return {
 	semantics = semanticsSmol,
-	definitionFromTypeSemantics = definitionFromTypeSemantics,
+	definitionFromType = definitionFromType,
 }

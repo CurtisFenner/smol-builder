@@ -591,6 +591,8 @@ REGISTER_TYPE("integer", predicateType(isinteger))
 REGISTER_TYPE("string", predicateType(isstring))
 REGISTER_TYPE("function", predicateType(isfunction))
 REGISTER_TYPE("boolean", predicateType(isboolean))
+REGISTER_TYPE("false", constantType(false))
+REGISTER_TYPE("true", constantType(true))
 REGISTER_TYPE("nil", constantType(nil))
 REGISTER_TYPE("any", predicateType(function() return true end))
 

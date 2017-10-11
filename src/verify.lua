@@ -2,7 +2,7 @@ local calculateSemantics = import "semantics.lua"
 
 -- RETURNS a symbolic value
 local function tupleAccess(value, index)
-	assertis(index, "natural")
+	assertis(index, "integer")
 	
 	-- TODO!
 end
@@ -17,6 +17,16 @@ local function valueInt(int)
 end
 
 local function valueString(str)
+	-- TODO
+end
+
+local function valueBoolean(bool)
+	-- TODO
+end
+
+-- MODIFIES scope
+-- RETURNS nothing
+local function addPredicate(scope, value)
 	-- TODO
 end
 
@@ -68,6 +78,7 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "verify" then
 		-- TODO!
+
 		error "TODO"
 	elseif statement.tag == "local" then
 		-- Do nothing
@@ -83,6 +94,9 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "field" then
 		-- TODO:
 		return
+	elseif statement.tag == "variant" then
+		-- TODO:
+		return
 	elseif statement.tag == "int" then
 		-- Integer literal
 		assignRaw(scope, statement.destination, valueInt(statement.number))
@@ -90,6 +104,10 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "string" then
 		-- String literal
 		assignRaw(scope, statement.destination, valueString(statement.string))
+		return
+	elseif statement.tag == "boolean" then
+		-- Boolean literal
+		assignRaw(scope, statement.destination, valueBoolean(statement.boolean))
 		return
 	elseif statement.tag == "method-call" or statement.tag == "generic-method-call" then
 		-- TODO:
@@ -129,6 +147,18 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "assign" then
 		assignRaw(scope, statement.destination, statement.source)
 		return
+	elseif statement.tag == "match" then
+		-- Check each case
+		for _, case in ipairs(statement.cases) do
+			beginSubscope(scope)
+			-- TODO: add predicate
+			addPredicate(scope, {"is", statement.base, statement.variant})
+			verifyStatement(case.statement, scope, semantics)
+			endSubscope(scope)
+		end
+
+		-- TODO: incorporate intersection (see if)
+		return
 	elseif statement.tag == "if" then
 		-- Check then branch
 		beginSubscope(scope)
@@ -142,7 +172,7 @@ local function verifyStatement(statement, scope, semantics)
 		verifyStatement(statement.bodyElse, scope, semantics)
 		endSubscope(scope)
 
-		-- TODO: incorporate intersection
+		-- TODO: incorporate intersection (see match)
 		return
 	end
 
@@ -154,8 +184,6 @@ local function verifyFunction(func, semantics)
 	assertis(func, "FunctionIR")
 	assertis(semantics, "Semantics")
 	assert(func.body)
-
-	print(func.name, func, semantics)
 
 	verifyStatement(func.body, {{}}, semantics)
 end
