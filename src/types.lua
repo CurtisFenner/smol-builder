@@ -337,7 +337,7 @@ constantType = memoized(1, constantType)
 
 -- RETURNS a type-predicate
 function recordType(record)
-	assert(isobject(record))
+	assert(isobject(record), "record type must be given a table")
 
 	for key, value in pairs(record) do
 		assert(isstring(key), "record key must be string")

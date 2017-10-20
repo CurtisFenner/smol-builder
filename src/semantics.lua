@@ -688,23 +688,91 @@ end
 
 local compileExpression
 
-local function generatePreconditionVerify(expression, method, environment)
+-- RETURNS a StatementIR
+local function generatePreconditionVerify(expression, method, invocation, environment)
 	assertis(expression, "any")
 	assertis(method, "Signature")
+	assertis(invocation, recordType {
+		arguments = listType "VariableIR",
+		this = choiceType(constantType(false), "VariableIR"),
+	})
 	assertis(environment, recordType {})
 	
-	local scope = {}
+	local subEnvironment = {
+		resolveType = environment.resolveType,
+		containerType = invocation.container,
+		containingSignature = method,
+		allDefinitions = environment.allDefinitions,
+		thisVariable = invocation.this,
+	}
+	local scope = {{}}
+	for i, argument in ipairs(invocation.arguments) do
+		scope[1][method.parameters[i].name] = argument
+	end
 	assertis(scope, listType(mapType("string", "VariableIR")))
-
+	
 	local evaluation, out = compileExpression(expression, scope, environment)
-	error "TODO generate pre condition verify st"
+	if #out ~= 1 or not areTypesEqual(out[1].type, BOOLEAN_TYPE) then
+		-- TODO: this is the wrong error message for wrong count
+		Report.TYPES_DONT_MATCH {
+			purpose = "assert expression in `requires`",
+			expectedType = showType(BOOLEAN_TYPE),
+			givenType = showType(out[1].type),
+			location = out[1].location,
+		}
+	end
+
+	return {
+		tag = "verify",
+		variable = out[1],
+		body = evaluation,
+		returns = "no",
+		location = expression.location,
+	}
 end
 
-local function generatePostconditionAssume(expression, method, environment)
+-- RETURNS a StatementIR
+local function generatePostconditionAssume(expression, method, invocation, environment)
 	assertis(expression, "any")
 	assertis(method, "Signature")
+	assertis(invocation, recordType {
+		arguments = listType "VariableIR",
+		this = choiceType(constantType(false), "VariableIR"),
+	})
+	assertis(environment, recordType {})
+	
+	local subEnvironment = {
+		resolveType = environment.resolveType,
+		containerType = invocation.container,
+		containingSignature = method,
+		allDefinitions = environment.allDefinitions,
+		thisVariable = invocation.this,
+	}
 
-	error "TODO: generate post condition assume st"
+	local scope = {{}}
+	for i, argument in ipairs(invocation.arguments) do
+		scope[1][method.parameters[i].name] = argument
+	end
+	assertis(scope, listType(mapType("string", "VariableIR")))
+
+	local evaluation, out = compileExpression(expression, scope, subEnvironment)
+	if #out ~= 1 or not areTypesEqual(out[1].type, BOOLEAN_TYPE) then
+		-- TODO: this is the wrong error message for wrong count
+		Report.TYPES_DONT_MATCH {
+			purpose = "assertion expression in `ensures`",
+			expectedType = showType(BOOLEAN_TYPE),
+			givenType = showType(out[1].type),
+			location = out[1].location,
+		}
+	end
+
+	return {
+		tag = "assume",
+		body = evaluation,
+		variable = out[1],
+		returns = "no",
+		location = expression.location,
+	}
 end
 
 -- RETURNS StatementIR, [Variable]
@@ -953,6 +1021,7 @@ function compileExpression(pExpression, scope, environment)
 					name = generateLocalID("return"),
 					type = substituter(returnType),
 					location = pExpression.location,
+					returns = "no",
 				}
 				table.insert(destinations, returnVariable)
 				table.insert(evaluation, localSt(returnVariable))
@@ -978,7 +1047,12 @@ function compileExpression(pExpression, scope, environment)
 
 			-- Generate Verify statements
 			for _, require in ipairs(static.signature.requires) do
-				local verification = generatePreconditionVerify(require, static.signature, environment)
+				local verification = generatePreconditionVerify(
+					require,
+					static.signature,
+					{arguments = argumentSources, this = false},
+					environment
+				)
 				table.insert(evaluation, verification)
 			end
 
@@ -995,7 +1069,12 @@ function compileExpression(pExpression, scope, environment)
 
 			-- Generate Assume statements
 			for _, ensure in ipairs(static.signature.ensures) do
-				local assumption = generatePostconditionAssume(ensure, static.signature, environment)
+				local assumption = generatePostconditionAssume(
+					ensure,
+					static.signature,
+					{arguments = argumentSources, this = false, container = t},
+					environment
+				)
 				table.insert(evaluation, assumption)
 			end
 
@@ -1095,14 +1174,19 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Generate Verify statements
 		for _, require in ipairs(method.requires) do
-			local verification = generatePreconditionVerify(require, method, environment)
+			local verification = generatePreconditionVerify(
+				require,
+				method,
+				{arguments = argumentSources, this = false},
+				environment
+			)
 			table.insert(evaluation, verification)
 		end
 
 		local call = {
 			tag = "static-call",
 			baseType = t,
-			name = method.name,
+			staticName = method.name,
 			arguments = argumentSources,
 			constraints = constraints,
 			destinations = outs,
@@ -1113,7 +1197,12 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Generate Assume statements
 		for _, ensure in ipairs(method.ensures) do
-			local assumption = generatePostconditionAssume(ensure, method, environment)
+			local assumption = generatePostconditionAssume(
+				ensure,
+				method,
+				{arguments = argumentSources, this = false, container = t},
+				environment
+			)
 			table.insert(evaluation, assumption)
 		end
 		
@@ -1223,7 +1312,12 @@ function compileExpression(pExpression, scope, environment)
 
 			-- Generate Verify statements
 			for _, require in ipairs(method.signature.requires) do
-				local verification = generatePreconditionVerify(require, method.signature, environment)
+				local verification = generatePreconditionVerify(
+					require,
+					method.signature,
+					{arguments = arguments, this = baseInstance},
+					environment
+				)
 				table.insert(evaluation, verification)
 			end
 			
@@ -1241,7 +1335,16 @@ function compileExpression(pExpression, scope, environment)
 			
 			-- Generate Assume statements
 			for _, ensure in ipairs(method.signature.ensures) do
-				local assumption = generatePostconditionAssume(ensure, method.signature, environment)
+				local assumption = generatePostconditionAssume(
+					ensure,
+					method.signature,
+					{
+						arguments = arguments,
+						this = baseInstance,
+						container = baseInstance.type,
+					},
+					environment
+				)
 				table.insert(evaluation, assumption)
 			end
 
@@ -1333,7 +1436,12 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Generate Verify statements
 		for _, require in ipairs(method.requires) do
-			local verification = generatePreconditionVerify(require, method, environment)
+			local verification = generatePreconditionVerify(
+				require,
+				method,
+				{arguments = arguments, this = baseInstance},
+				environment
+			)
 			table.insert(evaluation, verification)
 		end
 
@@ -1348,7 +1456,16 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Generate Assume statements
 		for _, ensure in ipairs(method.ensures) do
-			local assumption = generatePostconditionAssume(ensure, method, environment)
+			local assumption = generatePostconditionAssume(
+				ensure,
+				method,
+				{
+					arguments = arguments,
+					this = baseInstance,
+					container = baseInstance.type,
+				},
+				environment
+			)
 			table.insert(evaluation, assumption)
 		end
 
@@ -1408,6 +1525,19 @@ function compileExpression(pExpression, scope, environment)
 				}
 			}
 			return buildBlock(execution), {variable}
+		elseif pExpression.keyword == "return" then
+			-- TODO: mark as uncomputable
+			local returns = environment.containingSignature.returnTypes
+			assert(#returns == 1, "TODO: deal with multiple return values")
+			local variable = {
+				type = returns[1],
+				name = generateLocalID("return"),
+				returns = "no",
+				location = pExpression.location,
+				computable = false,
+			}
+
+			return localSt(variable), {variable}
 		end
 		error("TODO: keyword `" .. pExpression.keyword .. "`")
 	elseif pExpression.tag == "field" then
@@ -2814,5 +2944,7 @@ end
 
 return {
 	semantics = semanticsSmol,
+	showType = showType,
+	showInterfaceType = showInterfaceType,
 	definitionFromType = definitionFromType,
 }

@@ -1062,13 +1062,17 @@ REGISTER_TYPE("AbstractStatementIR", recordType {
 })
 
 EXTEND_TYPE("AssumeSt", "AbstractStatementIR", recordType {
-	tag = constantType "assume",
+	tag = constantType "assume", 
+	body = "StatementIR",
 	variable = "VariableIR",
+	location = "string",
 })
 
 EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
 	tag = constantType "verify",
+	body = "StatementIR",
 	variable = "VariableIR",
+	location = "string",
 })
 
 EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {
@@ -1147,7 +1151,7 @@ EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
-	name = "string",
+	staticName = "string",
 })
 
 EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {

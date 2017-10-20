@@ -267,6 +267,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 	assertis(statement, "StatementIR")
 	assertis(structScope, mapType("string", "string"))
 	assertis(demandTuple, "function")
+	statement = freeze(statement)
 
 	if statement.tag == "block" then
 		for _, subStatement in ipairs(statement.statements) do
@@ -383,7 +384,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("}")
 		return
 	elseif statement.tag == "static-call" then
-		comment("... = " .. showType(statement.baseType) .. "." .. statement.name .. "(...);")
+		comment("... = " .. showType(statement.baseType) .. "." .. statement.staticName .. "(...);")
 		-- Collect value arguments
 		local argumentNames = {}
 		for _, argument in ipairs(statement.arguments) do
@@ -400,14 +401,14 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 
 		-- Emit code
-		local invocation = staticFunctionName(statement.name, statement.baseType.name)
+		local invocation = staticFunctionName(statement.staticName, statement.baseType.name)
 		local arguments = table.concat(argumentNames, ", ")
 
 		local class = table.findwith(semantics.classes, "name", statement.baseType.name)
 		local union = table.findwith(semantics.unions, "name", statement.baseType.name)
 		local definition = class or union
 		assert(definition)
-		local signature = table.findwith(definition.signatures, "name", statement.name)
+		local signature = table.findwith(definition.signatures, "name", statement.staticName)
 		assert(signature)
 
 		local types = {}
