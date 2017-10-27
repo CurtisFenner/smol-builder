@@ -2,6 +2,9 @@ local calculateSemantics = import "semantics.lua"
 local showType = calculateSemantics.showType
 local showInterfaceType = calculateSemantics.showInterfaceType
 
+local theorem = import "theorem.lua"
+local verifyTheory = import "verify-theory.lua"
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -68,6 +71,50 @@ REGISTER_TYPE("Assertion", choiceType(
 		value = "Assertion",
 	}
 ))
+
+local assertionRecursionMap = freeze {
+	["new-union"] = {"value"},
+	["new-class"] = {"fields{}"},
+	["static"] = {"arguments{}"},
+	["method"] = {"base", "arguments{}"},
+	["unit"] = {},
+	["this"] = {},
+	["boolean"] = {},
+	["string"] = {},
+	["int"] = {},
+	["tuple"] = {"value"},
+	["variable"] = {},
+}
+
+
+-- RETURNS an Assertion
+local function assertionReplaced(expression, variable, with)
+	assertis(expression, "Assertion")
+	assertis(variable, "string")
+	assertis(with, "Assertion")
+
+	if expression.tag == "variable" then
+		if expression.variable.name == variable then
+			return with
+		end
+	end
+
+	assert(assertionRecursionMap[expression.tag])
+	local copy = {}
+	for key, value in pairs(expression) do
+		copy[key] = value
+	end
+	for _, key in ipairs(assertionRecursionMap[expression.tag]) do
+		if key:sub(-2) == "{}" then
+			for k, v in pairs(copy[key:sub(1, -3)]) do
+				copy[key:sub(1, -3)][k] = assertionReplaced(v, variable, with)
+			end
+		else
+			copy[key] = assertionReplaced(copy[key], variable, with)
+		end
+	end
+	return freeze(copy)
+end
 
 -- RETURNS a string
 local function showAssertion(assertion)
@@ -185,6 +232,18 @@ local function valueBoolean(bool)
 	}
 end
 
+-- RETURNS an Assertion
+local function variableAssertion(scope, variable)
+	-- TODO: get rid of scope
+	assertis(scope, listType(listType "Action"))
+	assertis(variable, "VariableIR")
+
+	return {
+		tag = "variable",
+		variable = variable,
+	}
+end
+
 -- MODIFIES scope
 -- RETURNS nothing
 local function addPredicate(scope, value)
@@ -211,10 +270,85 @@ local function assignRaw(scope, destination, value)
 	})
 end
 
+-- RETURNS an assertion representing the conjunction of all inputs
+local function andAssertion(assertions)
+	if #assertions == 0 then
+		return valueBoolean(true)
+	elseif #assertions == 1 then
+		return assertions[1]
+	end
+	local a = assertions[1]
+	for i = 2, #assertions do
+		a = {
+			tag = "method",
+			base = a,
+			arguments = {assertions[i]},
+			methodName = "and",
+		}
+	end
+	return a
+end
+
 -- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
-local function mustModel(scope, predicate)
+local function mustModel(scope, target)
+	assertis(scope, listType(listType "Action"))
+	assertis(target, "Assertion")
+
+	-- TODO: come up with something that deals with loops
+	local predicates = {}
+	local assignments = {}
+
+	-- RETURNS an Assertion
+	local function inNow(a)
+		assertis(a, "Assertion")
+		assertis(assignments, mapType("string", "Assertion"))
+		for variable, replacement in pairs(assignments) do
+			a = assertionReplaced(a, variable, replacement)
+		end
+		return a
+	end
+
+	-- Translate assignments as a substitution in all subsequent predicates
+	for i, frame in ipairs(scope) do
+		for j, action in ipairs(frame) do
+			if action.tag == "assignment" then
+				local newID = action.destination.name .. "'" .. i .. "'" .. j
+				local newV = variableAssertion(scope, table.with(action.destination, "name", newID))
+				table.insert(predicates, {
+					tag = "method",
+					methodName = "eq",
+					base = inNow(action.value),
+					arguments = {newV},
+				})
+				assignments[action.destination.name] = newV
+			elseif action.tag == "predicate" then
+				table.insert(predicates, inNow(action.value))
+			else
+				error("unknown action tag `" .. action.tag .. "`")
+			end
+		end
+	end
+	assertis(predicates, listType "Assertion")
+
+	print("mustModel ? ", showAssertion(inNow(target)))
+	for i, p in ipairs(predicates) do
+		print(i, showAssertion(p))
+	end
+
+	local given = andAssertion(predicates)
+	assertis(given, "Assertion")
+	local tautology = {
+		tag = "method",
+		methodName = "implies",
+		base = given,
+		arguments = {inNow(target)},
+	}
+	assertis(tautology, "Assertion")
+
+	local correct, counter = theorem.isTautology(verifyTheory, tautology)
+
 	-- TODO:
-	return false
+	return correct
 end
 
 -- MODIFIES scope
@@ -251,17 +385,6 @@ local function dumpScope(scope)
 			end
 		end
 	end
-end
-
--- RETURNS an Assertion
-local function variableAssertion(scope, variable)
-	assertis(scope, listType(listType "Action"))
-	assertis(variable, "VariableIR")
-
-	return {
-		tag = "variable",
-		variable = variable,
-	}
 end
 
 -- RETURNS an Assertion
@@ -315,7 +438,7 @@ local function verifyStatement(statement, scope, semantics)
 		verifyStatement(statement.body, scope, semantics)
 
 		-- Check
-		local models = mustModel(scope, statement.variable)
+		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
 			print("# Does not model", statement.variable.name)
 			dumpScope(scope)
@@ -448,7 +571,6 @@ local function verifyFunction(func, semantics)
 	assert(func.body)
 
 	print("= " .. func.name .. " " .. string.rep("=", 77 - #func.name))
-	print(showStatement(func.body))
 
 	verifyStatement(func.body, {{}}, semantics)
 end

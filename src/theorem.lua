@@ -1,17 +1,23 @@
 local theorem = {}
 
 REGISTER_TYPE("Theory", recordType {
-	-- argument: {assertion_t => boolean}
-	-- RETURNS [satisfaction_t]
-	satisfactions = "function",
+	-- argument: (self, model_t, assertion_t)
+	-- RETURNS true when assertion_t provably follows from the given simple
+	-- model
+	inModel = "function",
 
-	-- argument: (assertion_t, boolean)
+	-- argument: (self, assertion_t, boolean)
 	-- RETURNS false
 	-- RETURNS [assertion_t], [[boolean]]
 	breakup = "function",
 
+	-- argument: self, map(assertion_t => boolean)
+	-- RETURNS true if it provably inconsistent
+	-- RETURNS false if it is not probably inconsistent.
+	-- It is SAFE for this function to return `false` on inconsistent inputs.
+	isInconsistent = "function",
+
 	assertion_t = "any",
-	satisfaction_t = "any",
 })
 
 -- list: [][]T
@@ -38,194 +44,213 @@ local function cartesian(list)
 	return out
 end
 
--- RETURNS [{atomic Assertion => boolean}]
--- TODO: return [theory.satisfaction_t] also
--- an atomic Assertion is an Assertion a such that theory.breakup(a) == false.
-function theorem.satisfactions(theory, assertion, target)
+-- RETURNS a model
+-- RETURNS false if the intersection is unsatisfiable
+local function intersectMaps(modelA, modelB)
+	local out = {}
+	for key, value in pairs(modelA) do
+		out[key] = value
+	end
+	for key, value in pairs(modelB) do
+		if out[key] ~= nil and out[key] ~= value then
+			return false
+		end
+		out[key] = value
+	end
+	return out
+end
+
+-- RETURNS a type
+local function model_t(theory)
+	assertis(theory, "Theory")
+
+	return mapType(theory.assertion_t, "boolean")
+end
+
+-- RETURNS a map
+local function zipMap(a, b)
+	assertis(a, listType "any")
+	assertis(b, listType "any")
+	assert(#a == #b)
+
+	local out = {}
+	for i = 1, #a do
+		if out[a[i]] ~= nil and out[a[i]] ~= b[i] then
+			return false
+		end
+		out[a[i]] = b[i]
+	end
+	return out
+end
+
+-- RETURNS a set of simple models such that the disjunction of the simple models
+-- is equivalent to the assertion
+local function assertionToSimpleModels(theory, assertion, target)
 	assertis(theory, "Theory")
 	assertis(assertion, theory.assertion_t)
-	-- TODO: in principle, target need not be limited to booleans
 	assertis(target, "boolean")
 
-	-- Attempt to break-up the assertion into subassertions
-	local broken, truths = theory.breakup(assertion, target)
+	local broken, choices = theory:breakup(assertion, target)
 	if not broken then
-		local recursive = {[assertion] = target}
-		local out = theory.satisfactions(recursive)
-		assertis(out, listType(theory.satisfaction_t))
-		if #out == 0 then
-			return {}, {}
-		end
-		return {recursive}, out
+		return {{[assertion] = target}}
 	end
-	assert(#broken >= 0)
-	assertis(truths, listType(listType "boolean"))
 
-	-- Attempt each truth-assignment of sub-parts
-	local out = {}
-	local outTerm = {}
-	for _, truth in ipairs(truths) do
-		assert(#truth == #broken)
+	-- Recursively build the set
+	local models = {}
+	for _, choice in ipairs(choices) do
+		assert(#choice == #broken)
 
-		-- Which atomic assignments satisfy truth[i]?
-		local satisfactions = {}
-		for i = 1, #truth do
-			satisfactions[i] = theorem.satisfactions(theory, broken[i], truth[i])
+		local chains = {}
+		for i, component in ipairs(broken) do
+			local subs = assertionToSimpleModels(theory, component, choice[i])
+			assertis(subs, listType(model_t(theory)))
+			table.insert(chains, subs)
 		end
-		assertis(satisfactions, listType(listType(mapType(theory.assertion_t, "boolean"))))
-		local chains = cartesian(satisfactions)
-		assertis(chains, listType(listType(mapType(theory.assertion_t, "boolean"))))
-		for _, chain in ipairs(chains) do
-			assert(#chain >= 1)
-			local satisfiable = true
-			local merged = {}
-			for i = 1, #chain do
-				for key, value in pairs(chain[i]) do
-					if merged[key] ~= nil and merged[key] ~= value then
-						-- This chain contains a contradiction and so cannot be
-						-- satisfiable
-						satisfiable = false
-						break
-					end
-					merged[key] = value
+		assert(#chains == #broken)
+		assertis(chains, listType(listType(model_t(theory))))
+
+		for _, chain in ipairs(cartesian(chains)) do
+			local model = {}
+			for _, element in ipairs(chain) do
+				assertis(element, model_t(theory))
+
+				model = intersectMaps(model, element)
+				if not model then
+					break
 				end
 			end
-			satisfiable = satisfiable and theory.satisfactions(merged)
-			if satisfiable and #satisfiable > 0 then
-				table.insert(out, merged)
-				table.insert(outTerm, satisfiable)
+			if model then
+				table.insert(models, model)
 			end
 		end
 	end
-
-	-- The assertion is not satisfiable
-	return out, outTerm
+	assertis(models, listType(model_t(theory)))
+	return models
 end
 
-function theorem.counterexamples(theory, assertion)
-	return theorem.satisfactions(theory, assertion, false)
-end
+-- RETURNS a set of simple models such that the disjunction of the simple models
+-- is equivalent to the complex model
+local function complexToSimpleModels(theory, complex)
+	assertis(theory, "Theory")
+	assertis(complex, model_t(theory))
 
-function theorem.isTautology(theory, assertion)
-	local counter1, counter2 = theorem.counterexamples(theory, assertion)
-	if #counter1 == 0 then
-		return true
+	local terms = {}
+	for assertion, truth in pairs(complex) do
+		table.insert(terms, assertionToSimpleModels(theory, assertion, truth))
 	end
-	return false, counter1, counter2
+	assertis(terms, listType(listType(model_t(theory))))
+
+	local models = {}
+	for _, chain in ipairs(cartesian(terms)) do
+		local model = {}
+		for _, sub in ipairs(chain) do
+			model = intersectMaps(model, sub)
+			if not model then
+				break
+			end
+		end
+		if model then
+			table.insert(models, model)
+		end
+	end
+	return models
+end
+
+-- RETURNS a boolean
+local function modelImplies(theory, a, b)
+	assertis(theory, "Theory")
+	assertis(a, model_t(theory))
+	assertis(b, model_t(theory))
+
+	local todos = {}
+	for key, value in pairs(b) do
+		if a[key] ~= nil then
+			if a[key] ~= value then
+				return false
+			end
+		else
+			table.insert(todos, key)
+		end
+	end
+	assertis(todos, listType(theory.assertion_t))
+
+	for _, todo in ipairs(todos) do
+		if not theory:inModel(a, todo) then
+			return false
+		end
+	end
+	return true
+end
+
+-- RETURNS a boolean
+function theorem.simpleModelsAssertion(theory, models, assertion)
+	assertis(theory, "Theory")
+	assertis(models, listType(model_t(theory)))
+	assertis(assertion, theory.assertion_t)
+
+	local simples = assertionToSimpleModels(theory, assertion, true)
+	assertis(simples, listType(model_t(theory)))
+
+	for _, model in ipairs(models) do
+		local found = false
+		for _, simple in ipairs(simples) do
+			if modelImplies(theory, model, simple) then
+				found = true
+				break
+			end
+		end
+		if not found then
+			return false
+		end
+	end
+	return true
+end
+
+-- RETURNS a boolean
+function theorem.modelsAssertion(theory, model, assertion)
+	assertis(theory, "Theory")
+	assertis(model, model_t(theory))
+	assertis(assertion, theory.assertion_t)
+
+	local simples = complexToSimpleModels(theory, model)
+	return theorem.simpleModelsAssertion(theory, simples, assertion)
 end
 
 -- Tests -----------------------------------------------------------------------
 
-local test_theory = {
-	satisfactions = function(assignment)
-		local out = {}
-		local LOW, HIGH = -5, 5
-		for x = LOW, HIGH do
-			for y = LOW, HIGH do
-				for z = LOW, HIGH do
-					local satisfied = true
-					for f, v in pairs(assignment) do
-						if f(x, y, z) ~= v then
-							satisfied = false
-						end
-					end
-					if satisfied then
-						table.insert(out, {x = x, y = y, z = z})
-					end
-				end
-			end
-		end
-		return out
-	end,
+local eqtheory = {}
+function eqtheory:inModel(model, assertion)
+	-- TODO
+	print(string.rep(".", 80))
+	print("eqtheory:inModel(")
+	print("", show(model):gsub("%s+", " ") .. ", ")
+	print("", show(assertion):gsub("%s+", " ") .. ")")
+	print(string.rep(",", 80))
 
-	breakup = function(a, target)
-		if type(a) == "function" then
-			return false
-		end
-		if a[1] == "and" then
-			if target then
-				return {a[2], a[3]}, {{true, true}}
-			end
-			return {a[2], a[3]}, {{false, false}, {false, true}, {true, false}}
-		elseif a[1] == "or" then
-			if target then
-				return {a[2], a[3]}, {{false, true}, {true, false}, {true, true}}
-			end
-			return {a[2], a[3]}, {{false, false}}
-		elseif a[1] == "not" then
-			if target then
-				return {a[2]}, {{false}}
-			end
-			return {a[2]}, {{true}}
-		elseif a[1] == "implies" then
-			if target then
-				return {a[2], a[3]}, {{false, true}, {false, false}, {true, true}}
-			end
-			return {a[2], a[3]}, {{true, false}}
-		end
-		error "unknown tag"
-	end,
-
-	assertion_t = choiceType("function", listType "any"),
-	satisfaction_t = mapType("string", "integer"),
-}
-
-local always = function() return true end
-
-local tests = {
-	[
-		function(x, y) return false end
-	] = false,
-	[
-		function(x, y) return true end
-	] = true,
-	[
-		function(x, y) return x ~= 0 or y ~= 0 end
-	] = false,
-	[
-		{"or", function() return true end, function() return true end}
-	] = true,
-	[
-		{"implies", function(x) return x == 3 end, function(x) return x*x == 9 end}
-	] = true,
-	[
-		{"implies", function(x) return x*x == 9 end, function(x) return x == 3 end}
-	] = false,
-	[
-		{"or", always, {"not", always}}
-	] = true,
-	[
-		{"and", always, {"not", always}}
-	] = false,
-}
-
-local slow = {
-	{
-		"and",
-		{
-			"and",
-			function(x, y, z) return x > y end,
-			function(x, y, z) return y > z end,
-		},
-		{
-			"and",
-			function(x, y, z) return z == 10 end,
-			function(x, y, z) return x < 13 end,
-		}
-	}
-}
-
--- Run tests
-for x, e in pairs(tests) do
-	--print("test...")
-	local is, c1, counter = theorem.isTautology(test_theory, x)
-	if is ~= e then
-		print("isTautology " .. show(x):gsub("%s+", " ") .. " ?", is)
-		print("contradictions:", show(c1))
-		print("contradictions:", show(counter))
-		error("\t" .. show(e))
-	end
-	--print("...pass")
+	return false
 end
+
+function eqtheory:breakup(assertion, truth)
+	if assertion.tag == "and" then
+		return {assertion.left, assertion.right}, {{true, true}}
+	end
+	return false
+end
+
+function eqtheory:isInconsistent(model)
+	return false
+end
+
+eqtheory.assertion_t = recordType {tag = choiceType(constantType "and", constantType "=")}
+
+local m1 = {
+	[{tag = "and", left = {tag = "=", left = "x", right = "0"}, right = {tag = "=", left = "x", right = "y"}}] = true,
+}
+local a1 = {tag = "=", left = "y", right = "0"}
+
+print(theorem.modelsAssertion(eqtheory, m1, a1))
+
+
+os.exit(0)
 
 return theorem
