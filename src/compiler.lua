@@ -1072,7 +1072,9 @@ EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
 	tag = constantType "verify",
 	body = "StatementIR",
 	variable = "VariableIR",
-	location = "string",
+	checkLocation = "string",
+	conditionLocation = "string",
+	reason = "string",
 })
 
 EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {

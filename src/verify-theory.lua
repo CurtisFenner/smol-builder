@@ -301,7 +301,8 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 			end
 		end
 	end
-	print("don't know how to prove", show(targetAssertion):gsub("%s+", " "), "")
+
+	--print("don't know how to prove", show(targetAssertion):gsub("%s+", " "), "")
 	return false
 end
 

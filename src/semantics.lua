@@ -689,7 +689,7 @@ end
 local compileExpression
 
 -- RETURNS a StatementIR
-local function generatePreconditionVerify(expression, method, invocation, environment)
+local function generatePreconditionVerify(expression, method, invocation, environment, context)
 	assertis(expression, "any")
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
@@ -697,6 +697,10 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 		this = choiceType(constantType(false), "VariableIR"),
 	})
 	assertis(environment, recordType {})
+	assertis(context, recordType {
+		index = "integer",
+		func = "string",
+	})
 	
 	local subEnvironment = {
 		resolveType = environment.resolveType,
@@ -727,7 +731,8 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 		variable = out[1],
 		body = evaluation,
 		returns = "no",
-		location = expression.location,
+		reason = "that the " .. string.ordinal(context.index) .. " `requires` condition holds for " .. context.func,
+		conditionLocation = expression.location,
 	}
 end
 
@@ -1048,14 +1053,15 @@ function compileExpression(pExpression, scope, environment)
 			end
 
 			-- Generate Verify statements
-			for _, require in ipairs(static.signature.requires) do
+			for i, require in ipairs(static.signature.requires) do
 				local verification = generatePreconditionVerify(
 					require,
 					static.signature,
 					{arguments = argumentSources, this = false},
-					environment
+					environment,
+					{index = i, func = fullName}
 				)
-				table.insert(evaluation, verification)
+				table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
 			end
 
 			local callSt = {
@@ -1176,14 +1182,15 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- Generate Verify statements
-		for _, require in ipairs(method.requires) do
+		for i, require in ipairs(method.requires) do
 			local verification = generatePreconditionVerify(
 				require,
 				method,
 				{arguments = argumentSources, this = false},
-				environment
+				environment,
+				{index = i, func = fullName}
 			)
-			table.insert(evaluation, verification)
+			table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
 		end
 
 		local call = {
@@ -1315,14 +1322,15 @@ function compileExpression(pExpression, scope, environment)
 			end
 
 			-- Generate Verify statements
-			for _, require in ipairs(method.signature.requires) do
+			for i, require in ipairs(method.signature.requires) do
 				local verification = generatePreconditionVerify(
 					require,
 					method.signature,
 					{arguments = arguments, this = baseInstance},
-					environment
+					environment,
+					{index = i, func = methodFullName}
 				)
-				table.insert(evaluation, verification)
+				table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
 			end
 			
 			local callSt = {
@@ -1440,14 +1448,15 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- Generate Verify statements
-		for _, require in ipairs(method.requires) do
+		for i, require in ipairs(method.requires) do
 			local verification = generatePreconditionVerify(
 				require,
 				method,
 				{arguments = arguments, this = baseInstance},
-				environment
+				environment,
+				{index = i, func = methodFullName}
 			)
-			table.insert(evaluation, verification)
+			table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
 		end
 
 		table.insert(evaluation, {

@@ -6,6 +6,8 @@ local theorem = import "theorem.lua"
 local verifyTheory = import "verify-theory.lua"
 local showAssertion = verifyTheory.showAssertion
 
+local Report = import "verify-errors.lua"
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -396,6 +398,11 @@ local function verifyStatement(statement, scope, semantics)
 		-- Check
 		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
+			Report.DOES_NOT_MODEL {
+				reason = statement.reason,
+				conditionLocation = statement.conditionLocation,
+				checkLocation = statement.checkLocation,
+			}
 			print("# Does not model", statement.variable.name)
 			dumpScope(scope)
 			os.exit(45)
