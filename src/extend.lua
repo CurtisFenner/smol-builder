@@ -116,3 +116,8 @@ function table.indexof(list, element)
 		end
 	end
 end
+
+-- RETURNS a function
+function table.bind(object, f)
+	return function(...) return f(object, ...) end
+end

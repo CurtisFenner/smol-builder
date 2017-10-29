@@ -291,4 +291,10 @@ function Report.INEXHAUSTIVE_MATCH(p)
 		"\n\t`", table.concat(p.missingCases, "`\n\t"), "`\n", p.location)
 end
 
+function Report.RETURN_USED_IN_IMPLEMENTATION(p)
+	quit("The `return` keyword can only be used as an expression in",
+		" `ensures` clauses.",
+		"\nHowever, you use `return` ", p.location)
+end
+
 return Report

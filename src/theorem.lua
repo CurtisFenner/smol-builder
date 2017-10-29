@@ -1,9 +1,11 @@
 local theorem = {}
 
 REGISTER_TYPE("Theory", recordType {
-	-- argument: (self, model_t, assertion_t)
-	-- RETURNS true when assertion_t provably follows from the given simple
-	-- model
+	-- argument: (self, model_t, assertion_t, truth)
+	-- RETURNS true when simple assertion_t assertion provably
+	-- has the specified truth value
+	-- given the simple model.
+	-- Need not be complete.
 	inModel = "function",
 
 	-- argument: (self, assertion_t, boolean)
@@ -169,19 +171,23 @@ local function modelImplies(theory, a, b)
 				return false
 			end
 		else
-			table.insert(todos, key)
+			table.insert(todos, {assertion = key, truth = value})
 		end
 	end
-	assertis(todos, listType(theory.assertion_t))
+	assertis(todos, listType(recordType {
+		assertion = theory.assertion_t, truth = "boolean"
+	}))
 
 	for _, todo in ipairs(todos) do
-		if not theory:inModel(a, todo) then
+		if not theory:inModel(a, todo.assertion, todo.truth) then
 			return false
 		end
 	end
 	return true
 end
 
+-- models: a list of simple models
+-- assertion: a complex assertion
 -- RETURNS a boolean
 function theorem.simpleModelsAssertion(theory, models, assertion)
 	assertis(theory, "Theory")
@@ -206,6 +212,8 @@ function theorem.simpleModelsAssertion(theory, models, assertion)
 	return true
 end
 
+-- model: a complex model
+-- assertion: a complex assertion
 -- RETURNS a boolean
 function theorem.modelsAssertion(theory, model, assertion)
 	assertis(theory, "Theory")
@@ -216,41 +224,88 @@ function theorem.modelsAssertion(theory, model, assertion)
 	return theorem.simpleModelsAssertion(theory, simples, assertion)
 end
 
--- Tests -----------------------------------------------------------------------
+-- Plain Theory Test -----------------------------------------------------------
 
-local eqtheory = {}
-function eqtheory:inModel(model, assertion)
-	-- TODO
-	print(string.rep(".", 80))
-	print("eqtheory:inModel(")
-	print("", show(model):gsub("%s+", " ") .. ", ")
-	print("", show(assertion):gsub("%s+", " ") .. ")")
-	print(string.rep(",", 80))
+do
+	local plaintheory = {}
 
-	return false
-end
-
-function eqtheory:breakup(assertion, truth)
-	if assertion.tag == "and" then
-		return {assertion.left, assertion.right}, {{true, true}}
+	function plaintheory:breakup(assertion, truth)
+		if type(assertion) == "string" then
+			return false
+		end
+		if truth then
+			if assertion[1] == "and" then
+				return {assertion[2], assertion[3]}, {{true, true}}
+			elseif assertion[1] == "or" then
+				return {assertion[2], assertion[3]}, {{true, true}, {true, false}, {false, true}}
+			elseif assertion[1] == "not" then
+				return {assertion[2]}, {{false}}
+			end
+		else
+			if assertion[1] == "and" then
+				return {assertion[2], assertion[3]}, {{false, false}, {true, false}, {false, true}}
+			elseif assertion[1] == "or" then
+				return {assertion[2], assertion[3]}, {{false, false}}
+			elseif assertion[1] == "not" then
+				return {assertion[2]}, {{true}}
+			end
+		end
+		error "foo"
 	end
-	return false
+
+	plaintheory.assertion_t = "any"
+
+	function plaintheory:inModel(model, assertion, target)
+		return assertion == target
+	end
+
+	function plaintheory:isInconsistent(model)
+		for key, value in pairs(model) do
+			if type(key) == "boolean" then
+				if key ~= value then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	local m1 = {
+		[
+			{"and", "x", "y"}
+		] = true,
+	}
+	assert(theorem.modelsAssertion(plaintheory, m1, "y"))
+	assert(not theorem.modelsAssertion(plaintheory, m1, "z"))
+	assert(not theorem.modelsAssertion(plaintheory, m1, {"not", "z"}))
+	assert(not theorem.modelsAssertion(plaintheory, m1, {"not", "y"}))
+	local m2 = {
+		[
+			{"or", {"not", "x"}, "y"}
+		] = true,
+	}
+	assert(not theorem.modelsAssertion(plaintheory, m2, "y"))
+	assert(not theorem.modelsAssertion(plaintheory, m2, "x"))
+	assert(not theorem.modelsAssertion(plaintheory, m2, {"not", "x"}))
+	local m3 = {
+		["x"] = true,
+		[
+			{"or", {"not", "x"}, "y"}
+		] = true,
+	}
+	assert(theorem.modelsAssertion(plaintheory, m3, "y"))
+	assert(theorem.modelsAssertion(plaintheory, m3, "x"))
+	assert(not theorem.modelsAssertion(plaintheory, m3, {"not", "x"}))
+	local m3 = {
+		["x"] = false,
+		[
+			{"or", {"not", "x"}, "y"}
+		] = true,
+	}
+	assert(not theorem.modelsAssertion(plaintheory, m3, "y"))
+	assert(not theorem.modelsAssertion(plaintheory, m3, {"not", "y"}))
+	assert(not theorem.modelsAssertion(plaintheory, m3, "x"))
+	assert(theorem.modelsAssertion(plaintheory, m3, {"not", "x"}))
 end
-
-function eqtheory:isInconsistent(model)
-	return false
-end
-
-eqtheory.assertion_t = recordType {tag = choiceType(constantType "and", constantType "=")}
-
-local m1 = {
-	[{tag = "and", left = {tag = "=", left = "x", right = "0"}, right = {tag = "=", left = "x", right = "y"}}] = true,
-}
-local a1 = {tag = "=", left = "y", right = "0"}
-
-print(theorem.modelsAssertion(eqtheory, m1, a1))
-
-
-os.exit(0)
 
 return theorem

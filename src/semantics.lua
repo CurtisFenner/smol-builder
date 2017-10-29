@@ -732,7 +732,7 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 end
 
 -- RETURNS a StatementIR
-local function generatePostconditionAssume(expression, method, invocation, environment)
+local function generatePostconditionAssume(expression, method, invocation, environment, returnOuts)
 	assertis(expression, "any")
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
@@ -740,6 +740,7 @@ local function generatePostconditionAssume(expression, method, invocation, envir
 		this = choiceType(constantType(false), "VariableIR"),
 	})
 	assertis(environment, recordType {})
+	assertis(returnOuts, listType "VariableIR")
 	
 	local subEnvironment = {
 		resolveType = environment.resolveType,
@@ -747,6 +748,7 @@ local function generatePostconditionAssume(expression, method, invocation, envir
 		containingSignature = method,
 		allDefinitions = environment.allDefinitions,
 		thisVariable = invocation.this,
+		returnOuts = returnOuts,
 	}
 
 	local scope = {{}}
@@ -1018,7 +1020,7 @@ function compileExpression(pExpression, scope, environment)
 			local destinations = {}
 			for _, returnType in pairs(static.signature.returnTypes) do
 				local returnVariable = {
-					name = generateLocalID("return"),
+					name = generateLocalID("gs_return"),
 					type = substituter(returnType),
 					location = pExpression.location,
 					returns = "no",
@@ -1073,7 +1075,8 @@ function compileExpression(pExpression, scope, environment)
 					ensure,
 					static.signature,
 					{arguments = argumentSources, this = false, container = t},
-					environment
+					environment,
+					destinations
 				)
 				table.insert(evaluation, assumption)
 			end
@@ -1164,7 +1167,7 @@ function compileExpression(pExpression, scope, environment)
 		local outs = {}
 		for _, returnType in pairs(method.returnTypes) do
 			local returnVariable = {
-				name = generateLocalID("return"),
+				name = generateLocalID("cs_return"),
 				type = substituter(returnType),
 				location = pExpression.location,
 			}
@@ -1201,7 +1204,8 @@ function compileExpression(pExpression, scope, environment)
 				ensure,
 				method,
 				{arguments = argumentSources, this = false, container = t},
-				environment
+				environment,
+				outs
 			)
 			table.insert(evaluation, assumption)
 		end
@@ -1302,7 +1306,7 @@ function compileExpression(pExpression, scope, environment)
 			local destinations = {}
 			for _, returnType in ipairs(method.signature.returnTypes) do
 				local destination = {
-					name = generateLocalID("return"),
+					name = generateLocalID("gm_return"),
 					type = substituter(returnType),
 					location = pExpression.location,
 				}
@@ -1343,7 +1347,8 @@ function compileExpression(pExpression, scope, environment)
 						this = baseInstance,
 						container = baseInstance.type,
 					},
-					environment
+					environment,
+					destinations
 				)
 				table.insert(evaluation, assumption)
 			end
@@ -1426,7 +1431,7 @@ function compileExpression(pExpression, scope, environment)
 		local destinations = {}
 		for _, returnType in ipairs(method.returnTypes) do
 			local destination = {
-				name = generateLocalID("return"),
+				name = generateLocalID("cm_return"),
 				type = substituter(returnType),
 				location = pExpression.location,
 			}
@@ -1464,7 +1469,8 @@ function compileExpression(pExpression, scope, environment)
 					this = baseInstance,
 					container = baseInstance.type,
 				},
-				environment
+				environment,
+				destinations
 			)
 			table.insert(evaluation, assumption)
 		end
@@ -1529,15 +1535,14 @@ function compileExpression(pExpression, scope, environment)
 			-- TODO: mark as uncomputable
 			local returns = environment.containingSignature.returnTypes
 			assert(#returns == 1, "TODO: deal with multiple return values")
-			local variable = {
-				type = returns[1],
-				name = generateLocalID("return"),
-				returns = "no",
-				location = pExpression.location,
-				computable = false,
-			}
+			if not environment.returnOuts then
+				Report.RETURN_USED_IN_IMPLEMENTATION {
+					location = pExpression.location
+				}
+			end
+			assert(#returns == #environment.returnOuts)
 
-			return localSt(variable), {variable}
+			return buildBlock {}, environment.returnOuts
 		end
 		error("TODO: keyword `" .. pExpression.keyword .. "`")
 	elseif pExpression.tag == "field" then

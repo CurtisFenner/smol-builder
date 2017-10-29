@@ -4,6 +4,7 @@ local showInterfaceType = calculateSemantics.showInterfaceType
 
 local theorem = import "theorem.lua"
 local verifyTheory = import "verify-theory.lua"
+local showAssertion = verifyTheory.showAssertion
 
 --------------------------------------------------------------------------------
 
@@ -114,42 +115,6 @@ local function assertionReplaced(expression, variable, with)
 		end
 	end
 	return freeze(copy)
-end
-
--- RETURNS a string
-local function showAssertion(assertion)
-	assertis(assertion, "Assertion")
-
-	if assertion.tag == "unit" then
-		return "(unit)"
-	elseif assertion.tag == "this" then
-		return "(this)"
-	elseif assertion.tag == "variable" then
-		return "(var " .. assertion.variable.name .. ")"
-	elseif assertion.tag == "new-class" then
-		local fields = {}
-		for f, v in pairs(assertion.fields) do
-			table.insert(fields, f .. "=" .. showAssertion(v))
-		end
-		table.sort(fields)
-		fields = table.concat(fields, " ")
-		return "(new-class " .. assertion.type .. " " .. fields .. ")"
-	elseif assertion.tag == "static" then
-		local arguments = {}
-		for _, v in ipairs(assertion.arguments) do
-			table.insert(arguments, showAssertion(v))
-		end
-		arguments = table.concat(arguments, " ")
-		return "(method " .. assertion.staticName .. " " .. assertion.base .. " [" .. arguments .. "])"
-	elseif assertion.tag == "method" then
-		local arguments = {}
-		for _, v in ipairs(assertion.arguments) do
-			table.insert(arguments, showAssertion(v))
-		end
-		arguments = table.concat(arguments, " ")
-		return "(method " .. assertion.methodName .. " " .. showAssertion(assertion.base) .. " [" .. arguments .. "])"
-	end
-	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
 
 --------------------------------------------------------------------------------
@@ -330,25 +295,16 @@ local function mustModel(scope, target)
 	end
 	assertis(predicates, listType "Assertion")
 
-	print("mustModel ? ", showAssertion(inNow(target)))
+	local complexModel = {}
+	--print("mustModel ? ", showAssertion(inNow(target)))
 	for i, p in ipairs(predicates) do
-		print(i, showAssertion(p))
+		complexModel[p] = true
+		--print(i, showAssertion(p))
 	end
 
-	local given = andAssertion(predicates)
-	assertis(given, "Assertion")
-	local tautology = {
-		tag = "method",
-		methodName = "implies",
-		base = given,
-		arguments = {inNow(target)},
-	}
-	assertis(tautology, "Assertion")
+	local result = inNow(target)
 
-	local correct, counter = theorem.isTautology(verifyTheory, tautology)
-
-	-- TODO:
-	return correct
+	return theorem.modelsAssertion(verifyTheory, complexModel, result)
 end
 
 -- MODIFIES scope
@@ -442,13 +398,12 @@ local function verifyStatement(statement, scope, semantics)
 		if not models then
 			print("# Does not model", statement.variable.name)
 			dumpScope(scope)
-			--os.exit(45)
+			os.exit(45)
 		end
 	
 		return
 	elseif statement.tag == "assume" then
-		-- TODO!
-		print("ASSUME", statement)
+		--print("ASSUME", statement)
 		verifyStatement(statement.body, scope, semantics)
 
 		addPredicate(scope, variableAssertion(scope, statement.variable))
@@ -570,8 +525,8 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	print("= " .. func.name .. " " .. string.rep("=", 77 - #func.name))
-
+	--print("= " .. func.name .. " " .. string.rep("=", 77 - #func.name))
+	--print(showStatement(func.body))
 	verifyStatement(func.body, {{}}, semantics)
 end
 
