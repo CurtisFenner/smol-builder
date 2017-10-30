@@ -168,7 +168,7 @@ end
 function Report.TYPES_DONT_MATCH(p)
 	assertis(p.expectedType, "string")
 	assertis(p.givenType, "string")
-	assertis(p.location, "string")
+	assertis(p.location, "Location")
 	quit("The ", p.purpose, " expects `", p.expectedType, "` as defined ",
 		p.expectedLocation,
 		"\nHowever, `", p.givenType, "` was provided at ", p.location)

@@ -98,9 +98,13 @@ function parser.composite(components)
 
 	return function(stream, parsers)
 		-- Annotate metadata
+		local frontLocation = stream:location()
 		local object = {
 			tag = components.tag,
-			location = stream:location(),
+			location = {
+				begins = frontLocation.begins,
+				ends = frontLocation.ends,
+			},
 		}
 
 		local extracts = {}
@@ -124,6 +128,7 @@ function parser.composite(components)
 					object[key] = member
 				end
 				stream = rest
+				object.location.ends = rest:priorLocation().ends
 			elseif required then
 				-- This member was a required cut; report an error with
 				-- the input
@@ -145,6 +150,7 @@ function parser.composite(components)
 		if #extracts == 1 then
 			object = object[extracts[1]]
 		end
+
 
 		-- Successfully parsed all components
 		return object, stream

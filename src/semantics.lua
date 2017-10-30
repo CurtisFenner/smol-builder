@@ -348,35 +348,39 @@ end
 local STRING_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "String",
-	location = "???",
+	location = {begins = "???", ends = "???"},
 }
 
 local INT_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "Int",
-	location = "???",
+	location = {begins = "???", ends = "???"},
 }
 
 local BOOLEAN_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "Boolean",
-	location = "???",
+	location = {begins = "???", ends = "???"},
 }
 
 local UNIT_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "Unit",
-	location = "???",
+	location = {begins = "???", ends = "???"},
 }
 
 local NEVER_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "Never",
-	location = "???",
+	location = {begins = "???", ends = "???"},
 }
 
 --------------------------------------------------------------------------------
 
+local BUILTIN_LOC = {
+	begins = "builtin",
+	ends = "builtin",
+}
 local BUILTIN_DEFINITIONS = freeze {
 	{
 		type = INT_TYPE,
@@ -407,7 +411,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "lessThan",
-				parameters = {{location = "<builtin>", name = "one", type = INT_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "one", type = INT_TYPE}},
 				returnTypes = {BOOLEAN_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -418,7 +422,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "eq",
-				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
 				returnTypes = {BOOLEAN_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -429,7 +433,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "quotient",
-				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -440,7 +444,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "product",
-				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -451,7 +455,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "sum",
-				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -462,7 +466,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "difference",
-				parameters = {{location = "<builtin>", name = "other", type = INT_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -480,7 +484,7 @@ local BUILTIN_DEFINITIONS = freeze {
 		signatures = {
 			{
 				name = "concatenate",
-				parameters = {{location = "<builtin>", name = "other", type = STRING_TYPE}},
+				parameters = {{location = BUILTIN_LOC, name = "other", type = STRING_TYPE}},
 				returnTypes = {STRING_TYPE},
 				modifier = "method",
 				container = "String",
@@ -548,7 +552,7 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 	assertis(genericType, "GenericType+")
 	assertis(modifier, choiceType(constantType "static", constantType "method"))
 	assertis(name, "string")
-	assertis(location, "string")
+	assertis(location, "Location")
 	assert(name:sub(1, 1):lower() == name:sub(1, 1))
 	assertis(generics, listType "TypeParameterIR")
 	assertis(allDefinitions, listType "Definition")
@@ -839,7 +843,7 @@ function compileExpression(pExpression, scope, environment)
 		local out = {
 			name = generateLocalID("new"),
 			type = containerType,
-			location = pExpression.location .. ">"
+			location = pExpression.location
 		}
 		assertis(out.type, "ConcreteType+")
 
@@ -1842,7 +1846,7 @@ local function semanticsSmol(sources, main)
 			assertis(t, recordType {
 				tag = constantType "concrete-type",
 				arguments = "object",
-				location = "string",
+				location = "Location",
 				base = "string",
 			})
 			assertis(typeScope, listType(recordType {name = "string"}))

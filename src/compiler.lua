@@ -18,15 +18,51 @@ end
 
 local ansi = import "ansi.lua"
 
+local LOCATION_MODE = "column"
+
+-- RETURNS a string representing the location, respecting the command line
+-- location mode
+local function showLocation(location)
+	assertis(location, "Location")
+
+	local begins = location.begins
+	local ends = location.ends
+
+	-- Compute human-readable description of location
+	local sourceContext = "\t" .. begins.line .. ":\t" .. begins.sourceLines[begins.line]
+		.. "\n\t\t" .. string.rep(" ", begins.column-1) .. ansi.red("^")
+	
+	local location = "at " .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
+		.. "\n" .. sourceContext .. "\n"
+	if LOCATION_MODE == "index" then
+		location = location .. "@" .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
+	end
+	return location
+end
+
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
 -- DOES NOT RETURN.
 function quit(first, ...)
+	local rest = {...}
+	for i = 1, #rest do
+		if type(rest[i]) == "number" then
+			rest[i] = tostring(rest[i])
+		elseif type(rest[i]) ~= "string" then
+			if not rest[i].ends then
+				print(...)
+			end
+			assertis(rest[i], "Location")
+			rest[i] = showLocation(rest[i])
+		end
+	end
+	rest = table.concat(rest)
+
 	if not first:match("^[A-Z]+:\n$") then
-		print(table.concat{ansi.red("ERROR"), ":\n", first, ...})
+		print(table.concat{ansi.red("ERROR"), ":\n", first, rest})
 		os.exit(45)
 	else
-		print(table.concat{ansi.cyan(first), ...})
+		print(table.concat{ansi.cyan(first), rest})
 		os.exit(40)
 	end
 end
@@ -76,7 +112,6 @@ elseif not commandMap.sources or #commandMap.sources == 0 then
 	quitUsage()
 end
 
-local LOCATION_MODE = "column"
 if commandMap.location then
 	-- TODO: assert that it is correct
 	LOCATION_MODE = commandMap.location[1]
@@ -213,42 +248,49 @@ local function lexSmol(source, filename)
 	-- Track the location into the source file each token is
 	local line = 1
 	local column = 1
-	if LOCATION_MODE == "index" then
-		column = 0
-	end
+	local index = 0
+
+	-- RETURNS a Location of the last non-whitespace character
 	local function advanceCursor(str)
 		assert(isstring(str))
+		local final = {line = line, column = column, index = index}
 		for c in str:gmatch(".") do
+			if c:match "%S" then
+				final = {line = line, column = column, index = index}
+			end
 			if c == "\r" then
 				-- Carriage returns do not affect reported cursor location
 			elseif c == "\n" then
 				column = 1
+				index = 0
 				line = line + 1
-				if LOCATION_MODE == "index" then
-					column = 0
-				end
-			elseif c == "\t" and LOCATION_MODE ~= "index" then
+			elseif c == "\t" then
 				-- XXX: This reports column (assuming tab = 4)
 				-- rather than character.
 				-- (VSCode default behavior when tabs are size 4)
 				-- (Atom default behavior counts characters)
 				column = math.ceil(column/4)*4 + 1
+				index = index + 1
 			else
 				column = column + 1
+				index = index + 1
 			end
 		end
+		final.filename = filename
+		final.sourceLines = sourceLines
+		return final
 	end
 
 	while #source > 0 do
-		-- Compute human-readable description of location
-		local sourceContext = "\t" .. line .. ":\t" .. sourceLines[line]
-			.. "\n\t\t" .. string.rep(" ", column-1) .. ansi.red("^")
-
-		local location = "at " .. filename .. ":" .. line .. ":" .. column
-			.. "\n" .. sourceContext .. "\n"
-		if LOCATION_MODE == "index" then
-			location = location .. "@" .. filename .. ":" .. line .. ":" .. column
-		end
+		local location = {
+			begins = freeze {
+				filename = filename,
+				sourceLines = sourceLines,
+				line = line,
+				column = column,
+				index = index,
+			},
+		}
 
 		-- Tokenize string literals
 		if source:sub(1, 1) == QUOTE then
@@ -265,14 +307,16 @@ local function lexSmol(source, filename)
 			for i = 2, #source do
 				local c = source:sub(i, i)
 				if c == "\n" then
-					quit("The compiler found an unfinished string literal",
-						" that begins ", location)
+					location.ends = advanceCursor(source:sub(1, i-1))
+					quit("The compiler found an unfinished string literal ",
+					location)
 				end
 				if escaped then
 					if not SPECIAL[c] then
+						location.ends = advanceCursor(source:sub(1, i))
 						quit("The compiler found an unknown escape sequence",
 							" `\\", c, "`",
-							" in a string literal that begins ", location)
+							" in a string literal ", location)
 					end
 					content = content .. SPECIAL[c]
 					escaped = not escaped
@@ -280,7 +324,7 @@ local function lexSmol(source, filename)
 					escaped = true
 				elseif c == QUOTE then
 					-- Update location
-					advanceCursor(source:sub(1, i))
+					location.ends = advanceCursor(source:sub(1, i))
 					local lexeme = source:sub(1, i)
 					-- String literal is complete
 					source = source:sub(i+1)
@@ -305,6 +349,8 @@ local function lexSmol(source, filename)
 					local token = tokenRule[2](match)
 					assert(type(token) == "table" or rawequal(token, false),
 						"token must be table `" .. tokenRule[1] .. "`")
+
+					location.ends = advanceCursor(match)
 					if token then
 						token.location = location
 						token.lexeme = match
@@ -312,7 +358,6 @@ local function lexSmol(source, filename)
 					end
 
 					-- Advance the cursor through the text file
-					advanceCursor(match)
 					source = source:sub(#match+1)
 
 					matched = true
@@ -322,18 +367,33 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				quit("The compiler could not recognize any token ", location)
+				quit("The compiler could not recognize any token ",
+					table.with(location, "ends", location.begins))
 			end
 		end
 	end
 
+	assertis(tokens, listType "Token")
 	return freeze(tokens)
 end
 
 -- Stream ----------------------------------------------------------------------
 
+REGISTER_TYPE("Spot", choiceType(constantType "???", constantType "builtin", recordType {
+	filename = "string",
+	sourceLines = listType "string",
+	line = "integer",
+	column = "integer",
+	index = "integer",
+}))
+
+REGISTER_TYPE("Location", recordType {
+	begins = "Spot",
+	ends = "Spot",
+})
+
 REGISTER_TYPE("Token", recordType {
-	location = "string",
+	location = "Location",
 	tag = "string",
 	lexeme = "string",
 })
@@ -359,11 +419,30 @@ local function Stream(list, offset)
 		end,
 		location = function(self)
 			if self:size() == 0 then
-				-- TODO: get file name
-				return "end-of-file"
+				local spot = {
+					filename = self._list[1].location.begins.filename,
+					sourceLines = self._list[1].location.begins.sourceLines,
+					column = 1,
+					index = 0,
+					line = #self._list[1].location.begins.sourceLines,
+				}
+				return {begins = spot, ends = spot}
 			else
 				return self:head().location
 			end
+		end,
+		priorLocation = function(self)
+			if self._offset == 0 then
+				local spot = {
+					filename = self._list[1].location.begins.filename,
+					sourceLines = self._list[1].location.begins.sourceLines,
+					column = 1,
+					index = 0,
+					line = 1,
+				}
+				return {begins = spot, ends = spot}
+			end
+			return self._list[self._offset].location
 		end,
 	}
 end
@@ -1065,15 +1144,15 @@ EXTEND_TYPE("AssumeSt", "AbstractStatementIR", recordType {
 	tag = constantType "assume", 
 	body = "StatementIR",
 	variable = "VariableIR",
-	location = "string",
+	location = "Location",
 })
 
 EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
 	tag = constantType "verify",
 	body = "StatementIR",
 	variable = "VariableIR",
-	checkLocation = "string",
-	conditionLocation = "string",
+	checkLocation = "Location",
+	conditionLocation = "Location",
 	reason = "string",
 })
 
@@ -1231,7 +1310,7 @@ EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "Type+",
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("ConstraintIR", choiceType(
@@ -1264,7 +1343,7 @@ REGISTER_TYPE("InterfaceType+", recordType {
 	tag = constantType "interface-type",
 	name = "string",
 	arguments = listType "Type+",
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("ConcreteType+", recordType {
@@ -1273,7 +1352,7 @@ REGISTER_TYPE("ConcreteType+", recordType {
 	name = "string",
 	arguments = listType "Type+",
 
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("KeywordType+", recordType {
@@ -1281,7 +1360,7 @@ REGISTER_TYPE("KeywordType+", recordType {
 
 	name = "string",
 
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("GenericType+", recordType {
@@ -1289,7 +1368,7 @@ REGISTER_TYPE("GenericType+", recordType {
 
 	name = "string", -- e.g., "Foo" for `#Foo`
 
-	location = "string",
+	location = "Location",
 })
 
 -- Main ------------------------------------------------------------------------
