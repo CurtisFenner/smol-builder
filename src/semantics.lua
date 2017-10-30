@@ -2610,7 +2610,7 @@ local function semanticsSmol(sources, main)
 					Report.TYPE_MUST_BE_UNION {
 						purpose = "expression in match-statement",
 						givenType = showType(base.type),
-						location = base.location,
+						location = pStatement.base.location,
 					}
 				end
 				local definition = definitionFromType(base.type, allDefinitions)
@@ -2618,7 +2618,7 @@ local function semanticsSmol(sources, main)
 					Report.TYPE_MUST_BE_UNION {
 						purpose = "expression in match-statement",
 						givenType = showType(base.type),
-						location = base.location,
+						location = pStatement.base.location,
 					}
 				end
 				assertis(definition, "UnionIR")

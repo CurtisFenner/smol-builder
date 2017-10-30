@@ -72,7 +72,7 @@ end
 function Report.WRONG_ARITY(p)
 	quit("The type `", p.name, "` was defined ", p.definitionLocation,
 		"to take exactly ", p.expectedArity, " type arguments.",
-		"\nHowever, it is provided with ", p.givenArity, " ",
+		"\nHowever, it you provide ", p.givenArity, " ",
 		p.location)
 end
 
@@ -171,7 +171,7 @@ function Report.TYPES_DONT_MATCH(p)
 	assertis(p.location, "Location")
 	quit("The ", p.purpose, " expects `", p.expectedType, "` as defined ",
 		p.expectedLocation,
-		"\nHowever, `", p.givenType, "` was provided at ", p.location)
+		"\nHowever, you pass a `", p.givenType, "` ", p.location)
 end
 
 function Report.EQ_TYPE_MISMATCH(p)
@@ -221,8 +221,8 @@ function Report.TYPE_MUST_BE_CLASS(p)
 end
 
 function Report.TYPE_MUST_BE_UNION(p)
-	quit("The ", p.purpose, " must be a union instance. However, it is a ",
-		p.givenType, " ", p.location)
+	quit("The ", p.purpose, " must be a union instance. However, you try to use a ",
+		"`", p.givenType, "` ", p.location)
 end
 
 function Report.MISSING_VALUE(p)
@@ -281,14 +281,18 @@ function Report.THIS_USED_OUTSIDE_METHOD(p)
 end
 
 function Report.VARIANT_USED_TWICE(p)
-	quit("You use the variant `", p.variant, "` twice in a single match;",
-		"\nYou use `", p.variant, "` first ", p.firstLocation,
-		"\nYou use `", p.variant, "` a second time ", p.secondLocation)
+	quit("You use the variant `case ", p.variant, "` twice in a single match;",
+		"\nYou use `case ", p.variant, "` first ", p.firstLocation,
+		"\nYou use `case ", p.variant, "` a second time ", p.secondLocation)
 end
 
 function Report.INEXHAUSTIVE_MATCH(p)
-	quit("In a match statement on a `", p.baseType, "` you are missing cases for",
-		"\n\t`", table.concat(p.missingCases, "`\n\t"), "`\n", p.location)
+	local clauses = {}
+	for _, missing in ipairs(p.missingCases) do
+		table.insert(clauses, "\t`case " .. missing .. "`")
+	end
+	quit("In a match statement on a `", p.baseType, "` you are missing case clauses:\n",
+		table.concat(clauses, "`\n"), "\n", p.location)
 end
 
 function Report.RETURN_USED_IN_IMPLEMENTATION(p)

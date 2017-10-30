@@ -28,14 +28,39 @@ local function showLocation(location)
 	local begins = location.begins
 	local ends = location.ends
 
+	if type(begins) == "string" or type(ends) == "string" then
+		return "at " .. begins
+	end
+
+	local source = begins.sourceLines
+
 	-- Compute human-readable description of location
-	local sourceContext = "\t" .. begins.line .. ":\t" .. begins.sourceLines[begins.line]
-		.. "\n\t\t" .. string.rep(" ", begins.column-1) .. ansi.red("^")
+	local context = {}
+	for line = math.max(1, begins.line - 1), math.min(#source, ends.line + 1) do
+		local num = string.rep(" ", #tostring(#source) - #tostring(line)) .. tostring(line) .. " "
+		table.insert(context, "\t" .. num .. "| " .. source[line])
+		local pointy = ""
+		for i = 1, #source[line] do
+			local after = (line == begins.line and i >= begins.column) or line > begins.line
+			local before = (line == ends.line and i <= ends.column) or line < ends.line
+			if after and before and source[line]:sub(1, i):find "%S" then
+				pointy = pointy .. "^"
+			else
+				pointy = pointy .. " "
+			end
+		end
+		if pointy:find "%S" then
+			table.insert(context, "\t" .. string.rep(" ", #tostring(#source)) .. " | " .. ansi.red(pointy))
+		end
+	end
+	local sourceContext = table.concat(context, "\n")
 	
 	local location = "at " .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
 		.. "\n" .. sourceContext .. "\n"
+
+	-- Include indexes for computer consumption of error messages
 	if LOCATION_MODE == "index" then
-		location = location .. "@" .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
+		location = location .. "@" .. begins.filename .. ":" .. begins.line .. ":" .. begins.index .. "::" .. ends.line .. ":" .. ends.index
 	end
 	return location
 end

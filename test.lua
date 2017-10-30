@@ -1,6 +1,12 @@
 -- Test script for the Lua smol compiler
 
 local filter = arg[1] or ""
+local mode = filter:sub(1, 1)
+if mode == "+" or mode == "-" then
+	filter = filter:sub(2)
+else
+	mode = ""
+end
 
 --------------------------------------------------------------------------------
 
@@ -124,58 +130,62 @@ local function compiler(sources, main)
 	return status
 end
 
--- (1) Run all negative tests
-for test in io.popen("ls tests-negative", "r"):lines() do
-	if test:find(filter, 1, true) then
-		printHeader("TEST " .. test)
-		local status = compiler("tests-negative/" .. test, "test:Test")
-		if status ~= 45 then
-			FAIL {name = test, expected = 45, got = status}
-		else
-			PASS {name = test}
+if mode ~= "+" then
+	-- (1) Run all negative tests
+	for test in io.popen("ls tests-negative", "r"):lines() do
+		if test:find(filter, 1, true) then
+			printHeader("TEST " .. test)
+			local status = compiler("tests-negative/" .. test, "test:Test")
+			if status ~= 45 then
+				FAIL {name = test, expected = 45, got = status}
+			else
+				PASS {name = test}
+			end
 		end
 	end
 end
 
--- (2) Run all positive tests
-for test in io.popen("ls tests-positive", "r"):lines() do
-	if test:find(filter, 1, true) then
-		printHeader("TEST " .. test)
-		local status = compiler("tests-positive/" .. test, "test:Test")
-		if status ~= 0 then
-			FAIL {name = test, expected = 0, got = status}
-		else
-			local bin = "tests-positive/" .. test .. "/bin"
-			local flags = {
-				"-g3",
-				"-pedantic",
-				"-std=c99",
-				"-Werror",
-				"-Wall",
-				"-Wextra",
-				"-Wconversion",
-				-- Disable unhelpful warnings
-				"-Wno-unused-parameter",
-				"-Wno-unused-but-set-variable",
-				"-Wno-unused-variable",
-			}
-			local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
-			if compiles then
-				local outFile = "tests-positive/" .. test .. "/out.last"
-				local runs = shell(bin .. " > " .. outFile)
-				if runs then
-					local correctFile = "tests-positive/" .. test .. "/out.correct"
-					local correct = shell("diff -w " .. correctFile .. " " .. outFile)
-					if correct then
-						PASS {name = test}
+if mode ~= "-" then
+	-- (2) Run all positive tests
+	for test in io.popen("ls tests-positive", "r"):lines() do
+		if test:find(filter, 1, true) then
+			printHeader("TEST " .. test)
+			local status = compiler("tests-positive/" .. test, "test:Test")
+			if status ~= 0 then
+				FAIL {name = test, expected = 0, got = status}
+			else
+				local bin = "tests-positive/" .. test .. "/bin"
+				local flags = {
+					"-g3",
+					"-pedantic",
+					"-std=c99",
+					"-Werror",
+					"-Wall",
+					"-Wextra",
+					"-Wconversion",
+					-- Disable unhelpful warnings
+					"-Wno-unused-parameter",
+					"-Wno-unused-but-set-variable",
+					"-Wno-unused-variable",
+				}
+				local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
+				if compiles then
+					local outFile = "tests-positive/" .. test .. "/out.last"
+					local runs = shell(bin .. " > " .. outFile)
+					if runs then
+						local correctFile = "tests-positive/" .. test .. "/out.correct"
+						local correct = shell("diff -w " .. correctFile .. " " .. outFile)
+						if correct then
+							PASS {name = test}
+						else
+							FAIL {name = test, expected = 0, got = 1, reason = "wrong output"}
+						end
 					else
-						FAIL {name = test, expected = 0, got = 1, reason = "wrong output"}
+						FAIL {name = test, expected = 0, got = 1, reason = "bin failed"}
 					end
 				else
-					FAIL {name = test, expected = 0, got = 1, reason = "bin failed"}
+					FAIL {name = test, expected = 0, got = 1, reason = "gcc rejected"}
 				end
-			else
-				FAIL {name = test, expected = 0, got = 1, reason = "gcc rejected"}
 			end
 		end
 	end
