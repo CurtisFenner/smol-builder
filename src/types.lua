@@ -39,7 +39,7 @@ end
 -- RETURNS nothing
 -- MODIFIES out by appending strings to it
 local function showAdd(object, indent, out)
-	if indent > 10 then
+	if indent > 4 then
 		table.insert(out, "...")
 	elseif isstring(object) then
 		-- Turn into a string literal
@@ -200,6 +200,7 @@ end
 
 --------------------------------------------------------------------------------
 
+local traces = {}
 -- RETURNS an immutable copy of `object` that errors when a non-existent key
 -- is read.
 -- REQUIRES all components are immutable, including functions
@@ -209,6 +210,8 @@ function freeze(object)
 	end
 
 	local out = newproxy(true)
+	traces[out] = debug.traceback(2)
+
 	local metatable = getmetatable(out)
 	metatable.__index = function(_, key)
 		if object[key] == nil then
@@ -227,7 +230,7 @@ function freeze(object)
 			end
 			error("frozen object has no field `"
 				.. tostring(key) .. "`: available `"
-				.. show(object) .. "`", 2)
+				.. show(object) .. "`\nFrozen at " .. traces[_], 2)
 		end
 		return object[key]
 	end

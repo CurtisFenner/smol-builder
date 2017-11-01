@@ -1,4 +1,5 @@
 local theorem = {}
+local profile = import "profile.lua"
 
 REGISTER_TYPE("Theory", recordType {
 	-- argument: (self, model_t, assertion_t, truth)
@@ -220,7 +221,10 @@ function theorem.modelsAssertion(theory, model, assertion)
 	assertis(model, model_t(theory))
 	assertis(assertion, theory.assertion_t)
 
+	profile.open "complexToSimpleModels"
 	local simples = complexToSimpleModels(theory, model)
+	profile.close()
+
 	return theorem.simpleModelsAssertion(theory, simples, assertion)
 end
 

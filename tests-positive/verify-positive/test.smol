@@ -4,7 +4,8 @@ import core;
 class Box {
 	var size Int;
 
-	method isSmall() Boolean {
+	method isSmall() Boolean
+	ensures (this.size == 10).implies(return) {
 		return this.size == 10;
 	}
 

@@ -8,6 +8,8 @@ local showAssertion = verifyTheory.showAssertion
 
 local Report = import "verify-errors.lua"
 
+local profile = import "profile.lua"
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -275,6 +277,8 @@ local function mustModel(scope, target)
 		return a
 	end
 
+	profile.open "translating-in-scope"
+
 	-- Translate assignments as a substitution in all subsequent predicates
 	for i, frame in ipairs(scope) do
 		for j, action in ipairs(frame) do
@@ -296,6 +300,8 @@ local function mustModel(scope, target)
 		end
 	end
 	assertis(predicates, listType "Assertion")
+
+	profile.close()
 
 	local complexModel = {}
 	--print("mustModel ? ", showAssertion(inNow(target)))
@@ -330,16 +336,15 @@ local function dumpScope(scope)
 	assertis(scope, listType(listType "Action"))
 
 	for i, frame in ipairs(scope) do
-		print("-- Frame " .. i)
+		print("$ -- Frame " .. i)
 		for j, v in ipairs(frame) do
-			io.write("\t" .. j .. "\t")
+			io.write("$\t" .. j .. "\t")
 			if v.tag == "assignment" then
 				print(v.destination.name .. " := " .. showAssertion(v.value))
 			elseif v.tag == "predicate" then
 				print(showAssertion(v.value))
 			else
 				error("unknown action tag `" .. v.tag .. "` in dumpScope")
-
 			end
 		end
 	end
@@ -375,7 +380,6 @@ local function resultAssertion(scope, statement)
 	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
 end
 
-
 -- MODIFIES scope
 -- RETURNS nothing
 local function verifyStatement(statement, scope, semantics)
@@ -393,19 +397,21 @@ local function verifyStatement(statement, scope, semantics)
 		end
 		return
 	elseif statement.tag == "verify" then
+		profile.open "verify VerifySt's body"
 		verifyStatement(statement.body, scope, semantics)
+		profile.close()
 
 		-- Check
 		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
+			--print("$ !!!", models)
+			--dumpScope(scope)
+			--print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
 				checkLocation = statement.checkLocation,
 			}
-			print("# Does not model", statement.variable.name)
-			dumpScope(scope)
-			os.exit(45)
 		end
 	
 		return
@@ -532,9 +538,10 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	--print("= " .. func.name .. " " .. string.rep("=", 77 - #func.name))
-	--print(showStatement(func.body))
+	local beginTime = os.clock()
+	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {{}}, semantics)
+	profile.close()
 end
 
 -- RETURNS nothing

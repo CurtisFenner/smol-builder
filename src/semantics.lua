@@ -51,7 +51,10 @@ end
 -- RETURNS a StatementIR representing the execution of statements in
 -- sequence
 local function buildBlock(statements)
-	assertis(statements, listType("StatementIR"))
+	assertis(statements, listType(recordType {}))
+	for i = 1, #statements do
+		assertis(statements[i], "StatementIR")
+	end
 
 	local returned = "no"
 	for i, statement in ipairs(statements) do
@@ -499,7 +502,38 @@ local BUILTIN_DEFINITIONS = freeze {
 		type = BOOLEAN_TYPE,
 		name = "Boolean",
 		tag = "builtin",
-		signatures = {},
+		signatures = {
+			{
+				name = "and",
+				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Boolean",
+				foreign = true,
+				bang = false,
+				ensures = {},
+				requires = {},
+				logic = {
+					[true] = {{true, true}},
+					[false] = {{false, "*"}, {true, false}},
+				},
+			},
+			{
+				name = "implies",
+				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Boolean",
+				foreign = true,
+				bang = false,
+				ensures = {},
+				requires = {},
+				logic = {
+					[true] = {{false, "*"}, {true, true}},
+					[false] = {{true, false}},
+				},
+			},
+		},
 	},
 	{
 		type = UNIT_TYPE,
@@ -693,18 +727,18 @@ end
 local compileExpression
 
 -- RETURNS a StatementIR
-local function generatePreconditionVerify(expression, method, invocation, environment, context)
+local function generatePreconditionVerify(expression, method, invocation, environment, context, checkLocation)
 	assertis(expression, "any")
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
 		arguments = listType "VariableIR",
 		this = choiceType(constantType(false), "VariableIR"),
 	})
-	assertis(environment, recordType {})
-	assertis(context, recordType {
-		index = "integer",
-		func = "string",
+	assertis(environment, recordType {
+		returnOuts = choiceType(constantType(false), listType "VariableIR"),
 	})
+	assertis(context, "string")
+	assertis(checkLocation, "Location")
 	
 	local subEnvironment = {
 		resolveType = environment.resolveType,
@@ -723,21 +757,24 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 	if #out ~= 1 or not areTypesEqual(out[1].type, BOOLEAN_TYPE) then
 		-- TODO: this is the wrong error message for wrong count
 		Report.TYPES_DONT_MATCH {
-			purpose = "assert expression in `requires`",
+			purpose = context,
 			expectedType = showType(BOOLEAN_TYPE),
 			givenType = showType(out[1].type),
 			location = out[1].location,
 		}
 	end
 
-	return {
+	local out = {
 		tag = "verify",
 		variable = out[1],
 		body = evaluation,
 		returns = "no",
-		reason = "that the " .. string.ordinal(context.index) .. " `requires` condition holds for " .. context.func,
+		reason = context,
 		conditionLocation = expression.location,
+		checkLocation = checkLocation,
 	}
+	assertis(out, "VerifySt")
+	return out
 end
 
 -- RETURNS a StatementIR
@@ -1063,9 +1100,10 @@ function compileExpression(pExpression, scope, environment)
 					static.signature,
 					{arguments = argumentSources, this = false},
 					environment,
-					{index = i, func = fullName}
+					"the " .. string.ordinal(i) .. " `requires` condition for " .. fullName,
+					pExpression.location
 				)
-				table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
+				table.insert(evaluation, verification)
 			end
 
 			local callSt = {
@@ -1075,6 +1113,7 @@ function compileExpression(pExpression, scope, environment)
 				arguments = argumentSources,
 				destinations = destinations,
 				returns = "no",
+				signature = static.signature,
 			}
 			assertis(callSt, "StatementIR")
 			table.insert(evaluation, callSt)
@@ -1192,9 +1231,10 @@ function compileExpression(pExpression, scope, environment)
 				method,
 				{arguments = argumentSources, this = false},
 				environment,
-				{index = i, func = fullName}
+				"the " .. string.ordinal(i) .. " `requires` condition for " .. fullName,
+				pExpression.location
 			)
-			table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
+			table.insert(evaluation, verification)
 		end
 
 		local call = {
@@ -1205,6 +1245,7 @@ function compileExpression(pExpression, scope, environment)
 			constraints = constraints,
 			destinations = outs,
 			returns = "no",
+			signature = method,
 		}
 		assertis(call, "StaticCallSt")
 		table.insert(evaluation, call)
@@ -1332,9 +1373,10 @@ function compileExpression(pExpression, scope, environment)
 					method.signature,
 					{arguments = arguments, this = baseInstance},
 					environment,
-					{index = i, func = methodFullName}
+					"the " .. string.ordinal(i) .. " `requires` condition for " .. methodFullName,
+					pExpression.location
 				)
-				table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
+				table.insert(evaluation, verification)
 			end
 			
 			local callSt = {
@@ -1345,6 +1387,7 @@ function compileExpression(pExpression, scope, environment)
 				arguments = arguments,
 				destinations = destinations,
 				returns = "no",
+				signature = method.signature,
 			}
 			assertis(callSt, "StatementIR")
 			table.insert(evaluation, callSt)
@@ -1458,9 +1501,10 @@ function compileExpression(pExpression, scope, environment)
 				method,
 				{arguments = arguments, this = baseInstance},
 				environment,
-				{index = i, func = methodFullName}
+				"the " .. string.ordinal(i) .. " `requires` condition for " .. methodFullName,
+				pExpression.location
 			)
-			table.insert(evaluation, table.with(verification, "checkLocation", pExpression.location))
+			table.insert(evaluation, verification)
 		end
 
 		table.insert(evaluation, {
@@ -1469,7 +1513,8 @@ function compileExpression(pExpression, scope, environment)
 			methodName = method.name,
 			arguments = arguments,
 			destinations = destinations,
-			returns = "no"
+			returns = "no",
+			signature = method,
 		})
 
 		-- Generate Assume statements
@@ -2342,6 +2387,7 @@ local function semanticsSmol(sources, main)
 			containingSignature = containingSignature,
 			allDefinitions = allDefinitions,
 			thisVariable = thisVariable,
+			returnOuts = false,
 		}
 
 		local compileBlock
@@ -2458,6 +2504,29 @@ local function semanticsSmol(sources, main)
 						table.insert(sources, subsources[1])
 						table.insert(evaluation, subevaluation)
 					end
+				end
+
+				for i, ensures in ipairs(containingSignature.ensures) do
+					local arguments = {}
+					for _, a in ipairs(containingSignature.parameters) do
+						table.insert(arguments, getFromScope(scope, a.name))
+					end
+					local invocation = {arguments = arguments, this = thisVariable}
+
+					local sub = table.with(environment, "returnOuts", sources)
+					
+					local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.name
+					local verify = generatePreconditionVerify(
+						ensures,
+						containingSignature,
+						invocation,
+						sub,
+						context,
+						pStatement.location
+					)
+					
+					assertis(verify, "VerifySt")
+					table.insert(evaluation, verify)
 				end
 
 				local returnSt = {
