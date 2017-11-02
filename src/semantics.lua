@@ -45,7 +45,9 @@ local idCount = 0
 -- RETURNS a unique (to this struct) local variable name
 local function generateLocalID(hint)
 	idCount = idCount + 1
-	return "_local" .. tostring(idCount) .. "_" .. tostring(hint)
+	local indicator = string.char(string.byte "A" + (idCount-1) % 26) 
+	--indicator = ""
+	return "_local" .. indicator .. tostring(idCount) .. "_" .. tostring(hint)
 end
 
 -- RETURNS a StatementIR representing the execution of statements in
@@ -348,35 +350,13 @@ end
 
 --------------------------------------------------------------------------------
 
-local STRING_TYPE = freeze {
-	tag = "keyword-type+",
-	name = "String",
-	location = {begins = "???", ends = "???"},
-}
+local provided = import "provided.lua"
 
-local INT_TYPE = freeze {
-	tag = "keyword-type+",
-	name = "Int",
-	location = {begins = "???", ends = "???"},
-}
-
-local BOOLEAN_TYPE = freeze {
-	tag = "keyword-type+",
-	name = "Boolean",
-	location = {begins = "???", ends = "???"},
-}
-
-local UNIT_TYPE = freeze {
-	tag = "keyword-type+",
-	name = "Unit",
-	location = {begins = "???", ends = "???"},
-}
-
-local NEVER_TYPE = freeze {
-	tag = "keyword-type+",
-	name = "Never",
-	location = {begins = "???", ends = "???"},
-}
+local STRING_TYPE = provided.STRING_TYPE
+local INT_TYPE = provided.INT_TYPE
+local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
+local UNIT_TYPE = provided.UNIT_TYPE
+local NEVER_TYPE = provided.NEVER_TYPE
 
 --------------------------------------------------------------------------------
 
@@ -400,6 +380,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "negate",
@@ -411,6 +392,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "lessThan",
@@ -422,6 +404,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "eq",
@@ -433,6 +416,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "quotient",
@@ -444,6 +428,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "product",
@@ -455,6 +440,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "sum",
@@ -466,6 +452,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 			{
 				name = "difference",
@@ -477,6 +464,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 		},
 	},
@@ -495,6 +483,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				bang = false,
 				ensures = {},
 				requires = {},
+				logic = false,
 			},
 		},
 	},
@@ -515,7 +504,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				requires = {},
 				logic = {
 					[true] = {{true, true}},
-					[false] = {{false, "*"}, {true, false}},
+					[false] = {{false, false}, {false, true}, {true, false}},
 				},
 			},
 			{
@@ -529,7 +518,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensures = {},
 				requires = {},
 				logic = {
-					[true] = {{false, "*"}, {true, true}},
+					[true] = {{false, false}, {false, true}, {true, true}},
 					[false] = {{true, false}},
 				},
 			},
@@ -1216,7 +1205,7 @@ function compileExpression(pExpression, scope, environment)
 		local outs = {}
 		for _, returnType in pairs(method.returnTypes) do
 			local returnVariable = {
-				name = generateLocalID("cs_return"),
+				name = generateLocalID(method.name .. "_result"),
 				type = substituter(returnType),
 				location = pExpression.location,
 			}
@@ -1486,7 +1475,7 @@ function compileExpression(pExpression, scope, environment)
 		local destinations = {}
 		for _, returnType in ipairs(method.returnTypes) do
 			local destination = {
-				name = generateLocalID("cm_return"),
+				name = generateLocalID(method.name .. "_result"),
 				type = substituter(returnType),
 				location = pExpression.location,
 			}
@@ -1972,6 +1961,9 @@ local function semanticsSmol(sources, main)
 				ensures = signature.ensures,
 				requires = signature.requires,
 				scope = scope,
+
+				-- TODO: total boolean functions might have this computed:
+				logic = false,
 			}
 		end
 

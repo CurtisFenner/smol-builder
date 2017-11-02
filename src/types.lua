@@ -39,7 +39,7 @@ end
 -- RETURNS nothing
 -- MODIFIES out by appending strings to it
 local function showAdd(object, indent, out)
-	if indent > 4 then
+	if indent > 6 then
 		table.insert(out, "...")
 	elseif isstring(object) then
 		-- Turn into a string literal
@@ -49,13 +49,20 @@ local function showAdd(object, indent, out)
 		end
 		table.insert(out, [["]])
 	elseif isobject(object) then
+		local internal = {}
 		table.insert(out, "{")
 		for key, value in pairs(object) do
-			table.insert(out, "\n" .. string.rep("\t", indent) .. "\t[")
-			showAdd(key, indent + 1, out)
-			table.insert(out, "] = ")
-			showAdd(value, indent + 1, out)
-			table.insert(out, ",")
+			local line = {}
+			table.insert(line, "\n" .. string.rep("\t", indent) .. "\t[")
+			showAdd(key, indent + 1, line)
+			table.insert(line, "] = ")
+			showAdd(value, indent + 1, line)
+			table.insert(line, ",")
+			table.insert(internal, table.concat(line))
+		end
+		table.sort(internal)
+		for _, line in ipairs(internal) do
+			table.insert(out, line)
 		end
 		table.insert(out, "\n" .. string.rep("\t", indent) .. "}")
 	else

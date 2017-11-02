@@ -47,8 +47,13 @@ end
 theory.showAssertion = showAssertion
 
 function theory:isInconsistent(model)
-	return false
+	return theory:inModel(model, theory.falseAssertion, true)
 end
+
+theory.falseAssertion = {
+	tag = "boolean",
+	value = false,
+}
 
 local TERMINAL_TAG = {
 	["unit"] = true,
@@ -93,6 +98,7 @@ local function m_scan(self, object)
 			base = self:scan(object.base),
 			methodName = object.methodName,
 			arguments = table.map(table.bind(self, self.scan), object.arguments),
+			signature = object.signature,
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)
@@ -110,6 +116,7 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	assertis(targetAssertion, "Assertion")
 	assertis(targetTruth, "boolean")
 
+	print("I am an oracle.")
 
 	profile.open "canonicalization"
 	-- 1) Generate a list of relevant subexpressions
@@ -126,9 +133,10 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		
 		-- After canonicalizing, two expressions with different truth
 		-- assignments could be in the map
-		if simple[object] and simple[object] ~= value then
+		if simple[object] ~= nil and simple[object] ~= value then
 			-- All truths are modeled by an inconsistent model
 			profile.close()
+			print("<< inconsistent")
 			return true
 		end
 		simple[object] = value
@@ -366,26 +374,23 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	-- It may be equal to any true statement
 	for _, r in pairs(canon.relevant) do
 		if areEqual(r, targetAssertion) then
-			--print()
-			--print("", "@", showAssertion(r))
 			local holds = immediately(r, targetTruth)
-			--print("", "", holds)
 			if holds then
 				profile.close()
+				print("<< known")
 				return true
 			end
 		end
 	end
 
+	if immediately(falseAssertion, true) or immediately(trueAssertion, false) then
+		print("false <> true inconsistent!")
+		return true
+	end
+
 	profile.close()
 
-	--print("{")
-	--for key, value in pairs(idSimple) do
-	--	print("", showAssertion(key), "=>", value)
-	--end
-	--print("}")
-
-	--print("don't know how to prove", show(targetAssertion):gsub("%s+", " "), "")
+	print("don't know how to prove", showAssertion(targetAssertion))
 	return false
 end
 
@@ -393,23 +398,32 @@ function theory:breakup(assertion, target)
 	assertis(assertion, "Assertion")
 
 	if assertion.tag == "method" then
-		if assertion.methodName == "and" then
-			if target == true then
-				local truths = {{true, true}}
-				return {assertion.base, assertion.arguments[1]}, truths
-			else
-				local truths = {{false, false}, {false, true}, {true, false}}
-				return {assertion.base, assertion.arguments[1]}, truths
-			end
-		elseif assertion.methodName == "not" then
-			if target == true then
-				local truths = {{false}}
-				return {assertion.base}, truths
-			else
-				local truths = {{true}}
-				return {assertion.base}, truths
-			end
+		local signature = assertion.signature
+
+		if signature == false then
+			print("no signature for", assertion.methodName)
+			return false
 		end
+
+		assertis(signature, "Signature")
+
+		local logic = signature.logic
+		if not logic then
+			print("no logic for", assertion.methodName)
+			return false
+		end
+
+		local values = {assertion.base}
+		for _, argument in ipairs(assertion.arguments) do
+			table.insert(values, argument)
+		end
+		assertis(values, listType "Assertion")
+
+		for _, row in ipairs(logic[target]) do
+			assert(#row == #values)
+		end
+
+		return freeze(values), logic[target]
 	end
 
 	return false

@@ -131,17 +131,43 @@ local function assertionToSimpleModels(theory, assertion, target)
 	return models
 end
 
+-- RETURNS nothing
+-- Prints the contents of the model to standard out
+local function dumpModel(theory, model)
+	if not theory.showAssertion then
+		return
+	end
+	print("model {")
+	local longest = 0
+	local keys = {}
+	for k in pairs(model) do
+		longest = math.max(longest, #theory.showAssertion(k))
+		table.insert(keys, k)
+	end
+	table.sort(keys, function(a, b) return theory.showAssertion(a) < theory.showAssertion(b) end)
+	for _, k in ipairs(keys) do
+		local v = model[k]
+		local s = theory.showAssertion(k)
+		print("\t\t`" .. s .. "`" .. string.rep(" ", longest - #s) .. " -> " .. tostring(v))
+	end
+	print("}")
+end
+
 -- RETURNS a set of simple models such that the disjunction of the simple models
 -- is equivalent to the complex model
 local function complexToSimpleModels(theory, complex)
 	assertis(theory, "Theory")
 	assertis(complex, model_t(theory))
 
+	print("# Complex")
+	dumpModel(theory, complex)
+
 	local terms = {}
 	for assertion, truth in pairs(complex) do
 		table.insert(terms, assertionToSimpleModels(theory, assertion, truth))
 	end
 	assertis(terms, listType(listType(model_t(theory))))
+	table.sort(terms, function(a, b) return show(a) < show(b) end)
 
 	local models = {}
 	for _, chain in ipairs(cartesian(terms)) do
@@ -149,6 +175,8 @@ local function complexToSimpleModels(theory, complex)
 		for _, sub in ipairs(chain) do
 			model = intersectMaps(model, sub)
 			if not model then
+				assertis(theory.falseAssertion, theory.assertion_t)
+				table.insert(models, {[theory.falseAssertion] = true})
 				break
 			end
 		end
@@ -159,7 +187,7 @@ local function complexToSimpleModels(theory, complex)
 	return models
 end
 
--- RETURNS a boolean
+-- RETURNS a boolean representing the truth value of a => b.
 local function modelImplies(theory, a, b)
 	assertis(theory, "Theory")
 	assertis(a, model_t(theory))
@@ -169,7 +197,7 @@ local function modelImplies(theory, a, b)
 	for key, value in pairs(b) do
 		if a[key] ~= nil then
 			if a[key] ~= value then
-				return false
+				return theory:isInconsistent(a)
 			end
 		else
 			table.insert(todos, {assertion = key, truth = value})
@@ -198,16 +226,38 @@ function theorem.simpleModelsAssertion(theory, models, assertion)
 	local simples = assertionToSimpleModels(theory, assertion, true)
 	assertis(simples, listType(model_t(theory)))
 
+	table.sort(models, function(a, b)
+		return show(a) < show(b)
+	end)
+
+	print("There are ", #simples, "#simples")
+
+	print("There are", #models, "#models")
 	for _, model in ipairs(models) do
-		local found = false
-		for _, simple in ipairs(simples) do
-			if modelImplies(theory, model, simple) then
-				found = true
-				break
+		print(_)
+		dumpModel(theory, model)
+	end
+	print("~~~")
+
+	for _, model in ipairs(models) do
+		print(_)
+		if theory:isInconsistent(model) then
+			print("inconsistent!")
+		else
+			local found = false
+			print("findy")
+			for _, simple in ipairs(simples) do
+				print("\tsimple", _)
+				if modelImplies(theory, model, simple) then
+					found = true
+					break
+				end
 			end
-		end
-		if not found then
-			return false
+			if not found then
+				print("NO!")
+				return false
+			end
+			print("yes!")
 		end
 	end
 	return true
@@ -221,17 +271,27 @@ function theorem.modelsAssertion(theory, model, assertion)
 	assertis(model, model_t(theory))
 	assertis(assertion, theory.assertion_t)
 
+	if theory.showAssertion then
+		print("====")
+		dumpModel(theory, model)
+		print("--?-->", theory.showAssertion(assertion))
+	end
+
 	profile.open "complexToSimpleModels"
 	local simples = complexToSimpleModels(theory, model)
+
 	profile.close()
 
-	return theorem.simpleModelsAssertion(theory, simples, assertion)
+	local out = theorem.simpleModelsAssertion(theory, simples, assertion)
+	return out
 end
 
 -- Plain Theory Test -----------------------------------------------------------
 
 do
 	local plaintheory = {}
+	plaintheory.falseAssertion = false
+	plaintheory.showAssertion = function(x) return (show(x):gsub("%s+", " ")) end
 
 	function plaintheory:breakup(assertion, truth)
 		if type(assertion) == "string" then
@@ -244,6 +304,10 @@ do
 				return {assertion[2], assertion[3]}, {{true, true}, {true, false}, {false, true}}
 			elseif assertion[1] == "not" then
 				return {assertion[2]}, {{false}}
+			elseif assertion[1] == "iff" then
+				return {assertion[2], assertion[3]}, {{true, true}, {false, false}}
+			elseif assertion[1] == "implies" then
+				return {assertion[2], assertion[3]}, {{true, true}, {false, true}, {false, false}}
 			end
 		else
 			if assertion[1] == "and" then
@@ -252,6 +316,10 @@ do
 				return {assertion[2], assertion[3]}, {{false, false}}
 			elseif assertion[1] == "not" then
 				return {assertion[2]}, {{true}}
+			elseif assertion[1] == "iff" then
+				return {assertion[2], assertion[3]}, {{true, false}, {false, true}}
+			elseif assertion[1] == "implies" then
+				return {assertion[2], assertion[3]}, {{true, false}}
 			end
 		end
 		error "foo"
@@ -260,7 +328,7 @@ do
 	plaintheory.assertion_t = "any"
 
 	function plaintheory:inModel(model, assertion, target)
-		return assertion == target
+		return assertion == target or plaintheory:isInconsistent(model)
 	end
 
 	function plaintheory:isInconsistent(model)
@@ -283,6 +351,7 @@ do
 	assert(not theorem.modelsAssertion(plaintheory, m1, "z"))
 	assert(not theorem.modelsAssertion(plaintheory, m1, {"not", "z"}))
 	assert(not theorem.modelsAssertion(plaintheory, m1, {"not", "y"}))
+
 	local m2 = {
 		[
 			{"or", {"not", "x"}, "y"}
@@ -291,25 +360,49 @@ do
 	assert(not theorem.modelsAssertion(plaintheory, m2, "y"))
 	assert(not theorem.modelsAssertion(plaintheory, m2, "x"))
 	assert(not theorem.modelsAssertion(plaintheory, m2, {"not", "x"}))
-	local m3 = {
+
+	local m3_2 = {
 		["x"] = true,
 		[
 			{"or", {"not", "x"}, "y"}
 		] = true,
 	}
-	assert(theorem.modelsAssertion(plaintheory, m3, "y"))
-	assert(theorem.modelsAssertion(plaintheory, m3, "x"))
-	assert(not theorem.modelsAssertion(plaintheory, m3, {"not", "x"}))
-	local m3 = {
+	assert(theorem.modelsAssertion(plaintheory, m3_2, "y"))
+	assert(theorem.modelsAssertion(plaintheory, m3_2, "x"))
+	assert(not theorem.modelsAssertion(plaintheory, m3_2, {"not", "x"}))
+
+	local m3_4 = {
 		["x"] = false,
 		[
 			{"or", {"not", "x"}, "y"}
 		] = true,
 	}
-	assert(not theorem.modelsAssertion(plaintheory, m3, "y"))
-	assert(not theorem.modelsAssertion(plaintheory, m3, {"not", "y"}))
-	assert(not theorem.modelsAssertion(plaintheory, m3, "x"))
-	assert(theorem.modelsAssertion(plaintheory, m3, {"not", "x"}))
+	assert(not theorem.modelsAssertion(plaintheory, m3_4, "y"))
+	assert(not theorem.modelsAssertion(plaintheory, m3_4, {"not", "y"}))
+	assert(not theorem.modelsAssertion(plaintheory, m3_4, "x"))
+	assert(theorem.modelsAssertion(plaintheory, m3_4, {"not", "x"}))
+
+	local m4 = {
+		[
+			{"iff", "x", "y"}
+		] = true,
+	}
+	assert(theorem.modelsAssertion(plaintheory, m4, {"implies", "x", "y"}))
+	assert(theorem.modelsAssertion(plaintheory, m4, {"implies", "y", "x"}))
+	assert(not theorem.modelsAssertion(plaintheory, m4, "x"))
+	assert(not theorem.modelsAssertion(plaintheory, m4, "y"))
+	assert(not theorem.modelsAssertion(plaintheory, m4, {"not", "x"}))
+	assert(not theorem.modelsAssertion(plaintheory, m4, {"not", "y"}))
+
+	local m5 = {
+		[
+			{"iff", "x", "y"}
+		] = true,
+		[
+			{"implies", "x", "y"}
+		] = true,
+	}
+	assert(theorem.modelsAssertion(plaintheory, m5, {"implies", "y", "x"}))
 end
 
 return theorem

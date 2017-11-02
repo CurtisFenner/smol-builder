@@ -12,6 +12,16 @@ local profile = import "profile.lua"
 
 --------------------------------------------------------------------------------
 
+local provided = import "provided.lua"
+
+local STRING_TYPE = provided.STRING_TYPE
+local INT_TYPE = provided.INT_TYPE
+local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
+local UNIT_TYPE = provided.UNIT_TYPE
+local NEVER_TYPE = provided.NEVER_TYPE
+
+--------------------------------------------------------------------------------
+
 REGISTER_TYPE("Action", choiceType(
 	recordType {
 		tag = constantType "predicate",
@@ -23,6 +33,14 @@ REGISTER_TYPE("Action", choiceType(
 		value = "Assertion",
 	}
 ))
+
+REGISTER_TYPE("MethodAssertion", recordType {
+	tag = constantType "method",
+	base = "Assertion",
+	arguments = listType "Assertion",
+	methodName = "string",
+	signature = choiceType("Signature", "Signature"),
+})
 
 REGISTER_TYPE("Assertion", choiceType(
 	recordType {
@@ -48,12 +66,7 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "unit",
 	},
-	recordType {
-		tag = constantType "method",
-		base = "Assertion",
-		arguments = listType "Assertion",
-		methodName = "string",
-	},
+	"MethodAssertion",
 	recordType {
 		tag = constantType "static",
 		base = "string",
@@ -239,25 +252,6 @@ local function assignRaw(scope, destination, value)
 	})
 end
 
--- RETURNS an assertion representing the conjunction of all inputs
-local function andAssertion(assertions)
-	if #assertions == 0 then
-		return valueBoolean(true)
-	elseif #assertions == 1 then
-		return assertions[1]
-	end
-	local a = assertions[1]
-	for i = 2, #assertions do
-		a = {
-			tag = "method",
-			base = a,
-			arguments = {assertions[i]},
-			methodName = "and",
-		}
-	end
-	return a
-end
-
 -- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
 local function mustModel(scope, target)
 	assertis(scope, listType(listType "Action"))
@@ -283,14 +277,45 @@ local function mustModel(scope, target)
 	for i, frame in ipairs(scope) do
 		for j, action in ipairs(frame) do
 			if action.tag == "assignment" then
+				local t = action.destination.type
+				local unknown = freeze {begins = "???", ends = "???"}
+				local eqSignature = freeze {
+					name = "eq",
+					parameters = {
+						freeze {name = "left", type = t, location = unknown},
+						freeze {name = "right", type = t, location = unknown}
+					},
+					returnTypes = {BOOLEAN_TYPE},
+					modifier = "method",
+					container = showType(t),
+					bang = false,
+					foreign = true,
+					ensures = {},
+					requires = {},
+					logic = false
+				}
+
+				if action.destination.type.name == "Boolean" then
+					local logic = {
+						[true] = {{true, true}, {false, false}},
+						[false] = {{true, false}, {false, true}},
+					}
+					eqSignature = table.with(eqSignature, "logic", logic)
+				end
+
 				local newID = action.destination.name .. "'" .. i .. "'" .. j
 				local newV = variableAssertion(scope, table.with(action.destination, "name", newID))
-				table.insert(predicates, {
+				
+				local p = {
 					tag = "method",
 					methodName = "eq",
 					base = inNow(action.value),
 					arguments = {newV},
-				})
+
+					signature = eqSignature,
+				}
+				assertis(p, "MethodAssertion")
+				table.insert(predicates, p)
 				assignments[action.destination.name] = newV
 			elseif action.tag == "predicate" then
 				table.insert(predicates, inNow(action.value))
@@ -304,10 +329,8 @@ local function mustModel(scope, target)
 	profile.close()
 
 	local complexModel = {}
-	--print("mustModel ? ", showAssertion(inNow(target)))
 	for i, p in ipairs(predicates) do
 		complexModel[p] = true
-		--print(i, showAssertion(p))
 	end
 
 	local result = inNow(target)
@@ -362,6 +385,8 @@ local function resultAssertion(scope, statement)
 			base = variableAssertion(scope, statement.baseInstance),
 			methodName = statement.methodName,
 			arguments = table.map(function(x) return variableAssertion(scope, x) end, statement.arguments),
+
+			signature = statement.signature,
 		}
 	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
 		local base
@@ -404,9 +429,9 @@ local function verifyStatement(statement, scope, semantics)
 		-- Check
 		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
-			--print("$ !!!", models)
-			--dumpScope(scope)
-			--print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
+			print("$ !!!", models)
+			dumpScope(scope)
+			print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
@@ -416,7 +441,6 @@ local function verifyStatement(statement, scope, semantics)
 	
 		return
 	elseif statement.tag == "assume" then
-		--print("ASSUME", statement)
 		verifyStatement(statement.body, scope, semantics)
 
 		addPredicate(scope, variableAssertion(scope, statement.variable))
