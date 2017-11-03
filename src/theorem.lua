@@ -159,15 +159,12 @@ local function complexToSimpleModels(theory, complex)
 	assertis(theory, "Theory")
 	assertis(complex, model_t(theory))
 
-	print("# Complex")
-	dumpModel(theory, complex)
-
 	local terms = {}
 	for assertion, truth in pairs(complex) do
 		table.insert(terms, assertionToSimpleModels(theory, assertion, truth))
 	end
 	assertis(terms, listType(listType(model_t(theory))))
-	table.sort(terms, function(a, b) return show(a) < show(b) end)
+	--table.sort(terms, function(a, b) return show(a) < show(b) end)
 
 	local models = {}
 	for _, chain in ipairs(cartesian(terms)) do
@@ -226,38 +223,25 @@ function theorem.simpleModelsAssertion(theory, models, assertion)
 	local simples = assertionToSimpleModels(theory, assertion, true)
 	assertis(simples, listType(model_t(theory)))
 
-	table.sort(models, function(a, b)
-		return show(a) < show(b)
-	end)
-
-	print("There are ", #simples, "#simples")
-
-	print("There are", #models, "#models")
 	for _, model in ipairs(models) do
-		print(_)
-		dumpModel(theory, model)
-	end
-	print("~~~")
-
-	for _, model in ipairs(models) do
-		print(_)
 		if theory:isInconsistent(model) then
-			print("inconsistent!")
 		else
 			local found = false
-			print("findy")
 			for _, simple in ipairs(simples) do
-				print("\tsimple", _)
 				if modelImplies(theory, model, simple) then
 					found = true
 					break
 				end
 			end
 			if not found then
-				print("NO!")
+				if theory.showAssertion then
+					dumpModel(theory, model)
+					print("=/=>")
+					print(theory.showAssertion(assertion))
+					print()
+				end
 				return false
 			end
-			print("yes!")
 		end
 	end
 	return true
@@ -270,12 +254,6 @@ function theorem.modelsAssertion(theory, model, assertion)
 	assertis(theory, "Theory")
 	assertis(model, model_t(theory))
 	assertis(assertion, theory.assertion_t)
-
-	if theory.showAssertion then
-		print("====")
-		dumpModel(theory, model)
-		print("--?-->", theory.showAssertion(assertion))
-	end
 
 	profile.open "complexToSimpleModels"
 	local simples = complexToSimpleModels(theory, model)
@@ -291,7 +269,7 @@ end
 do
 	local plaintheory = {}
 	plaintheory.falseAssertion = false
-	plaintheory.showAssertion = function(x) return (show(x):gsub("%s+", " ")) end
+	--plaintheory.showAssertion = function(x) return (show(x):gsub("%s+", " ")) end
 
 	function plaintheory:breakup(assertion, truth)
 		if type(assertion) == "string" then

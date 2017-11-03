@@ -42,6 +42,12 @@ REGISTER_TYPE("MethodAssertion", recordType {
 	signature = choiceType("Signature", "Signature"),
 })
 
+REGISTER_TYPE("FieldAssertion", recordType {
+	tag = constantType "field",
+	base = "Assertion",
+	fieldName = "string",
+})
+
 REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "tuple",
@@ -66,6 +72,7 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "unit",
 	},
+	"FieldAssertion",
 	"MethodAssertion",
 	recordType {
 		tag = constantType "static",
@@ -76,17 +83,6 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "variable",
 		variable = "VariableIR",
-	},
-	recordType {
-		tag = constantType "new-class",
-		type = "string",
-		fields = mapType("string", "Assertion"),
-	},
-	recordType {
-		tag = constantType "new-union",
-		type = "string",
-		field = "string",
-		value = "Assertion",
 	}
 ))
 
@@ -95,6 +91,7 @@ local assertionRecursionMap = freeze {
 	["new-class"] = {"fields{}"},
 	["static"] = {"arguments{}"},
 	["method"] = {"base", "arguments{}"},
+	["field"] = {"base"},
 	["unit"] = {},
 	["this"] = {},
 	["boolean"] = {},
@@ -104,6 +101,30 @@ local assertionRecursionMap = freeze {
 	["variable"] = {},
 }
 
+-- RETURNS a Signature for t.eq(t)
+local function makeEqSignature(t)
+	assertis(t, "Type+")
+	local unknown = freeze {begins = "???", ends = "???"}
+	
+	local eqSignature = freeze {
+		name = "eq",
+		parameters = {
+			freeze {name = "left", type = t, location = unknown},
+			freeze {name = "right", type = t, location = unknown}
+		},
+		returnTypes = {BOOLEAN_TYPE},
+		modifier = "method",
+		container = showType(t),
+		bang = false,
+		foreign = true,
+		ensures = {},
+		requires = {},
+		logic = false
+	}
+	assertis(eqSignature, "Signature")
+
+	return eqSignature
+end
 
 -- RETURNS an Assertion
 local function assertionReplaced(expression, variable, with)
@@ -226,6 +247,21 @@ local function variableAssertion(scope, variable)
 	}
 end
 
+local uniqueNameID = 1000
+local function uniqueVariable(type)
+	assertis(type, "Type+")
+	uniqueNameID = uniqueNameID + 1
+
+	return freeze {
+		location = freeze {
+			begins = "???",
+			ends = "???",
+		},
+		type = type,
+		name = "__unique" .. uniqueNameID,
+	}
+end
+
 -- MODIFIES scope
 -- RETURNS nothing
 local function addPredicate(scope, value)
@@ -278,22 +314,7 @@ local function mustModel(scope, target)
 		for j, action in ipairs(frame) do
 			if action.tag == "assignment" then
 				local t = action.destination.type
-				local unknown = freeze {begins = "???", ends = "???"}
-				local eqSignature = freeze {
-					name = "eq",
-					parameters = {
-						freeze {name = "left", type = t, location = unknown},
-						freeze {name = "right", type = t, location = unknown}
-					},
-					returnTypes = {BOOLEAN_TYPE},
-					modifier = "method",
-					container = showType(t),
-					bang = false,
-					foreign = true,
-					ensures = {},
-					requires = {},
-					logic = false
-				}
+				local eqSignature = makeEqSignature(t)
 
 				if action.destination.type.name == "Boolean" then
 					local logic = {
@@ -405,6 +426,17 @@ local function resultAssertion(scope, statement)
 	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
 end
 
+-- RETURNS an Assertion
+local function fieldAssertion(scope, statement)
+	assertis(statement, "FieldSt")
+	
+	return freeze {
+		tag = "field",
+		fieldName = statement.name,
+		base = variableAssertion(scope, statement.base),
+	}
+end
+
 -- MODIFIES scope
 -- RETURNS nothing
 local function verifyStatement(statement, scope, semantics)
@@ -445,7 +477,6 @@ local function verifyStatement(statement, scope, semantics)
 
 		addPredicate(scope, variableAssertion(scope, statement.variable))
 
-		--error "TODO"
 		return
 	elseif statement.tag == "local" then
 		-- Do nothing
@@ -459,11 +490,12 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, VALUE_UNIT)
 		return
 	elseif statement.tag == "field" then
-		-- TODO:
+		local assertion = fieldAssertion(scope, statement)
+		assignRaw(scope, statement.destination, assertion)
 		return
 	elseif statement.tag == "variant" then
 		-- TODO:
-		return
+		return error("TODO: variant")
 	elseif statement.tag == "int" then
 		-- Integer literal
 		assignRaw(scope, statement.destination, valueInt(statement.number))
@@ -504,15 +536,35 @@ local function verifyStatement(statement, scope, semantics)
 		for n, v in pairs(statement.fields) do
 			fields[n] = variableAssertion(scope, v)
 		end
-		local rhs = {
-			tag = "new-class",
-			type = showType(statement.type),
-			fields = fields,
-		}
-		assignRaw(scope, statement.destination, rhs)
+
+		assertis(statement.type, "ConcreteType+")
+
+		local instance = variableAssertion(scope, uniqueVariable(statement.type))
+		assignRaw(scope, statement.destination, instance)
+
+		for fieldName, value in pairs(statement.fields) do
+			local fieldAssertion = freeze {
+				tag = "field",
+				base = instance,
+				fieldName = fieldName,
+			}
+			assertis(value, "VariableIR")
+			local eq = freeze {
+				tag = "method",
+				base = fieldAssertion,
+				arguments = {variableAssertion(scope, value)},
+				methodName = "eq",
+				signature = makeEqSignature(value.type),
+			}
+			assertis(eq, "MethodAssertion")
+			addPredicate(scope, eq)
+		end
+
 		return
 	elseif statement.tag == "new-union" then
 		-- TODO
+		print "TODO: new-union"
+		--[[
 		local rhs = {
 			tag = "new-union",
 			type = showType(statement.type),
@@ -520,6 +572,7 @@ local function verifyStatement(statement, scope, semantics)
 			value = variableAssertion(scope, statement.value),
 		}
 		assignRaw(scope, statement.destination, rhs)
+		]]
 		return
 	elseif statement.tag == "assign" then
 		assignRaw(scope, statement.destination, variableAssertion(scope, statement.source))

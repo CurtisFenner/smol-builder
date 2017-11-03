@@ -319,6 +319,7 @@ TYPE_DESCRIPTION = memoized(1, TYPE_DESCRIPTION)
 
 -- ASSERTS that `value` is of the specified type `t`
 function assertis(value, t)
+	do return end
 	local predicate = TYPE_PREDICATE(t)
 	local okay, reason = predicate(value)
 	if not okay then

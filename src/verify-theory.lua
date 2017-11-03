@@ -41,6 +41,8 @@ local function showAssertion(assertion)
 		return "(int " .. tostring(assertion.value) .. ")"
 	elseif assertion.tag == "boolean" then
 		return "(boolean " .. tostring(assertion.value) .. ")"
+	elseif assertion.tag == "field" then
+		return "(field " .. showAssertion(assertion.base) .. " " .. assertion.fieldName .. ")"
 	end
 	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
@@ -105,9 +107,17 @@ local function m_scan(self, object)
 		for _, argument in ipairs(canon) do
 			ref(argument)
 		end
+	elseif object.tag == "field" then
+		local canon = freeze {
+			tag = "field",
+			base = self:scan(object.base),
+			fieldName = object.fieldName,
+		}
+		self.relevant[shown] = canon
+		ref(canon.base)
 	end
 
-	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
+	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`: " .. show(object))
 	return self.relevant[shown]
 end
 
@@ -115,8 +125,6 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	assertis(idSimple, mapType("Assertion", "boolean"))
 	assertis(targetAssertion, "Assertion")
 	assertis(targetTruth, "boolean")
-
-	print("I am an oracle.")
 
 	profile.open "canonicalization"
 	-- 1) Generate a list of relevant subexpressions
@@ -136,7 +144,6 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		if simple[object] ~= nil and simple[object] ~= value then
 			-- All truths are modeled by an inconsistent model
 			profile.close()
-			print("<< inconsistent")
 			return true
 		end
 		simple[object] = value
@@ -161,6 +168,12 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 			else
 				table.insert(negativeEq, {left, right})
 			end
+		end
+
+		if truth then
+			table.insert(positiveEq, {trueAssertion, assertion})
+		else
+			table.insert(positiveEq, {falseAssertion, assertion})
 		end
 	end
 
@@ -205,6 +218,8 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 			return "method-" .. x.methodName
 		elseif x.tag == "static" then
 			return "static-" .. x.staticName
+		elseif x.tag == "field" then
+			return "field-" .. x.fieldName
 		else
 			return x.tag
 		end
@@ -247,7 +262,13 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 			if x.staticName ~= y.staticName then
 				return false
 			end
-			-- TODO
+
+			error "TODO: childrenSame for static"
+		elseif x.tag == "field" then
+			if x.fieldName ~= y.fieldName then
+				return false
+			end
+			return areEqual(x.base, y.base)
 		end
 		error("TODO childrenSame for tag `" .. x.tag .. "`")
 	end
@@ -314,7 +335,6 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 
 		if rootA == rootB then
 			-- TODO: Inconsistent model
-			print("INCONSISTENT!")
 			profile.close()
 			return true
 		end
@@ -334,7 +354,6 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	local function immediately(assertion, truth)
 		assertis(truth, "boolean")
 		assert(rootRepresentative(assertion))
-		--print("", "??", showAssertion(assertion), "=>?", truth)
 
 		-- The boolean literals have known truth assignments
 		if truth then
@@ -350,7 +369,6 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		for given, t in pairs(simple) do
 			assert(rootRepresentative(given))
 			local eq = areEqual(given, assertion)
-			--print("", "", eq, "?=", showAssertion(given))
 			if t == truth and eq then
 				return true
 			end
@@ -377,20 +395,17 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 			local holds = immediately(r, targetTruth)
 			if holds then
 				profile.close()
-				print("<< known")
 				return true
 			end
 		end
 	end
 
 	if immediately(falseAssertion, true) or immediately(trueAssertion, false) then
-		print("false <> true inconsistent!")
 		return true
 	end
 
 	profile.close()
 
-	print("don't know how to prove", showAssertion(targetAssertion))
 	return false
 end
 
@@ -401,7 +416,6 @@ function theory:breakup(assertion, target)
 		local signature = assertion.signature
 
 		if signature == false then
-			print("no signature for", assertion.methodName)
 			return false
 		end
 
@@ -409,7 +423,6 @@ function theory:breakup(assertion, target)
 
 		local logic = signature.logic
 		if not logic then
-			print("no logic for", assertion.methodName)
 			return false
 		end
 

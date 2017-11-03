@@ -14,7 +14,7 @@ class Box {
 	}
 
 	static makeSmallBox() Box
-	ensures return.isSmall() {
+	ensures return.size == 10 {
 		return new(size = 10);
 	}
 }

@@ -1541,12 +1541,6 @@ function compileExpression(pExpression, scope, environment)
 			}
 			return buildBlock(execution), {boolean}
 		elseif pExpression.keyword == "this" then
-			local variable = {
-				type = containerType,
-				name = generateLocalID("this"),
-				location = pExpression.location,
-			}
-
 			-- Check that this is a method
 			if containingSignature.modifier ~= "method" then
 				Report.THIS_USED_OUTSIDE_METHOD {
@@ -1554,15 +1548,7 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 
-			local execution = {
-				localSt(variable),
-				{
-					tag = "this",
-					destination = variable,
-					returns = "no",
-				},
-			}
-			return buildBlock(execution), {variable}
+			return buildBlock {}, {environment.thisVariable}
 		elseif pExpression.keyword == "unit" then
 			local variable = {
 				type = UNIT_TYPE,

@@ -1,7 +1,5 @@
 package test;
 
-import core;
-
 class Test {
 	static yes() Boolean
 	ensures return {
