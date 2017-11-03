@@ -234,12 +234,6 @@ function theorem.simpleModelsAssertion(theory, models, assertion)
 				end
 			end
 			if not found then
-				if theory.showAssertion then
-					dumpModel(theory, model)
-					print("=/=>")
-					print(theory.showAssertion(assertion))
-					print()
-				end
 				return false
 			end
 		end

@@ -378,8 +378,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -390,8 +390,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -402,8 +402,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -414,8 +414,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -426,8 +426,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -438,8 +438,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -450,8 +450,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 			{
@@ -462,8 +462,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Int",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 		},
@@ -481,8 +481,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "String",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = false,
 			},
 		},
@@ -500,8 +500,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Boolean",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = {
 					[true] = {{true, true}},
 					[false] = {{false, false}, {false, true}, {true, false}},
@@ -515,8 +515,8 @@ local BUILTIN_DEFINITIONS = freeze {
 				container = "Boolean",
 				foreign = true,
 				bang = false,
-				ensures = {},
-				requires = {},
+				ensuresAST = {},
+				requiresAST = {},
 				logic = {
 					[true] = {{false, false}, {false, true}, {true, true}},
 					[false] = {{true, false}},
@@ -1083,7 +1083,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 
 			-- Generate Verify statements
-			for i, require in ipairs(static.signature.requires) do
+			for i, require in ipairs(static.signature.requiresAST) do
 				local verification = generatePreconditionVerify(
 					require,
 					static.signature,
@@ -1108,7 +1108,7 @@ function compileExpression(pExpression, scope, environment)
 			table.insert(evaluation, callSt)
 
 			-- Generate Assume statements
-			for _, ensure in ipairs(static.signature.ensures) do
+			for _, ensure in ipairs(static.signature.ensuresAST) do
 				local assumption = generatePostconditionAssume(
 					ensure,
 					static.signature,
@@ -1214,7 +1214,7 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- Generate Verify statements
-		for i, require in ipairs(method.requires) do
+		for i, require in ipairs(method.requiresAST) do
 			local verification = generatePreconditionVerify(
 				require,
 				method,
@@ -1240,7 +1240,7 @@ function compileExpression(pExpression, scope, environment)
 		table.insert(evaluation, call)
 
 		-- Generate Assume statements
-		for _, ensure in ipairs(method.ensures) do
+		for _, ensure in ipairs(method.ensuresAST) do
 			local assumption = generatePostconditionAssume(
 				ensure,
 				method,
@@ -1356,7 +1356,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 
 			-- Generate Verify statements
-			for i, require in ipairs(method.signature.requires) do
+			for i, require in ipairs(method.signature.requiresAST) do
 				local verification = generatePreconditionVerify(
 					require,
 					method.signature,
@@ -1382,7 +1382,7 @@ function compileExpression(pExpression, scope, environment)
 			table.insert(evaluation, callSt)
 			
 			-- Generate Assume statements
-			for _, ensure in ipairs(method.signature.ensures) do
+			for _, ensure in ipairs(method.signature.ensuresAST) do
 				local assumption = generatePostconditionAssume(
 					ensure,
 					method.signature,
@@ -1484,7 +1484,7 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- Generate Verify statements
-		for i, require in ipairs(method.requires) do
+		for i, require in ipairs(method.requiresAST) do
 			local verification = generatePreconditionVerify(
 				require,
 				method,
@@ -1507,7 +1507,7 @@ function compileExpression(pExpression, scope, environment)
 		})
 
 		-- Generate Assume statements
-		for _, ensure in ipairs(method.ensures) do
+		for _, ensure in ipairs(method.ensuresAST) do
 			local assumption = generatePostconditionAssume(
 				ensure,
 				method,
@@ -1697,6 +1697,23 @@ function compileExpression(pExpression, scope, environment)
 	end
 
 	error("TODO expression: " .. show(pExpression))
+end
+
+local function typeFromDefinition(definition)
+	assertis(definition, choiceType("ClassIR", "UnionIR"))
+
+	return freeze {
+		tag = "concrete-type+",
+		name = definition.name,
+		arguments = table.map(function(p)
+			return freeze {
+				tag = "generic+",
+				name = p.name,
+				location = definition.location,
+			}
+		end, definition.generics),
+		location = definition.location,
+	}
 end
 
 --------------------------------------------------------------------------------
@@ -1944,8 +1961,8 @@ local function semanticsSmol(sources, main)
 				end, signature.parameters),
 				location = signature.location,
 				bang = signature.bang,
-				ensures = signature.ensures,
-				requires = signature.requires,
+				ensuresAST = signature.ensures,
+				requiresAST = signature.requires,
 				scope = scope,
 
 				-- TODO: total boolean functions might have this computed:
@@ -2313,6 +2330,76 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
+	-- (4.5) Verify all ensures/requires
+	for _, definition in ipairs(allDefinitions) do
+		if definition.tag == "class" or definition.tag == "union" then
+			for _, signature in ipairs(definition.signatures) do
+				-- Verify the type of the signature's ensures and requires
+				local scope = {{}}
+				for _, parameter in ipairs(signature.parameters) do
+					scope[1][parameter.name] = parameter
+				end
+
+				local containerType = typeFromDefinition(definition)
+				local thisVariable = false
+				local unknownLocation = {begins = "???", ends = "???"}
+				if signature.modifier == "method" then
+					thisVariable = {
+						location = unknownLocation,
+						name = "this",
+						type = containerType,
+					}
+				end
+
+				local returnOuts = {}
+				for i, returned in ipairs(signature.returnTypes) do
+					table.insert(returnOuts, {
+						location = unknownLocation,
+						name = "_r" .. i,
+						type = returned,
+					})
+				end
+				
+				local environment = {
+					resolveType = signature.resolveType,
+					containerType = containerType,
+					containingSignature = signature,
+					allDefinitions = allDefinitions,
+					thisVariable = thisVariable,
+					returnOuts = returnOuts,
+				}
+
+				-- Check each requires
+				for _, requires in ipairs(signature.requiresAST) do
+					local _, outs = compileExpression(requires, scope, environment)
+					if #outs ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+
+						}
+					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
+						Report.TYPES_DONT_MATCH {
+
+						}
+					end
+				end
+
+				-- Check each ensures
+				for _, ensures in ipairs(signature.ensuresAST) do
+					local _, outs = compileExpression(ensures, scope, environment)
+					if #outs ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+
+						}
+					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
+						Report.TYPES_DONT_MATCH {
+
+						}
+					end
+				end
+			end
+		end
+	end
+
 	-- (5) Compile all code bodies
 
 	-- RETURNS a FunctionIR
@@ -2320,18 +2407,7 @@ local function semanticsSmol(sources, main)
 		assertis(definition, choiceType("ClassIR", "UnionIR"))
 		assertis(containingSignature, "Signature")
 
-		local containerType = freeze {
-			tag = "concrete-type+",
-			name = definition.name,
-			arguments = table.map(function(p)
-				return freeze {
-					tag = "generic+",
-					name = p.name,
-					location = definition.location,
-				}
-			end, definition.generics),
-			location = definition.location,
-		}
+		local containerType = typeFromDefinition(definition)
 
 		local thisVariable = false
 		if containingSignature.modifier == "method" then
@@ -2484,7 +2560,7 @@ local function semanticsSmol(sources, main)
 					end
 				end
 
-				for i, ensures in ipairs(containingSignature.ensures) do
+				for i, ensures in ipairs(containingSignature.ensuresAST) do
 					local arguments = {}
 					for _, a in ipairs(containingSignature.parameters) do
 						table.insert(arguments, getFromScope(scope, a.name))

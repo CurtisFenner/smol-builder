@@ -1115,8 +1115,8 @@ REGISTER_TYPE("Signature", recordType {
 	container = "string",
 	foreign = "boolean",
 	bang = "boolean",
-	requires = listType "ASTExpression",
-	ensures = listType "ASTExpression",
+	requiresAST = listType "ASTExpression",
+	ensuresAST = listType "ASTExpression",
 	logic = choiceType(
 		constantType(false),
 		mapType(

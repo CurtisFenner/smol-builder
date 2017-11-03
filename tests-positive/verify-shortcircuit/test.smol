@@ -1,0 +1,32 @@
+package test;
+
+class Thing {
+	var man Boolean;
+	var mortal Boolean;
+
+	static socrates() Thing
+	ensures return.isMortal()
+	ensures return.isMortal().implies(return.isMan()) {
+		return new(man = true, mortal = true);
+	}
+
+	method isMan() Boolean {
+		return false;
+	}
+
+	method isMortal() Boolean {
+		return true;
+	}
+}
+
+class Test {
+	static willDie(x Thing) Unit
+	requires x.isMan()
+	ensures x.isMortal() {
+
+	}
+
+	static main() Unit {
+
+	}
+}

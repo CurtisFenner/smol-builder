@@ -117,8 +117,8 @@ local function makeEqSignature(t)
 		container = showType(t),
 		bang = false,
 		foreign = true,
-		ensures = {},
-		requires = {},
+		ensuresAST = {},
+		requiresAST = {},
 		logic = false
 	}
 	assertis(eqSignature, "Signature")
@@ -461,9 +461,9 @@ local function verifyStatement(statement, scope, semantics)
 		-- Check
 		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
-			print("$ !!!", models)
-			dumpScope(scope)
-			print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
+			--print("$ !!!", models)
+			--dumpScope(scope)
+			--print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
