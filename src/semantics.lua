@@ -485,6 +485,18 @@ local BUILTIN_DEFINITIONS = freeze {
 				requiresAST = {},
 				logic = false,
 			},
+			{
+				name = "eq",
+				parameters = {{location = BUILTIN_LOC, name = "other", type = STRING_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "String",
+				foreign = true,
+				bang = false,
+				ensuresAST = {},
+				requiresAST = {},
+				logic = false,
+			}
 		},
 	},
 	{
@@ -705,10 +717,7 @@ local function constraintFromStruct(interface, implementer, generics, containing
 			}
 		end
 	end
-	print(show(interface))
-	print(show(implementer))
-	print(string.rep(".", 80))
-	error("unhandled tag: " .. show(implementer))
+	error("unhandled tag `" .. implementer.tag .. "`")
 end
 
 --------------------------------------------------------------------------------
@@ -721,6 +730,7 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
 		arguments = listType "VariableIR",
+		container = "Type+",
 		this = choiceType(constantType(false), "VariableIR"),
 	})
 	assertis(environment, recordType {
@@ -729,20 +739,25 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 	assertis(context, "string")
 	assertis(checkLocation, "Location")
 	
-	local subEnvironment = {
+	local subEnvironment = freeze {
 		resolveType = environment.resolveType,
 		containerType = invocation.container,
 		containingSignature = method,
 		allDefinitions = environment.allDefinitions,
 		thisVariable = invocation.this,
+
+		-- Can be not-false when checking `ensures` at `return` statement
+		returnOuts = environment.returnOuts,
 	}
+	assertis(subEnvironment.containerType, "Type+")
+
 	local scope = {{}}
 	for i, argument in ipairs(invocation.arguments) do
 		scope[1][method.parameters[i].name] = argument
 	end
 	assertis(scope, listType(mapType("string", "VariableIR")))
 	
-	local evaluation, out = compileExpression(expression, scope, environment)
+	local evaluation, out = compileExpression(expression, scope, subEnvironment)
 	if #out ~= 1 or not areTypesEqual(out[1].type, BOOLEAN_TYPE) then
 		-- TODO: this is the wrong error message for wrong count
 		Report.TYPES_DONT_MATCH {
@@ -775,12 +790,14 @@ local function generatePostconditionAssume(expression, method, invocation, envir
 		this = choiceType(constantType(false), "VariableIR"),
 	})
 	assertis(environment, recordType {})
-	assertis(returnOuts, listType "VariableIR")
+	assertis(environment.containerType, "Type+")
+	assertis(returnOuts, choiceType(constantType(false), listType "VariableIR"))
 	
 	local subEnvironment = {
 		resolveType = environment.resolveType,
 		containerType = invocation.container,
 		containingSignature = method,
+		containerType = environment.containerType,
 		allDefinitions = environment.allDefinitions,
 		thisVariable = invocation.this,
 		returnOuts = returnOuts,
@@ -823,7 +840,7 @@ function compileExpression(pExpression, scope, environment)
 		containerType = "Type+",
 		containingSignature = "Signature",
 		allDefinitions = listType "Definition",
-		thisVariable = choiceType("false", "VariableIR"),
+		thisVariable = choiceType(constantType(false), "VariableIR"),
 	})
 	local resolveType = environment.resolveType
 	local containerType = environment.containerType
@@ -1218,7 +1235,7 @@ function compileExpression(pExpression, scope, environment)
 			local verification = generatePreconditionVerify(
 				require,
 				method,
-				{arguments = argumentSources, this = false},
+				{arguments = argumentSources, this = false, container = containerType},
 				environment,
 				"the " .. string.ordinal(i) .. " `requires` condition for " .. fullName,
 				pExpression.location
@@ -1485,10 +1502,11 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Generate Verify statements
 		for i, require in ipairs(method.requiresAST) do
+			assert(baseInstance)
 			local verification = generatePreconditionVerify(
 				require,
 				method,
-				{arguments = arguments, this = baseInstance},
+				{arguments = arguments, this = baseInstance, container = baseInstance.type},
 				environment,
 				"the " .. string.ordinal(i) .. " `requires` condition for " .. methodFullName,
 				pExpression.location
@@ -1569,6 +1587,7 @@ function compileExpression(pExpression, scope, environment)
 			local returns = environment.containingSignature.returnTypes
 			assert(#returns == 1, "TODO: deal with multiple return values")
 			if not environment.returnOuts then
+				error "foo"
 				Report.RETURN_USED_IN_IMPLEMENTATION {
 					location = pExpression.location
 				}
@@ -1600,6 +1619,7 @@ function compileExpression(pExpression, scope, environment)
 		local definition = definitionFromType(base.type, allDefinitions)
 		if definition.tag ~= "class" then
 			Report.TYPE_MUST_BE_CLASS {
+				purpose = "base of the `." .. pExpression.field .. "` field access",
 				givenType = showType(base.type),
 				location = pExpression.location,
 			}
@@ -1694,9 +1714,60 @@ function compileExpression(pExpression, scope, environment)
 		}
 
 		return compileExpression(rewrite, scope, environment)
+	elseif pExpression.tag == "isa" then
+		local baseEvaluation, baseOut = compileExpression(pExpression.base, scope, environment)
+		if #baseOut ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "`is " .. pExpression.variant .. "` expression",
+				expectedCount = 1,
+				givenCount = #baseOut,
+				location = pExpression.location,
+			}
+		end
+		local base = baseOut[1]
+		local baseDefinition = definitionFromType(base.type, allDefinitions)
+		if baseDefinition.tag ~= "union" then
+			Report.TYPE_MUST_BE_UNION {
+				purpose = "base of a `is " .. pExpression.variant .. "` expression",
+				givenType = showType(base.type),
+				location = pExpression.location,
+			}
+		end
+
+		local result = {
+			type = BOOLEAN_TYPE,
+			name = generateLocalID("isa"),
+			location = pExpression.location,
+		}
+
+		local isA = freeze {
+			tag = "isa",
+			destination = result,
+			base = base,
+			variant = pExpression.variant,
+			returns = "no",
+		}
+
+		-- Check that a variant of this name exists for this union type
+		local found = false
+		for _, field in ipairs(baseDefinition.fields) do
+			if field.name == pExpression.variant then
+				found = true
+			end
+		end
+
+		if not found then
+			Report.NO_SUCH_VARIANT {
+				container = showType(base.type),
+				name = pExpression.variant,
+				location = pExpression.location,
+			}
+		end
+
+		return buildBlock {baseEvaluation, localSt(result), isA}, {result}
 	end
 
-	error("TODO expression: " .. show(pExpression))
+	error("TODO expression")
 end
 
 local function typeFromDefinition(definition)
@@ -1714,6 +1785,21 @@ local function typeFromDefinition(definition)
 		end, definition.generics),
 		location = definition.location,
 	}
+end
+
+-- RETURNS a type-resolving function (Parsed Type => Type+)
+local function makeTypeResolver(containingSignature, generics, allDefinitions)
+	assertis(containingSignature, "Signature")
+	assertis(generics, listType "any")
+	assertis(allDefinitions, listType "Definition")
+
+	-- RETURNS a (verified) Type+
+	return function(parsedType)
+		local typeScope = generics
+		local outType = containingSignature.resolveType(parsedType, typeScope)
+		verifyTypeValid(outType, generics, allDefinitions)
+		return outType
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -2361,7 +2447,7 @@ local function semanticsSmol(sources, main)
 				end
 				
 				local environment = {
-					resolveType = signature.resolveType,
+					resolveType = makeTypeResolver(signature, definition.generics, allDefinitions),
 					containerType = containerType,
 					containingSignature = signature,
 					allDefinitions = allDefinitions,
@@ -2419,13 +2505,7 @@ local function semanticsSmol(sources, main)
 		end
 		assertis(thisVariable, choiceType("false", "VariableIR"))
 
-		-- RETURNS a (verified) Type+
-		local function resolveType(parsedType)
-			local typeScope = definition.generics
-			local outType = containingSignature.resolveType(parsedType, typeScope)
-			verifyTypeValid(outType, definition.generics, allDefinitions)
-			return outType
-		end
+		local resolveType = makeTypeResolver(containingSignature, definition.generics, allDefinitions)
 
 		-- RETURNS a (verified) InterfaceType+
 		local function resolveInterface(parsedInterface)
@@ -2565,7 +2645,8 @@ local function semanticsSmol(sources, main)
 					for _, a in ipairs(containingSignature.parameters) do
 						table.insert(arguments, getFromScope(scope, a.name))
 					end
-					local invocation = {arguments = arguments, this = thisVariable}
+					local invocation = {arguments = arguments, this = thisVariable, container = containerType}
+					assertis(invocation.container, "Type+")
 
 					local sub = table.with(environment, "returnOuts", sources)
 					
@@ -2831,11 +2912,14 @@ local function semanticsSmol(sources, main)
 					end
 				end
 				if #unhandledVariants ~= 0 then
-					Report.INEXHAUSTIVE_MATCH {
-						location = pStatement.location,
-						missingCases = unhandledVariants,
-						baseType = showType(base.type),
-					}
+					print "INEXHAUSTIVE MATCH: TODO HANDLE THIS"
+					if false then
+						Report.INEXHAUSTIVE_MATCH {
+							location = pStatement.location,
+							missingCases = unhandledVariants,
+							baseType = showType(base.type),
+						}
+					end
 				end
 
 				-- Determine if this match returns or not
@@ -2859,7 +2943,7 @@ local function semanticsSmol(sources, main)
 					returns = "maybe"
 				end
 
-				local match = {
+				local match = freeze {
 					tag = "match",
 					base = base,
 					cases = cases,
@@ -2908,7 +2992,7 @@ local function semanticsSmol(sources, main)
 
 				return buildBlock(out)
 			end
-			error("TODO: compileStatement(" .. show(pStatement) .. ")")
+			error("TODO: compileStatement")
 		end
 
 		-- RETURNS a BlockSt
@@ -2979,10 +3063,23 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
+		local assumptions = {}
+		for _, requires in ipairs(containingSignature.requiresAST) do
+			assertis(environment.containerType, "Type+")
+			table.insert(assumptions, generatePostconditionAssume(
+				requires,
+				containingSignature,
+				{this = thisVariable, arguments = containingSignature.parameters},
+				environment,
+				false
+			))
+		end
+
 		local body = false
 		if not containingSignature.foreign then
 			body = buildBlock {
 				initialization,
+				buildBlock(assumptions),
 				compileBlock(containingSignature.body, functionScope)
 			}
 			assertis(body, "StatementIR")

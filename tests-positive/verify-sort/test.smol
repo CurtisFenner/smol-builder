@@ -1,0 +1,140 @@
+package test;
+
+class FunctionSort {
+	var domain Sort;
+	var range Sort;
+
+	method getDomainSort() Sort ensures this.domain == return {
+		return this.domain;
+	}
+
+	method getRangeSort() Sort ensures this.range == return {
+		return this.range;
+	}
+
+	static make(domain Sort, range Sort) FunctionSort
+	ensures return.getDomainSort() == domain
+	ensures return.getRangeSort() == range {
+		return new(domain = domain, range = range);
+	}
+
+	method eq(other FunctionSort) Boolean {
+		return (this.domain == other.domain).and(this.range == other.range);
+	}
+}
+
+union Sort {
+	var fn FunctionSort;
+	var named String;
+
+	static makeFunctionSort(domain Sort, range Sort) Sort {
+		return new(fn = FunctionSort.make(domain, range));
+	}
+
+	static makeSort(name String) Sort
+	ensures return is named {
+		return new(named = name);
+	}
+
+	static intSort() Sort ensures return == Sort.makeSort("Int"){
+		return Sort.makeSort("Int");
+	}
+
+	method getDomainSort() Sort
+	requires this is fn {
+		match this {
+			case fn fn {
+				return fn.getDomainSort();
+			}
+		}
+	}
+	method getRangeSort() Sort
+	requires this is fn {
+		match this {
+			case fn fn {
+				return fn.getRangeSort();
+			}
+		}
+	}
+
+	method eq(other Sort) Boolean {
+		match this {
+			case f1 fn {
+				match other {
+					case f2 fn {
+						return f1 == f2;
+					}
+					case n2 named {
+						return false;
+					}
+				}
+			}
+			case n1 named {
+				match other {
+					case f2 fn {
+						return false;
+					}
+					case n2 named {
+						return n1 == n2;
+					}
+				}
+			}
+		}
+	}
+}
+
+class Datatype {
+	var name String;
+	var data Sort;
+
+	static make(name String, data Sort) Datatype {
+		return new(name = name, data = data);
+	}
+
+	method getSort() Sort
+	ensures return == Sort.makeSort(this.name) {
+		return Sort.makeSort(this.name);
+	}
+
+	method getConstructor() Expr
+	ensures return.getSort() is fn
+	ensures return.getSort().getDomainSort() == this.data
+	ensures return.getSort().getRangeSort() == this.getSort() {
+		return Expr.makeFunction(this.data, this.getSort());
+	}
+}
+
+class Expr {
+	var sort Sort;
+
+	method getSort() Sort
+	ensures return == this.sort {
+		return this.sort;
+	}
+
+	static makeInt(value Int) Expr
+	ensures return.getSort() == Sort.intSort() {
+		return new(sort = Sort.intSort());
+	}
+
+	static makeApp(fn Expr, arg Expr) Expr
+	requires fn.getSort() is fn
+	requires arg.getSort() == fn.getSort().getDomainSort() {
+		return new(sort = fn.getSort().getRangeSort());
+	}
+
+	static makeFunction(from Sort, to Sort) Expr
+	ensures return.getSort() is fn 
+	ensures return.getSort().getDomainSort() == from
+	ensures return.getSort().getRangeSort() == to {
+		return new(sort = Sort.makeFunctionSort(from, to));
+	}
+}
+
+
+class Test {
+	static main() Unit {
+		
+	}
+}
+

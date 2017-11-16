@@ -14,11 +14,8 @@ REGISTER_TYPE("Theory", recordType {
 	-- RETURNS [assertion_t], [[boolean]]
 	breakup = "function",
 
-	-- argument: self, map(assertion_t => boolean)
-	-- RETURNS true if it provably inconsistent
-	-- RETURNS false if it is not probably inconsistent.
-	-- It is SAFE for this function to return `false` on inconsistent inputs.
-	isInconsistent = "function",
+	-- A simple assertion
+	falseAssertion = "any",
 
 	assertion_t = "any",
 })
@@ -28,9 +25,10 @@ REGISTER_TYPE("Theory", recordType {
 -- cartesian [[1], [2, 3]] is [[1, 2], [1, 3]]
 local function cartesian(list)
 	assertis(list, listType(listType "any"))
-	assert(#list >= 1)
-
-	if #list == 1 then
+	
+	if #list == 0 then
+		return {}
+	elseif #list == 1 then
 		return table.map(function(x) return {x} end, list[1])
 	end
 	local tail = {}
@@ -86,6 +84,34 @@ local function zipMap(a, b)
 	return out
 end
 
+-- RETURNS a boolean
+local function isInconsistent(theory, model)
+	return theory:inModel(model, theory.falseAssertion, true)
+end
+
+-- RETURNS nothing
+-- Prints the contents of the model to standard out
+local function dumpModel(theory, model)
+	if not theory.showAssertion then
+		return
+	end
+	print("model {")
+	local longest = 0
+	local keys = {}
+	for k in pairs(model) do
+		longest = math.max(longest, #theory.showAssertion(k))
+		table.insert(keys, k)
+	end
+	table.sort(keys, function(a, b) return theory.showAssertion(a) < theory.showAssertion(b) end)
+	for _, k in ipairs(keys) do
+		local v = model[k]
+		local s = theory.showAssertion(k)
+		print("\t\t`" .. s .. "`" .. string.rep(" ", longest - #s) .. " -> " .. tostring(v))
+	end
+	print("}")
+end
+theorem.dumpModel = dumpModel
+
 -- RETURNS a set of simple models such that the disjunction of the simple models
 -- is equivalent to the assertion
 local function assertionToSimpleModels(theory, assertion, target)
@@ -131,26 +157,8 @@ local function assertionToSimpleModels(theory, assertion, target)
 	return models
 end
 
--- RETURNS nothing
--- Prints the contents of the model to standard out
-local function dumpModel(theory, model)
-	if not theory.showAssertion then
-		return
-	end
-	print("model {")
-	local longest = 0
-	local keys = {}
-	for k in pairs(model) do
-		longest = math.max(longest, #theory.showAssertion(k))
-		table.insert(keys, k)
-	end
-	table.sort(keys, function(a, b) return theory.showAssertion(a) < theory.showAssertion(b) end)
-	for _, k in ipairs(keys) do
-		local v = model[k]
-		local s = theory.showAssertion(k)
-		print("\t\t`" .. s .. "`" .. string.rep(" ", longest - #s) .. " -> " .. tostring(v))
-	end
-	print("}")
+local function isPower2(i)
+	return i == 1 or i == 2 or i == 4 or i == 8 or i == 16 or i == 32
 end
 
 -- RETURNS a set of simple models such that the disjunction of the simple models
@@ -159,42 +167,63 @@ local function complexToSimpleModels(theory, complex)
 	assertis(theory, "Theory")
 	assertis(complex, model_t(theory))
 
+	profile.open "build terms"
 	local terms = {}
 	for assertion, truth in pairs(complex) do
 		table.insert(terms, assertionToSimpleModels(theory, assertion, truth))
 	end
 	assertis(terms, listType(listType(model_t(theory))))
-	--table.sort(terms, function(a, b) return show(a) < show(b) end)
+	profile.close "build terms"
+
+	local addedInconsistent = false
+
+	profile.open "cartesian(terms)"
+	local c = cartesian(terms)
+	profile.close "cartesian(terms)"
 
 	local models = {}
-	for _, chain in ipairs(cartesian(terms)) do
+	for chainIndex, chain in ipairs(c) do
+		profile.open("chain " .. chainIndex)
 		local model = {}
-		for _, sub in ipairs(chain) do
+		for i, sub in ipairs(chain) do
 			model = intersectMaps(model, sub)
+			if model and isPower2(i) and isInconsistent(theory, model) then
+				model = false
+			end
 			if not model then
-				assertis(theory.falseAssertion, theory.assertion_t)
-				table.insert(models, {[theory.falseAssertion] = true})
+				if not addedInconsistent then
+					table.insert(models, {[theory.falseAssertion] = true})
+					addedInconsistent = true
+				end
 				break
 			end
 		end
 		if model then
 			table.insert(models, model)
 		end
+		profile.close("chain " .. chainIndex)
 	end
 	return models
 end
 
+-- a: a simple model
+-- b: a simple model
 -- RETURNS a boolean representing the truth value of a => b.
 local function modelImplies(theory, a, b)
 	assertis(theory, "Theory")
 	assertis(a, model_t(theory))
 	assertis(b, model_t(theory))
 
+	if isInconsistent(theory, a) then
+		return true
+	end
+
 	local todos = {}
 	for key, value in pairs(b) do
 		if a[key] ~= nil then
 			if a[key] ~= value then
-				return theory:isInconsistent(a)
+				-- a is not inconsistent yet b disagrees
+				return false
 			end
 		else
 			table.insert(todos, {assertion = key, truth = value})
@@ -220,12 +249,15 @@ function theorem.simpleModelsAssertion(theory, models, assertion)
 	assertis(models, listType(model_t(theory)))
 	assertis(assertion, theory.assertion_t)
 
+	profile.open "assertionToSimpleModels"
+
 	local simples = assertionToSimpleModels(theory, assertion, true)
 	assertis(simples, listType(model_t(theory)))
 
+	profile.close "assertionToSimpleModels"
+
 	for _, model in ipairs(models) do
-		if theory:isInconsistent(model) then
-		else
+		if not isInconsistent(theory, model) then
 			local found = false
 			for _, simple in ipairs(simples) do
 				if modelImplies(theory, model, simple) then
@@ -248,13 +280,14 @@ function theorem.modelsAssertion(theory, model, assertion)
 	assertis(theory, "Theory")
 	assertis(model, model_t(theory))
 	assertis(assertion, theory.assertion_t)
-
+	
 	profile.open "complexToSimpleModels"
 	local simples = complexToSimpleModels(theory, model)
-
-	profile.close()
-
+	profile.close "complexToSimpleModels"
+	
+	profile.open "simpleModelsAssertion"
 	local out = theorem.simpleModelsAssertion(theory, simples, assertion)
+	profile.close "simpleModelsAssertion"
 	return out
 end
 
@@ -263,7 +296,6 @@ end
 do
 	local plaintheory = {}
 	plaintheory.falseAssertion = false
-	--plaintheory.showAssertion = function(x) return (show(x):gsub("%s+", " ")) end
 
 	function plaintheory:breakup(assertion, truth)
 		if type(assertion) == "string" then
@@ -300,18 +332,9 @@ do
 	plaintheory.assertion_t = "any"
 
 	function plaintheory:inModel(model, assertion, target)
-		return assertion == target or plaintheory:isInconsistent(model)
-	end
+		assertis(target, "boolean")
 
-	function plaintheory:isInconsistent(model)
-		for key, value in pairs(model) do
-			if type(key) == "boolean" then
-				if key ~= value then
-					return true
-				end
-			end
-		end
-		return false
+		return assertion == target or (model[true] == false) or (model[false] == true)
 	end
 
 	local m1 = {

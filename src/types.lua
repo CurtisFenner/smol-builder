@@ -39,7 +39,7 @@ end
 -- RETURNS nothing
 -- MODIFIES out by appending strings to it
 local function showAdd(object, indent, out)
-	if indent > 6 then
+	if indent > 3 then
 		table.insert(out, "...")
 	elseif isstring(object) then
 		-- Turn into a string literal
@@ -140,7 +140,7 @@ end
 local IMMUTABLE_OBJECTS = table.weak()
 
 -- RETURNS (conservatively) whether or not `x` is immutable
-local function isimmutable(x)
+function isimmutable(x)
 	-- Not-a-number does not count as immutable
 	if x ~= x then
 		return false

@@ -216,6 +216,8 @@ function Report.CONFLICTING_INTERFACES(p)
 end
 
 function Report.TYPE_MUST_BE_CLASS(p)
+	assertis(p.purpose, "string")
+
 	quit("The ", p.purpose, " must be a class instance. However, it is a ",
 		p.givenType, " ", p.location)
 end
@@ -277,7 +279,7 @@ function Report.UNKNOWN_OPERATOR_USED(p)
 end
 
 function Report.THIS_USED_OUTSIDE_METHOD(p)
-	quit("You try to use `this` in a non-static function ", p.location)
+	quit("You try to use `this` in a non-method function ", p.location)
 end
 
 function Report.VARIANT_USED_TWICE(p)

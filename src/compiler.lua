@@ -9,9 +9,15 @@ INVOKATION = ARGV[0] .. " " .. table.concat(ARGV, " ")
 
 --------------------------------------------------------------------------------
 
+-- Cache imported files
+local _imported = {}
 function import(name)
+	if _imported[name] then
+		return _imported[name]
+	end
 	local directory = ARGV[0]:gsub("[^/\\]+$", "")
-	return dofile(directory .. name)
+	_imported[name] = dofile(directory .. name)
+	return _imported[name]
 end
 
 --------------------------------------------------------------------------------
@@ -910,22 +916,31 @@ local function parseSmol(tokens)
 			{"body", parser.named "block", "expected a block to follow `else`"},
 		},
 
+		["isa"] = parser.composite {
+			tag = "isa",
+			{"_", K_IS},
+			{"field", T_IDENTIFIER, "expected a variant identifier"},
+		},
+
 		-- Expressions!
 		["expression"] = parser.map(parser.composite {
 			tag = "***expression",
 			{"base", parser.named "atom"},
 			{"operations", parser.query "operation*"},
+			{"isa", parser.query "isa?"},
 		}, function(x)
 			-- XXX: no precedence yet; assume left-associative
 			local out = x.base
 			assertis(out.tag, "string")
+
+			local isa = x.isa
 
 			if #x.operations >= 2 then
 				quit("You must explicitly parenthesize the operators ", x.operations[2].location)
 			end
 
 			for _, operation in ipairs(x.operations) do
-				out = {
+				out = freeze {
 					tag = "binary",
 					left = out,
 					right = operation.operand,
@@ -933,6 +948,15 @@ local function parseSmol(tokens)
 				}
 				assert(isstring(out.operator))
 			end
+
+			if isa then
+				return freeze {
+					tag = "isa",
+					base = out,
+					variant = isa.field,
+				}
+			end
+
 			assert(out)
 			return out
 		end, true),
@@ -1145,6 +1169,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"FieldSt",
 	"GenericMethodCallSt",
 	"GenericStaticCallSt",
+	"IsASt",
 	"LocalSt",
 	"MatchSt",
 	"MethodCallSt",
@@ -1341,6 +1366,14 @@ EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
 		variant = "string",
 		statement = "StatementIR",
 	}),
+})
+
+EXTEND_TYPE("IsASt", "AbstractStatementIR", recordType {
+	tag = constantType "isa",
+	base = "VariableIR",
+	destination = "VariableIR",
+	returns = constantType "no",
+	variant = "string",
 })
 
 REGISTER_TYPE("VariableIR", recordType {

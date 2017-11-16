@@ -83,12 +83,20 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "variable",
 		variable = "VariableIR",
+	},
+	recordType {
+		tag = constantType "isa",
+		variant = "string",
+		base = "Assertion",
+	},
+	recordType {
+		tag = constantType "variant",
+		variant = "string",
+		base = "Assertion",
 	}
 ))
 
 local assertionRecursionMap = freeze {
-	["new-union"] = {"value"},
-	["new-class"] = {"fields{}"},
 	["static"] = {"arguments{}"},
 	["method"] = {"base", "arguments{}"},
 	["field"] = {"base"},
@@ -99,6 +107,8 @@ local assertionRecursionMap = freeze {
 	["int"] = {},
 	["tuple"] = {"value"},
 	["variable"] = {},
+	["isa"] = {"base"},
+	["variant"] = {"base"},
 }
 
 -- RETURNS a Signature for t.eq(t)
@@ -195,44 +205,55 @@ local function tupleAccess(value, index)
 	assertis(value, "Assertion")
 	assertis(index, "integer")
 	
-	return {
+	return freeze {
 		tag = "tuple",
 		index = index,
 		value = value,
 	}
 end
 
-local VALUE_THIS = {tag = "this"}
-local VALUE_UNIT = {tag = "unit"}
+local VALUE_THIS = freeze {tag = "this"}
+local VALUE_UNIT = freeze {tag = "unit"}
 
 -- RETURNS an Assertion
 local function valueInt(int)
 	assertis(int, "integer")
 
-	return {
+	return freeze {
 		tag = "int",
 		value = int,
 	}
 end
+valueInt = memoized(1, valueInt)
 
 -- RETURNS an Assertion
 local function valueString(str)
 	assertis(str, "string")
 
-	return {
+	return freeze {
 		tag = "string",
 		value = str,
 	}
 end
+valueString = memoized(1, valueString)
+
+local trueBoolean = freeze {
+	tag = "boolean",
+	value = true,
+}
+local falseBoolean = freeze {
+	tag = "boolean",
+	value = false,
+}
 
 -- RETURNS an Assertion
 local function valueBoolean(bool)
 	assertis(bool, "boolean")
 
-	return {
-		tag = "boolean",
-		value = bool,
-	}
+	if bool then
+		return trueBoolean
+	end
+	return falseBoolean
 end
 
 -- RETURNS an Assertion
@@ -241,7 +262,7 @@ local function variableAssertion(scope, variable)
 	assertis(scope, listType(listType "Action"))
 	assertis(variable, "VariableIR")
 
-	return {
+	return freeze {
 		tag = "variable",
 		variable = variable,
 	}
@@ -327,7 +348,7 @@ local function mustModel(scope, target)
 				local newID = action.destination.name .. "'" .. i .. "'" .. j
 				local newV = variableAssertion(scope, table.with(action.destination, "name", newID))
 				
-				local p = {
+				local p = freeze {
 					tag = "method",
 					methodName = "eq",
 					base = inNow(action.value),
@@ -347,16 +368,20 @@ local function mustModel(scope, target)
 	end
 	assertis(predicates, listType "Assertion")
 
-	profile.close()
+	profile.close "translating-in-scope"
 
+	print("\n\n\n\n")
 	local complexModel = {}
 	for i, p in ipairs(predicates) do
 		complexModel[p] = true
+		print("& " .. showAssertion(p))
 	end
 
 	local result = inNow(target)
-
-	return theorem.modelsAssertion(verifyTheory, complexModel, result)
+	print(" =?=> " .. showAssertion(result))
+	local result = theorem.modelsAssertion(verifyTheory, complexModel, result)
+	print("<-", result)
+	return result
 end
 
 -- MODIFIES scope
@@ -437,6 +462,17 @@ local function fieldAssertion(scope, statement)
 	}
 end
 
+-- RETURNS an Assertion
+local function variantAssertion(scope, statement)
+	assertis(statement, "VariantSt")
+
+	return freeze {
+		tag = "variant",
+		variant = statement.variant,
+		base = variableAssertion(scope, statement.base),
+	}
+end
+
 -- MODIFIES scope
 -- RETURNS nothing
 local function verifyStatement(statement, scope, semantics)
@@ -456,14 +492,14 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "verify" then
 		profile.open "verify VerifySt's body"
 		verifyStatement(statement.body, scope, semantics)
-		profile.close()
+		profile.close"verify VerifySt's body"
 
 		-- Check
 		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
-			--print("$ !!!", models)
-			--dumpScope(scope)
-			--print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
+			print("$ !!!", models)
+			dumpScope(scope)
+			print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
@@ -494,8 +530,10 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, assertion)
 		return
 	elseif statement.tag == "variant" then
-		-- TODO:
-		return error("TODO: variant")
+		-- TODO: verify isa
+		local assertion = variantAssertion(scope, statement)
+		assignRaw(scope, statement.destination, assertion)
+		return
 	elseif statement.tag == "int" then
 		-- Integer literal
 		assignRaw(scope, statement.destination, valueInt(statement.number))
@@ -563,16 +601,13 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "new-union" then
 		-- TODO
-		print "TODO: new-union"
-		--[[
-		local rhs = {
-			tag = "new-union",
-			type = showType(statement.type),
-			field = statement.field,
-			value = variableAssertion(scope, statement.value),
-		}
-		assignRaw(scope, statement.destination, rhs)
-		]]
+		addPredicate(scope, freeze {
+			tag = "isa",
+			variant = statement.field,
+			base = variableAssertion(scope, statement.destination),
+		})
+
+		-- TODO: add field information? so that matches get same value put in
 		return
 	elseif statement.tag == "assign" then
 		assignRaw(scope, statement.destination, variableAssertion(scope, statement.source))
@@ -581,8 +616,10 @@ local function verifyStatement(statement, scope, semantics)
 		-- Check each case
 		for _, case in ipairs(statement.cases) do
 			beginSubscope(scope)
-			-- TODO: add predicate
-			addPredicate(scope, {"is", statement.base, statement.variant})
+			-- Add variant predicate
+			addPredicate(scope, freeze {
+				tag = "isa", base = variableAssertion(scope, statement.base), variant = case.variant
+			})
 			verifyStatement(case.statement, scope, semantics)
 			endSubscope(scope)
 		end
@@ -604,6 +641,14 @@ local function verifyStatement(statement, scope, semantics)
 
 		-- TODO: incorporate intersection (see match)
 		return
+	elseif statement.tag == "isa" then
+		assertis(statement, "IsASt")
+		assignRaw(scope, statement.destination, freeze {
+			tag = "isa",
+			base = variableAssertion(scope, statement.base),
+			variant = statement.variant,
+		})
+		return
 	end
 
 	error("unhandled statement `" .. statement.tag .. "`")
@@ -615,10 +660,9 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	local beginTime = os.clock()
 	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {{}}, semantics)
-	profile.close()
+	profile.close("verifyFunction " .. func.name)
 end
 
 -- RETURNS nothing

@@ -43,16 +43,21 @@ local function showAssertion(assertion)
 		return "(boolean " .. tostring(assertion.value) .. ")"
 	elseif assertion.tag == "field" then
 		return "(field " .. showAssertion(assertion.base) .. " " .. assertion.fieldName .. ")"
+	elseif assertion.tag == "isa" then
+		return "(isa " .. assertion.variant .. " " .. showAssertion(assertion.base) .. ")"
+	elseif assertion.tag == "string" then
+		return "(string " .. string.format("%q", assertion.value) .. ")"
 	end
-	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
+	error("unknown assertion tag `" .. show(assertion) .. "` in showAssertion")
 end
+showAssertion = memoized(1, showAssertion)
 theory.showAssertion = showAssertion
 
 function theory:isInconsistent(model)
 	return theory:inModel(model, theory.falseAssertion, true)
 end
 
-theory.falseAssertion = {
+theory.falseAssertion = freeze {
 	tag = "boolean",
 	value = false,
 }
@@ -63,9 +68,21 @@ local TERMINAL_TAG = {
 	["variable"] = true,
 	["int"] = true,
 	["boolean"] = true,
+	["string"] = true,
 }
 
-local function m_scan(self, object)
+
+local m_scan
+
+local function scanned(self, children)
+	local out = {}
+	for i = 1, #children do
+		out[i] = m_scan(self, children[i])
+	end
+	return out
+end
+
+function m_scan(self, object)
 	assertis(object, "Assertion")
 
 	local shown = showAssertion(object)
@@ -88,7 +105,7 @@ local function m_scan(self, object)
 			tag = "static",
 			base = object.base,
 			staticName = object.staticName,
-			arguments = table.map(table.bind(self, self.scan), object.arguments),
+			arguments = scanned(self, object.arguments),
 		}
 		self.relevant[shown] = canon
 		for _, argument in ipairs(canon.arguments) do
@@ -99,7 +116,7 @@ local function m_scan(self, object)
 			tag = "method",
 			base = self:scan(object.base),
 			methodName = object.methodName,
-			arguments = table.map(table.bind(self, self.scan), object.arguments),
+			arguments = scanned(self, object.arguments),
 			signature = object.signature,
 		}
 		self.relevant[shown] = canon
@@ -115,9 +132,17 @@ local function m_scan(self, object)
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)
+	elseif object.tag == "isa" then
+		local canon = freeze {
+			tag = "isa",
+			base = self:scan(object.base),
+			variant = object.variant,
+		}
+		self.relevant[shown] = canon
+		ref(canon.base)
 	end
 
-	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`: " .. show(object))
+	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
 	return self.relevant[shown]
 end
 
@@ -126,12 +151,12 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	assertis(targetAssertion, "Assertion")
 	assertis(targetTruth, "boolean")
 
-	profile.open "canonicalization"
+	profile.open "#canonicalization"
 	-- 1) Generate a list of relevant subexpressions
 	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
 
-	local trueAssertion = canon:scan({tag = "boolean", value = true})
-	local falseAssertion = canon:scan({tag = "boolean", value = false})
+	local trueAssertion = canon:scan(freeze {tag = "boolean", value = true})
+	local falseAssertion = canon:scan(freeze {tag = "boolean", value = false})
 
 	targetAssertion = canon:scan(targetAssertion)
 
@@ -143,7 +168,7 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		-- assignments could be in the map
 		if simple[object] ~= nil and simple[object] ~= value then
 			-- All truths are modeled by an inconsistent model
-			profile.close()
+			profile.close "#canonicalization"
 			return true
 		end
 		simple[object] = value
@@ -152,9 +177,9 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	assertis(canon.relevant, mapType("string", "Assertion"))
 	assertis(canon.referencedBy, mapType("Assertion", listType("Assertion")))
 
-	profile.close()
+	profile.close "#canonicalization"
 
-	profile.open "scan for equality"
+	profile.open "#scan for equality"
 	
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
@@ -177,7 +202,7 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		end
 	end
 
-	profile.close()
+	profile.close "#scan for equality"
 
 	-- 3) Use each positive == assertion to join representatives
 	local representative = {}
@@ -262,15 +287,51 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 			if x.staticName ~= y.staticName then
 				return false
 			end
-
-			error "TODO: childrenSame for static"
+			assert(#x.arguments == #y.arguments)
+			for i in ipairs(x.arguments) do
+				if not areEqual(x.arguments[i], y.arguments[i]) then
+					return false
+				end
+			end
+			return true
 		elseif x.tag == "field" then
 			if x.fieldName ~= y.fieldName then
 				return false
 			end
 			return areEqual(x.base, y.base)
+		elseif x.tag == "isa" then
+			if x.variant ~= y.variant then
+				return false
+			end
+			return areEqual(x.base, y.base)
 		end
 		error("TODO childrenSame for tag `" .. x.tag .. "`")
+	end
+
+	-- RETURNS a map from root => [eq assertion set]
+	local function eqClasses()
+		local out = {}
+		for key, root in pairs(representative) do
+			out[root] = out[root] or {}
+			table.insert(out[root], key)
+		end
+		return out
+	end
+
+	-- RETURNS a set (map from Assertion to true)
+	local function thoseReferencingAny(list)
+		assertis(list, listType "Assertion")
+
+		local out = {}
+		for _, element in pairs(list) do
+			local references = canon.referencedBy[element]
+			if references then
+				for _, reference in pairs(references) do
+					out[reference] = true
+				end
+			end
+		end
+		return out
 	end
 
 	-- RETURNS nothing
@@ -281,28 +342,32 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		local rootA = rootRepresentative(a)
 		local rootB = rootRepresentative(b)
 		if rootA ~= rootB then
+			local classes = eqClasses()
+			local thoseThatReferenceA = thoseReferencingAny(classes[rootA])
+			local thoseThatReferenceB = thoseReferencingAny(classes[rootB])
+
 			if math.random(2) == 1 then
 				representative[rootA] = rootB
 			else
 				representative[rootB] = rootA
 			end
 
-			profile.open("recursive union")
+
+			profile.open("#recursive union")
 
 			-- Union all functions of equal value
 
 			-- TODO: need only consider `x`s that are reference a or b
-			for _, x in pairs(canon.relevant) do
-				local group = byStructure[approximateStructure(x)]
+			for x in pairs(thoseThatReferenceA) do
 				local rootX = rootRepresentative(x)
-				for _, y in ipairs(group) do
+				for y in pairs(thoseThatReferenceB) do
 					local rootY = rootRepresentative(y)
 					if rootX ~= rootY then
 						assert(not areEqual(x, y))
 						if childrenSame(x, y) then
-							profile.open("sub fun eq")
+							profile.open("#sub fun eq")
 							union(x, y)
-							profile.close()
+							profile.close("#sub fun eq")
 						end
 						
 						-- union() may modify the root representative of x,
@@ -312,20 +377,20 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 				end
 			end
 
-			profile.close("recursive union")
+			profile.close("#recursive union")
 		end
 	end
 
-	profile.open "union-find"
+	profile.open "#union-find"
 	-- Union find
 	for i, eq in ipairs(positiveEq) do
-		profile.open("union-find " .. i .. "/" .. #positiveEq)
+		profile.open("#union-find " .. i .. "/" .. #positiveEq)
 		union(eq[1], eq[2])
-		profile.close()
+		profile.close("#union-find " .. i .. "/" .. #positiveEq)
 	end
-	profile.close()
+	profile.close "#union-find"
 
-	profile.open "negative =="
+	profile.open "#negative =="
 	-- 4) Use each negative == assertion to separate groups
 	local negated = {}
 	for _, eq in ipairs(negativeEq) do
@@ -335,7 +400,7 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 
 		if rootA == rootB then
 			-- TODO: Inconsistent model
-			profile.close()
+			profile.close "#negative =="
 			return true
 		end
 		negated[rootA] = negated[rootA] or {}
@@ -347,7 +412,7 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		self.assertion_t,
 		mapType(self.assertion_t, constantType(true))
 	))
-	profile.close()
+	profile.close "#negative =="
 
 	-- RETURNS whether or not it is immediate that `assertion` has truth value
 	-- `truth` in the given model after applying UF for equality
@@ -387,14 +452,14 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		return false
 	end
 
-	profile.open("immediately?")
+	profile.open("#immediately?")
 	-- 5) Check if the assertion is true
 	-- It may be equal to any true statement
 	for _, r in pairs(canon.relevant) do
 		if areEqual(r, targetAssertion) then
 			local holds = immediately(r, targetTruth)
 			if holds then
-				profile.close()
+				profile.close "#immediately?"
 				return true
 			end
 		end
@@ -404,9 +469,17 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		return true
 	end
 
-	profile.close()
+	profile.close "#immediately?"
 
 	return false
+end
+local old = theory.inModel
+theory.inModel = function(...)
+	profile.open "#vt inModel"
+	local before = os.clock()
+	local out = old(...)
+	profile.close "#vt inModel"
+	return out
 end
 
 function theory:breakup(assertion, target)

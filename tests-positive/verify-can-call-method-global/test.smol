@@ -1,0 +1,21 @@
+package test;
+
+class Test {
+
+	method requirement() Boolean {
+		return true;
+	}
+
+	static make() Test {
+		return new();
+	}
+
+	method action() Unit requires this.requirement() {}
+
+	static foo() Unit requires Test.make().requirement() {
+		do Test.make().action();
+	}
+
+	static main() Unit {}
+
+}

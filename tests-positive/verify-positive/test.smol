@@ -38,10 +38,11 @@ class Truck {
 }
 
 class Test {
-
 	static main!() Unit {
 		var truck Truck = Truck.make();
+
 		truck = Truck.loaded(truck, Box.makeSmallBox());
+
 		do core:Out.println!(core:ASCII.formatInt(truck.boxCount()));
 	}
 }

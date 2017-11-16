@@ -1,0 +1,17 @@
+package test;
+
+class Test {
+
+	static requirement() Boolean {
+		return true;
+	}
+
+	static action() Unit requires Test.requirement() {}
+
+	static foo() Unit requires Test.requirement() {
+		do Test.action();
+	}
+
+	static main() Unit {}
+
+}
