@@ -170,7 +170,8 @@ function memoized(count, f)
 
 	local memoizedF = function(...)
 		local arguments = {...}
-		assert(arguments[count+1] == nil)
+		assert(arguments[count+1] == nil,
+			"memoized function given too many arguments!")
 
 		-- Check that the arguments are immutable
 		for i = 1, count do

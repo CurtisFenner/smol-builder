@@ -8,6 +8,7 @@ local summary = {}
 local PRINT_SECONDS = 0.1
 
 function profile.open(message)
+	assert(type(message) == "string", "type of message must be a string")
 	table.insert(stack, {
 		message = message,
 		time = os.clock(),
@@ -20,7 +21,7 @@ function profile.close(message)
 	local top = stack[#stack]
 	local parent = stack[#stack - 1]
 	assert(top, "top")
-	assert(top.message == message, "top.message")
+	assert(top.message == message, "top.message is `" .. top.message .. "` but you gave `" .. message .. "`")
 	local elapsed = os.clock() - top.time
 
 	if elapsed >= PRINT_SECONDS then

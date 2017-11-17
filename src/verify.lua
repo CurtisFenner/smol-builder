@@ -2,9 +2,8 @@ local calculateSemantics = import "semantics.lua"
 local showType = calculateSemantics.showType
 local showInterfaceType = calculateSemantics.showInterfaceType
 
-local theorem = import "theorem.lua"
+local smt = import "smt.lua"
 local verifyTheory = import "verify-theory.lua"
-local showAssertion = verifyTheory.showAssertion
 
 local Report = import "verify-errors.lua"
 
@@ -370,18 +369,16 @@ local function mustModel(scope, target)
 
 	profile.close "translating-in-scope"
 
-	print("\n\n\n\n")
-	local complexModel = {}
-	for i, p in ipairs(predicates) do
-		complexModel[p] = true
-		print("& " .. showAssertion(p))
-	end
+	--print("\n\n\n\n")
+	--for i, p in ipairs(predicates) do
+	--	print("& " .. verifyTheory:canonKey(p))
+	--end
 
 	local result = inNow(target)
-	print(" =?=> " .. showAssertion(result))
-	local result = theorem.modelsAssertion(verifyTheory, complexModel, result)
-	print("<-", result)
-	return result
+	--print(" =?=> " .. verifyTheory:canonKey(result))
+	local tautology = smt.implies(verifyTheory, predicates, result)
+	--print("<-", tautology)
+	return tautology
 end
 
 -- MODIFIES scope
@@ -409,9 +406,9 @@ local function dumpScope(scope)
 		for j, v in ipairs(frame) do
 			io.write("$\t" .. j .. "\t")
 			if v.tag == "assignment" then
-				print(v.destination.name .. " := " .. showAssertion(v.value))
+				print(v.destination.name .. " := " .. verifyTheory:canonKey(v.value))
 			elseif v.tag == "predicate" then
-				print(showAssertion(v.value))
+				print(verifyTheory:canonKey(v.value))
 			else
 				error("unknown action tag `" .. v.tag .. "` in dumpScope")
 			end
@@ -497,9 +494,9 @@ local function verifyStatement(statement, scope, semantics)
 		-- Check
 		local models = mustModel(scope, variableAssertion(scope, statement.variable))
 		if not models then
-			print("$ !!!", models)
-			dumpScope(scope)
-			print("$ =/=>", showAssertion(variableAssertion(scope, statement.variable)))
+			--print("$ !!!", models)
+			--dumpScope(scope)
+			--print("$ =/=>", verifyTheory:canonKey(variableAssertion(scope, statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,

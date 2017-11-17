@@ -51,10 +51,9 @@ local function showAssertion(assertion)
 	error("unknown assertion tag `" .. show(assertion) .. "` in showAssertion")
 end
 showAssertion = memoized(1, showAssertion)
-theory.showAssertion = showAssertion
 
-function theory:isInconsistent(model)
-	return theory:inModel(model, theory.falseAssertion, true)
+function theory:canonKey(e)
+	return showAssertion(e)
 end
 
 theory.falseAssertion = freeze {
@@ -146,30 +145,28 @@ function m_scan(self, object)
 	return self.relevant[shown]
 end
 
-function theory:inModel(idSimple, targetAssertion, targetTruth)
-	assertis(idSimple, mapType("Assertion", "boolean"))
-	assertis(targetAssertion, "Assertion")
-	assertis(targetTruth, "boolean")
+function theory:isSatisfiable(modelInput)
+	assertis(modelInput, mapType("Assertion", "boolean"))
 
-	profile.open "#canonicalization"
 	-- 1) Generate a list of relevant subexpressions
+	profile.open "#canonicalization"
 	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
 
 	local trueAssertion = canon:scan(freeze {tag = "boolean", value = true})
 	local falseAssertion = canon:scan(freeze {tag = "boolean", value = false})
 
-	targetAssertion = canon:scan(targetAssertion)
-
 	local simple = {}
-	for key, value in pairs(idSimple) do
+	for key, value in pairs(modelInput) do
+		assertis(key, "Assertion")
+
 		local object = canon:scan(key)
 		
 		-- After canonicalizing, two expressions with different truth
 		-- assignments could be in the map
 		if simple[object] ~= nil and simple[object] ~= value then
-			-- All truths are modeled by an inconsistent model
+			-- This model is inconsistent
 			profile.close "#canonicalization"
-			return true
+			return false
 		end
 		simple[object] = value
 	end
@@ -399,9 +396,9 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 		local rootB = rootRepresentative(b)
 
 		if rootA == rootB then
-			-- TODO: Inconsistent model
+			-- This model is inconsistent
 			profile.close "#negative =="
-			return true
+			return false
 		end
 		negated[rootA] = negated[rootA] or {}
 		negated[rootA][rootB] = true
@@ -455,23 +452,15 @@ function theory:inModel(idSimple, targetAssertion, targetTruth)
 	profile.open("#immediately?")
 	-- 5) Check if the assertion is true
 	-- It may be equal to any true statement
-	for _, r in pairs(canon.relevant) do
-		if areEqual(r, targetAssertion) then
-			local holds = immediately(r, targetTruth)
-			if holds then
-				profile.close "#immediately?"
-				return true
-			end
-		end
-	end
 
 	if immediately(falseAssertion, true) or immediately(trueAssertion, false) then
-		return true
+		profile.close "#immediately?"
+		return false
 	end
 
 	profile.close "#immediately?"
 
-	return false
+	return true
 end
 local old = theory.inModel
 theory.inModel = function(...)
@@ -514,5 +503,10 @@ function theory:breakup(assertion, target)
 
 	return false
 end
+
+--------------------------------------------------------------------------------
+
+-- Tests
+
 
 return theory
