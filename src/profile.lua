@@ -5,7 +5,7 @@ local summary = {}
 
 -- Times elapsed quicker than this threshold will not be printed as the program
 -- is running.
-local PRINT_SECONDS = 0.1
+local PRINT_SECONDS = 1
 
 function profile.open(message)
 	assert(type(message) == "string", "type of message must be a string")
@@ -73,6 +73,15 @@ function profile.summarize()
 		local mean = item.sum / item.count
 		local pad = string.rep(" ", longest - #item.message)
 		print(pad .. item.message .. "\tx" .. item.count .. "\t[" .. f(item.min) .. " -- " .. f(mean) .. " -- " .. f(item.max) .. "] for sum " .. f(item.sum))
+	end
+end
+
+function profile.clocked(f, s)
+	return function(...)
+		profile.open(s)
+		local out = {f(...)}
+		profile.close(s)
+		return unpack(out)
 	end
 end
 

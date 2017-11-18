@@ -1,6 +1,7 @@
 -- Curtis Fenner, copyright (C) 2017
 
 local Report = import "semantic-errors.lua"
+local profile = import "profile.lua"
 
 -- RETURNS the clearest possible combination of a, and b.
 local function unclear(a, b)
@@ -837,16 +838,16 @@ function compileExpression(pExpression, scope, environment)
 	assertis(scope, listType(mapType("string", "VariableIR")))
 	assertis(environment, recordType {
 		resolveType = "function",
-		containerType = "Type+",
-		containingSignature = "Signature",
-		allDefinitions = listType "Definition",
-		thisVariable = choiceType(constantType(false), "VariableIR"),
-	})
-	local resolveType = environment.resolveType
-	local containerType = environment.containerType
-	local containingSignature = environment.containingSignature
-	local allDefinitions = environment.allDefinitions
-	local containingDefinition = definitionFromType(containerType, allDefinitions)
+			containerType = "Type+",
+			containingSignature = "Signature",
+			allDefinitions = listType "Definition",
+			thisVariable = choiceType(constantType(false), "VariableIR"),
+		})
+		local resolveType = environment.resolveType
+		local containerType = environment.containerType
+		local containingSignature = environment.containingSignature
+		local allDefinitions = environment.allDefinitions
+		local containingDefinition = definitionFromType(containerType, allDefinitions)
 
 	if pExpression.tag == "string-literal" then
 		local out = {
@@ -1651,8 +1652,10 @@ function compileExpression(pExpression, scope, environment)
 		return buildBlock {baseEvaluation, localSt(result), accessStatement}, {result}
 	elseif pExpression.tag == "binary" then
 		-- Compile the two operands
+		profile.open("compileExpression binary recursive")
 		local leftEvaluation, leftOut = compileExpression(pExpression.left, scope, environment)
 		local rightEvaluation, rightOut = compileExpression(pExpression.right, scope, environment)
+		profile.close("compileExpression binary recursive")
 
 		-- Verify there is one value on each side
 		if #leftOut ~= 1 then
@@ -1769,6 +1772,13 @@ function compileExpression(pExpression, scope, environment)
 
 	error("TODO expression")
 end
+local _compileExpression = compileExpression
+compileExpression = function(p, ...)
+	profile.open("compileExpression tag=" .. p.tag)
+	local a, b = _compileExpression(p, ...)
+	profile.close("compileExpression tag=" .. p.tag)
+	return a, b
+end
 
 local function typeFromDefinition(definition)
 	assertis(definition, choiceType("ClassIR", "UnionIR"))
@@ -1807,6 +1817,8 @@ end
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
 	assertis(main, "string")
+
+	profile.open "resolve types"
 
 	-- (1) Resolve the set of types and the set of packages that have been
 	-- defined
@@ -2226,6 +2238,9 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
+	profile.close "resolve types"
+	profile.open "check implements"
+
 	assertis(allDefinitions, listType "Definition")
 
 	-- (3) Verify and record all interfaces implementation
@@ -2339,6 +2354,9 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
+	profile.close "check implements"
+	profile.open "check prototypes"
+
 	-- (4) Verify all existing Type+'s (from headers) are OKAY
 	for _, definition in ipairs(allDefinitions) do
 		assertis(definition, "Definition")
@@ -2416,6 +2434,9 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
+	profile.close "check prototypes"
+	profile.open "check ensures"
+
 	-- (4.5) Verify all ensures/requires
 	for _, definition in ipairs(allDefinitions) do
 		if definition.tag == "class" or definition.tag == "union" then
@@ -2485,6 +2506,9 @@ local function semanticsSmol(sources, main)
 			end
 		end
 	end
+
+	profile.close "check ensures"
+	profile.open "compile bodies"
 
 	-- (5) Compile all code bodies
 
@@ -3141,6 +3165,9 @@ local function semanticsSmol(sources, main)
 			error("unknown definition tag `" .. definition.tag .. "`")
 		end
 	end
+
+	profile.close "compile bodies"
+	profile.open "compile main"
 	
 	assertis(functions, listType "FunctionIR")
 
@@ -3169,6 +3196,8 @@ local function semanticsSmol(sources, main)
 			}
 		end
 	end
+
+	profile.close "compile main"
 
 	return freeze {
 		classes = classes,

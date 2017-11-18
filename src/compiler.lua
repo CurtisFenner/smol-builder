@@ -20,15 +20,48 @@ function import(name)
 	return _imported[name]
 end
 
---------------------------------------------------------------------------------
+local showLocation
 
 local ansi = import "ansi.lua"
+
+-- DISPLAYS the concatenation of the input,
+-- and terminates the program.
+-- DOES NOT RETURN.
+function quit(first, ...)
+	local rest = {...}
+	for i = 1, #rest do
+		if type(rest[i]) == "number" then
+			rest[i] = tostring(rest[i])
+		elseif type(rest[i]) ~= "string" then
+			if not rest[i].ends then
+				print(...)
+			end
+			assertis(rest[i], "Location")
+			rest[i] = showLocation(rest[i])
+		end
+	end
+	rest = table.concat(rest)
+
+	if not first:match("^[A-Z]+:\n$") then
+		print(table.concat{ansi.red("ERROR"), ":\n", first, rest})
+		os.exit(45)
+	else
+		print(table.concat{ansi.cyan(first), rest})
+		os.exit(40)
+	end
+end
+
+import "extend.lua"
+import "types.lua"
+
+--------------------------------------------------------------------------------
+
 
 local LOCATION_MODE = "column"
 
 -- RETURNS a string representing the location, respecting the command line
 -- location mode
-local function showLocation(location)
+function showLocation(location)
 	assertis(location, "Location")
 
 	local begins = location.begins
@@ -71,37 +104,9 @@ local function showLocation(location)
 	return location
 end
 
--- DISPLAYS the concatenation of the input,
--- and terminates the program.
--- DOES NOT RETURN.
-function quit(first, ...)
-	local rest = {...}
-	for i = 1, #rest do
-		if type(rest[i]) == "number" then
-			rest[i] = tostring(rest[i])
-		elseif type(rest[i]) ~= "string" then
-			if not rest[i].ends then
-				print(...)
-			end
-			assertis(rest[i], "Location")
-			rest[i] = showLocation(rest[i])
-		end
-	end
-	rest = table.concat(rest)
-
-	if not first:match("^[A-Z]+:\n$") then
-		print(table.concat{ansi.red("ERROR"), ":\n", first, rest})
-		os.exit(45)
-	else
-		print(table.concat{ansi.cyan(first), rest})
-		os.exit(40)
-	end
-end
-
 --------------------------------------------------------------------------------
 
-import "extend.lua"
-import "types.lua"
+local profile = import "profile.lua"
 
 local parser = import "parser.lua"
 local calculateSemantics = import "semantics.lua"
@@ -1538,9 +1543,13 @@ interface Eq[#T] {
 ]]
 })
 
+profile.open "parsing"
+
 -- Load and parse source files
 local sourceParses = {}
 for _, sourceFile in ipairs(sourceFiles) do
+	profile.open("parsing " .. sourceFile.path)
+	profile.open("reading")
 	local contents = sourceFile.contents
 	if not contents then
 		local file, err = io.open(sourceFile.path, "r")
@@ -1554,21 +1563,34 @@ for _, sourceFile in ipairs(sourceFiles) do
 		end
 	end
 	assert(contents)
-
+	profile.close("reading")
+	
 	-- Lex contents
+	profile.open("lexing")
 	local tokens = lexSmol(contents, sourceFile.short)
+	profile.close("lexing")
 
 	-- Parse contents
+	profile.open("parsing")
 	table.insert(sourceParses, parseSmol(tokens))
+	profile.close("parsing")
+	profile.close("parsing " .. sourceFile.path)
 end
+
+profile.close "parsing"
 
 assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
+profile.open "semantics"
 local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
+profile.close "semantics"
 
+profile.open "verify"
 verify(semantics)
+profile.close "verify"
 
+profile.open "codegen"
 if semantics.main then
 	-- TODO: read target
 	local arguments = {out = "output.c"}
@@ -1577,3 +1599,4 @@ if semantics.main then
 else
 	print("Successfully compiled " .. #sourceFiles .. " file(s)")
 end
+profile.close "codegen"

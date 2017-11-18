@@ -218,7 +218,7 @@ function freeze(object)
 	end
 
 	local out = newproxy(true)
-	traces[out] = debug.traceback(2)
+	traces[out] = "debug.traceback(2)"
 
 	local metatable = getmetatable(out)
 	metatable.__index = function(_, key)
