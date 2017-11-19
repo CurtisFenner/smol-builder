@@ -509,4 +509,4 @@ end
 -- Tests
 
 
-return theory
+return freeze(theory)

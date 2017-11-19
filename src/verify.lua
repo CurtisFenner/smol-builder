@@ -154,9 +154,12 @@ local function assertionReplaced(expression, variable, with)
 	end
 	for _, key in ipairs(assertionRecursionMap[expression.tag]) do
 		if key:sub(-2) == "{}" then
-			for k, v in pairs(copy[key:sub(1, -3)]) do
-				copy[key:sub(1, -3)][k] = assertionReplaced(v, variable, with)
+			local pre = key:sub(1, -3)
+			local m = {}
+			for k, v in pairs(copy[pre]) do
+				m[k] = assertionReplaced(v, variable, with)
 			end
+			copy[pre] = m
 		else
 			copy[key] = assertionReplaced(copy[key], variable, with)
 		end
@@ -256,9 +259,7 @@ local function valueBoolean(bool)
 end
 
 -- RETURNS an Assertion
-local function variableAssertion(scope, variable)
-	-- TODO: get rid of scope
-	assertis(scope, listType(listType "Action"))
+local function variableAssertion(variable)
 	assertis(variable, "VariableIR")
 
 	return freeze {
@@ -297,7 +298,7 @@ end
 -- RETURNS nothing
 -- MODIFIES scope
 local function assignRaw(scope, destination, value)
-	assertis(scope, listType(listType "Action"))
+	--assertis(scope, listType(listType "Action"))
 	assertis(destination, "VariableIR")
 	assertis(value, "Assertion")
 	
@@ -310,7 +311,7 @@ end
 
 -- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
 local function mustModel(scope, target)
-	assertis(scope, listType(listType "Action"))
+	--assertis(scope, listType(listType "Action"))
 	assertis(target, "Assertion")
 
 	-- TODO: come up with something that deals with loops
@@ -320,7 +321,7 @@ local function mustModel(scope, target)
 	-- RETURNS an Assertion
 	local function inNow(a)
 		assertis(a, "Assertion")
-		assertis(assignments, mapType("string", "Assertion"))
+		--assertis(assignments, mapType("string", "Assertion"))
 		for variable, replacement in pairs(assignments) do
 			a = assertionReplaced(a, variable, replacement)
 		end
@@ -345,7 +346,7 @@ local function mustModel(scope, target)
 				end
 
 				local newID = action.destination.name .. "'" .. i .. "'" .. j
-				local newV = variableAssertion(scope, table.with(action.destination, "name", newID))
+				local newV = variableAssertion(table.with(action.destination, "name", newID))
 				
 				local p = freeze {
 					tag = "method",
@@ -418,16 +419,16 @@ end
 
 -- RETURNS an Assertion
 local function resultAssertion(scope, statement)
-	assertis(scope, listType(listType "Action"))
+	--assertis(scope, listType(listType "Action"))
 	assertis(statement, "StatementIR")
 	statement = freeze(statement)
 
 	if statement.tag == "method-call" or statement.tag == "generic-method-call" then
 		return freeze {
 			tag = "method",
-			base = variableAssertion(scope, statement.baseInstance),
+			base = variableAssertion(statement.baseInstance),
 			methodName = statement.methodName,
-			arguments = table.map(function(x) return variableAssertion(scope, x) end, statement.arguments),
+			arguments = table.map(function(x) return variableAssertion(x) end, statement.arguments),
 
 			signature = statement.signature,
 		}
@@ -442,7 +443,7 @@ local function resultAssertion(scope, statement)
 			tag = "static",
 			base = base,
 			staticName = statement.staticName,
-			arguments = table.map(function(x) return variableAssertion(scope, x) end, statement.arguments),
+			arguments = table.map(function(x) return variableAssertion(x) end, statement.arguments),
 		}
 	end
 	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
@@ -455,7 +456,7 @@ local function fieldAssertion(scope, statement)
 	return freeze {
 		tag = "field",
 		fieldName = statement.name,
-		base = variableAssertion(scope, statement.base),
+		base = variableAssertion(statement.base),
 	}
 end
 
@@ -466,7 +467,7 @@ local function variantAssertion(scope, statement)
 	return freeze {
 		tag = "variant",
 		variant = statement.variant,
-		base = variableAssertion(scope, statement.base),
+		base = variableAssertion(statement.base),
 	}
 end
 
@@ -474,12 +475,13 @@ end
 -- RETURNS nothing
 local function verifyStatement(statement, scope, semantics)
 	assertis(statement, "StatementIR")
-	assertis(scope, listType(listType "Action"))
+	--assertis(scope, listType(listType "Action"))
 	assertis(semantics, "Semantics")
 
 	local allDefinitions = table.concatted(
 		semantics.classes, semantics.interfaces, semantics.unions
 	)
+	allDefinitions = freeze(allDefinitions)
 
 	if statement.tag == "block" then
 		for _, sub in ipairs(statement.statements) do
@@ -492,11 +494,11 @@ local function verifyStatement(statement, scope, semantics)
 		profile.close"verify VerifySt's body"
 
 		-- Check
-		local models = mustModel(scope, variableAssertion(scope, statement.variable))
+		local models = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
 			--print("$ !!!", models)
 			--dumpScope(scope)
-			--print("$ =/=>", verifyTheory:canonKey(variableAssertion(scope, statement.variable)))
+			--print("$ =/=>", verifyTheory:canonKey(variableAssertion(statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
@@ -508,7 +510,7 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "assume" then
 		verifyStatement(statement.body, scope, semantics)
 
-		addPredicate(scope, variableAssertion(scope, statement.variable))
+		addPredicate(scope, variableAssertion(statement.variable))
 
 		return
 	elseif statement.tag == "local" then
@@ -569,12 +571,12 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "new-class" then
 		local fields = {}
 		for n, v in pairs(statement.fields) do
-			fields[n] = variableAssertion(scope, v)
+			fields[n] = variableAssertion(v)
 		end
 
 		assertis(statement.type, "ConcreteType+")
 
-		local instance = variableAssertion(scope, uniqueVariable(statement.type))
+		local instance = variableAssertion(uniqueVariable(statement.type))
 		assignRaw(scope, statement.destination, instance)
 
 		for fieldName, value in pairs(statement.fields) do
@@ -587,7 +589,7 @@ local function verifyStatement(statement, scope, semantics)
 			local eq = freeze {
 				tag = "method",
 				base = fieldAssertion,
-				arguments = {variableAssertion(scope, value)},
+				arguments = {variableAssertion(value)},
 				methodName = "eq",
 				signature = makeEqSignature(value.type),
 			}
@@ -601,13 +603,13 @@ local function verifyStatement(statement, scope, semantics)
 		addPredicate(scope, freeze {
 			tag = "isa",
 			variant = statement.field,
-			base = variableAssertion(scope, statement.destination),
+			base = variableAssertion(statement.destination),
 		})
 
 		-- TODO: add field information? so that matches get same value put in
 		return
 	elseif statement.tag == "assign" then
-		assignRaw(scope, statement.destination, variableAssertion(scope, statement.source))
+		assignRaw(scope, statement.destination, variableAssertion(statement.source))
 		return
 	elseif statement.tag == "match" then
 		-- Check each case
@@ -615,7 +617,7 @@ local function verifyStatement(statement, scope, semantics)
 			beginSubscope(scope)
 			-- Add variant predicate
 			addPredicate(scope, freeze {
-				tag = "isa", base = variableAssertion(scope, statement.base), variant = case.variant
+				tag = "isa", base = variableAssertion(statement.base), variant = case.variant
 			})
 			verifyStatement(case.statement, scope, semantics)
 			endSubscope(scope)
@@ -642,7 +644,7 @@ local function verifyStatement(statement, scope, semantics)
 		assertis(statement, "IsASt")
 		assignRaw(scope, statement.destination, freeze {
 			tag = "isa",
-			base = variableAssertion(scope, statement.base),
+			base = variableAssertion(statement.base),
 			variant = statement.variant,
 		})
 		return

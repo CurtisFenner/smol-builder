@@ -108,7 +108,7 @@ local function toCNFFromBreakup(theory, terms, assignments, normalization)
 	assertis(terms, listType(theory.assertion_t))
 	assertis(assignments, listType(listType(choiceType("boolean", constantType "*"))))
 	assert(#assignments >= 1)
-	assertis(normalization, "object")
+	--assertis(normalization, "object")
 
 	local options = {}
 	for _, assignment in ipairs(assignments) do
@@ -383,6 +383,8 @@ function plaintheory:canonKey(e)
 	end
 	return "{" .. table.concat(list, ", ") .. "}"
 end
+
+plaintheory = freeze(plaintheory)
 
 local m1 = {"and", "x", "y"}
 assert(true == implies(plaintheory, {m1}, "x"))

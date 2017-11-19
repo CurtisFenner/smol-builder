@@ -835,19 +835,19 @@ function compileExpression(pExpression, scope, environment)
 	assertis(pExpression, recordType {
 		tag = "string"
 	})
-	assertis(scope, listType(mapType("string", "VariableIR")))
+	--assertis(scope, listType(mapType("string", "VariableIR")))
 	assertis(environment, recordType {
 		resolveType = "function",
-			containerType = "Type+",
-			containingSignature = "Signature",
-			allDefinitions = listType "Definition",
-			thisVariable = choiceType(constantType(false), "VariableIR"),
-		})
-		local resolveType = environment.resolveType
-		local containerType = environment.containerType
-		local containingSignature = environment.containingSignature
-		local allDefinitions = environment.allDefinitions
-		local containingDefinition = definitionFromType(containerType, allDefinitions)
+		containerType = "Type+",
+		containingSignature = "Signature",
+		allDefinitions = listType "Definition",
+		thisVariable = choiceType(constantType(false), "VariableIR"),
+	})
+	local resolveType = environment.resolveType
+	local containerType = environment.containerType
+	local containingSignature = environment.containingSignature
+	local allDefinitions = environment.allDefinitions
+	local containingDefinition = definitionFromType(containerType, allDefinitions)
 
 	if pExpression.tag == "string-literal" then
 		local out = {
@@ -1137,7 +1137,7 @@ function compileExpression(pExpression, scope, environment)
 				table.insert(evaluation, assumption)
 			end
 
-			return buildBlock(evaluation), destinations
+			return buildBlock(evaluation), freeze(destinations)
 		end
 
 		local baseDefinition = definitionFromType(t, allDefinitions)
@@ -1386,7 +1386,7 @@ function compileExpression(pExpression, scope, environment)
 				table.insert(evaluation, verification)
 			end
 			
-			local callSt = {
+			local callSt = freeze {
 				tag = "generic-method-call",
 				baseInstance = baseInstance,
 				constraint = method.constraintIR,
@@ -1415,7 +1415,7 @@ function compileExpression(pExpression, scope, environment)
 				table.insert(evaluation, assumption)
 			end
 
-			return buildBlock(evaluation), destinations
+			return buildBlock(evaluation), freeze(destinations)
 		end
 
 		-- Concrete instance
@@ -1541,7 +1541,7 @@ function compileExpression(pExpression, scope, environment)
 			table.insert(evaluation, assumption)
 		end
 
-		return buildBlock(evaluation), destinations
+		return buildBlock(evaluation), freeze(destinations)
 	elseif pExpression.tag == "keyword" then
 		if pExpression.keyword == "false" or pExpression.keyword == "true" then
 			local boolean = {
@@ -1582,7 +1582,7 @@ function compileExpression(pExpression, scope, environment)
 					returns = "no",
 				}
 			}
-			return buildBlock(execution), {variable}
+			return buildBlock(execution), freeze {variable}
 		elseif pExpression.keyword == "return" then
 			-- TODO: mark as uncomputable
 			local returns = environment.containingSignature.returnTypes
@@ -1595,7 +1595,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 			assert(#returns == #environment.returnOuts)
 
-			return buildBlock {}, environment.returnOuts
+			return buildBlock {}, freeze(environment.returnOuts)
 		end
 		error("TODO: keyword `" .. pExpression.keyword .. "`")
 	elseif pExpression.tag == "field" then
@@ -1649,7 +1649,7 @@ function compileExpression(pExpression, scope, environment)
 			destination = result,
 			returns = "no",
 		}
-		return buildBlock {baseEvaluation, localSt(result), accessStatement}, {result}
+		return buildBlock {baseEvaluation, localSt(result), accessStatement}, freeze {result}
 	elseif pExpression.tag == "binary" then
 		-- Compile the two operands
 		profile.open("compileExpression binary recursive")
@@ -1767,7 +1767,7 @@ function compileExpression(pExpression, scope, environment)
 			}
 		end
 
-		return buildBlock {baseEvaluation, localSt(result), isA}, {result}
+		return buildBlock {baseEvaluation, localSt(result), isA}, freeze {result}
 	end
 
 	error("TODO expression")
@@ -2042,21 +2042,21 @@ local function semanticsSmol(sources, main)
 
 		-- RETURNS a Signature
 		local function compiledSignature(signature, scope, foreign)
-			assertis(scope, listType("TypeParameterIR"))
+			--assertis(scope, listType("TypeParameterIR"))
 			assertis(foreign, "boolean")
 
 			return freeze {
 				foreign = foreign,
 				modifier = signature.modifier.keyword,
 				name = signature.name,
-				returnTypes = table.map(resolveType, signature.returnTypes, scope),
-				parameters = table.map(function(p)
-					return {
+				returnTypes = freeze(table.map(resolveType, signature.returnTypes, scope)),
+				parameters = freeze(table.map(function(p)
+					return freeze {
 						name = p.name,
 						type = resolveType(p.type, scope),
 						location = p.location,
 					}
-				end, signature.parameters),
+				end, signature.parameters)),
 				location = signature.location,
 				bang = signature.bang,
 				ensuresAST = signature.ensures,
@@ -2112,7 +2112,7 @@ local function semanticsSmol(sources, main)
 				})
 			end
 
-			return parametersOut
+			return freeze(parametersOut)
 		end
 
 		-- RETURNS a class+/union+
@@ -2241,6 +2241,7 @@ local function semanticsSmol(sources, main)
 	profile.close "resolve types"
 	profile.open "check implements"
 
+	allDefinitions = freeze(allDefinitions)
 	assertis(allDefinitions, listType "Definition")
 
 	-- (3) Verify and record all interfaces implementation
@@ -2467,7 +2468,7 @@ local function semanticsSmol(sources, main)
 					})
 				end
 				
-				local environment = {
+				local environment = freeze {
 					resolveType = makeTypeResolver(signature, definition.generics, allDefinitions),
 					containerType = containerType,
 					containingSignature = signature,
