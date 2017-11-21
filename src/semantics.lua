@@ -1122,7 +1122,7 @@ function compileExpression(pExpression, scope, environment)
 					static.signature,
 					{arguments = argumentSources, this = false},
 					environment,
-					"the " .. string.ordinal(i) .. " `requires` condition for " .. fullName,
+					"the " .. string.ordinal(i) .. " `requires` condition for static " .. fullName,
 					pExpression.location
 				)
 				table.insert(evaluation, verification)
@@ -1253,7 +1253,7 @@ function compileExpression(pExpression, scope, environment)
 				method,
 				{arguments = argumentSources, this = false, container = containerType},
 				environment,
-				"the " .. string.ordinal(i) .. " `requires` condition for " .. fullName,
+				"the " .. string.ordinal(i) .. " `requires` condition for static " .. fullName,
 				pExpression.location
 			)
 			table.insert(evaluation, verification)
@@ -1395,7 +1395,7 @@ function compileExpression(pExpression, scope, environment)
 					method.signature,
 					{arguments = arguments, this = baseInstance},
 					environment,
-					"the " .. string.ordinal(i) .. " `requires` condition for " .. methodFullName,
+					"the " .. string.ordinal(i) .. " `requires` condition for method " .. methodFullName,
 					pExpression.location
 				)
 				table.insert(evaluation, verification)
@@ -1524,7 +1524,7 @@ function compileExpression(pExpression, scope, environment)
 				method,
 				{arguments = arguments, this = baseInstance, container = baseInstance.type},
 				environment,
-				"the " .. string.ordinal(i) .. " `requires` condition for " .. methodFullName,
+				"the " .. string.ordinal(i) .. " `requires` condition for method " .. methodFullName,
 				pExpression.location
 			)
 			table.insert(evaluation, verification)

@@ -193,7 +193,7 @@ local function showStatement(statement, indent)
 	elseif statement.tag == "assume" then
 		return pre .. " " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
 	elseif statement.tag == "verify" then
-		return pre .. " " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
+		return pre .. " " .. statement.variable.name .. " in // " .. show(statement.reason) .. "\n" .. showStatement(statement.body, "\t" .. indent)
 	elseif statement.tag == "local" then
 		return pre .. " " .. statement.variable.name .. " " .. showType(statement.variable.type)
 	elseif statement.tag == "assign" then
