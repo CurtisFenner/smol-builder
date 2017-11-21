@@ -39,7 +39,7 @@ end
 -- RETURNS nothing
 -- MODIFIES out by appending strings to it
 local function showAdd(object, indent, out)
-	if indent > 4 then
+	if indent > 6 then
 		table.insert(out, "...")
 	elseif isstring(object) then
 		-- Turn into a string literal
@@ -61,9 +61,8 @@ local function showAdd(object, indent, out)
 			table.insert(internal, table.concat(line))
 		end
 		table.sort(internal)
-		--[[
 		for i = 1, #internal do
-			if #internal > 10 and i > 3 and i <= #internal - 3 then
+			if #internal > 1000 and i > 3 and i <= #internal - 3 then
 				local el = "\n" .. string.rep("\t", indent) .. "...;"
 				if out[#out] ~= el then
 					table.insert(out, el)
@@ -73,7 +72,6 @@ local function showAdd(object, indent, out)
 				table.insert(out, line)
 			end
 		end
-		]]
 		table.insert(out, "\n" .. string.rep("\t", indent) .. "}")
 	else
 		table.insert(out, tostring(object))
@@ -383,7 +381,7 @@ _assertis = memoized(2, _assertis)
 local normalizedT = {}
 -- ASSERTS that `value` is of the specified type `t`
 function assertis(value, t)
-	do return true end
+	--do return true end
 	-- TYPE_DESCRIPTION must be injective
 	-- Normalize types so that memoization works
 	local x = TYPE_DESCRIPTION(t)

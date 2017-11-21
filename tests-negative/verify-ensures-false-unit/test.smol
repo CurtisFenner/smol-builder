@@ -1,0 +1,9 @@
+package test;
+
+class Test {
+	static foo() Unit ensures false {
+	}
+
+	static main() Unit {
+	}
+}

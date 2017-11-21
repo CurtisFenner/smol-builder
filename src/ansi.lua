@@ -18,5 +18,8 @@ end
 function ansi.cyan(text)
 	return ansi._format(text, "[36m[1m")
 end
+function ansi.gray(text)
+	return ansi._format(text, "[30m[1m")
+end
 
 return ansi

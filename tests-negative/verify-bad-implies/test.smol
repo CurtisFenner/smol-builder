@@ -15,15 +15,11 @@ class Foo {
 	ensures x.a().implies(Foo.short(x).not()) {
 
 	}
-
-	static make() Foo {
-		return new();
-	}
 }
 
 class Test {
 
-	static main!() Unit {
-		do Foo.skip!(Foo.make());
+	static main() Unit {
+
 	}
 }

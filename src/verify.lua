@@ -8,6 +8,7 @@ local verifyTheory = import "verify-theory.lua"
 local Report = import "verify-errors.lua"
 
 local profile = import "profile.lua"
+local ansi = import "ansi.lua"
 
 --------------------------------------------------------------------------------
 
@@ -172,33 +173,47 @@ end
 -- RETURNS a string
 local function showStatement(statement, indent)
 	indent = (indent or "")
+	local color = ansi.blue
+	if statement.tag == "verify" or statement.tag == "assume" then
+		color = ansi.red
+	elseif statement.tag == "block" then
+		color = ansi.gray
+	end
+
+	local pre = indent .. color(statement.tag)
 	if statement.tag == "block" then
 		if #statement.statements == 0 then
-			return indent .. "block {}"
+			return pre .. " {}"
 		end
-		local out = indent .. "block {\n"
+		local out = pre .. " {\n"
 		for _, element in ipairs(statement.statements) do
 			out = out .. showStatement(element, indent .. "\t") .. "\n"
 		end
 		return out .. indent .. "}"
 	elseif statement.tag == "assume" then
-		return indent .. "assume " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
+		return pre .. " " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
 	elseif statement.tag == "verify" then
-		return indent .. "verify " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
+		return pre .. " " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
 	elseif statement.tag == "local" then
-		return indent .. "local " .. statement.variable.name .. " " .. showType(statement.variable.type)
+		return pre .. " " .. statement.variable.name .. " " .. showType(statement.variable.type)
 	elseif statement.tag == "assign" then
-		return indent .. "assign " .. statement.destination.name .. " := " .. statement.source.name
+		return pre .. " " .. statement.destination.name .. " := " .. statement.source.name
 	elseif statement.tag == "method-call" then
 		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		return indent .. "method " .. destinations.. " := " .. statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations.. " := " .. statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
 	elseif statement.tag == "static-call" then
 		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		return indent .. "static " .. destinations.. " := " .. showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations.. " := " .. showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
+	elseif statement.tag == "return" then
+		local out = {}
+		for _, s in ipairs(statement.sources) do
+			table.insert(out, s.name)
+		end
+		return pre .. " " .. table.concat(out, ", ")
 	else
-		return indent .. statement.tag
+		return pre .. " <?>"
 	end
 end
 
@@ -658,6 +673,9 @@ local function verifyFunction(func, semantics)
 	assertis(func, "FunctionIR")
 	assertis(semantics, "Semantics")
 	assert(func.body)
+
+	print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
+	print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {{}}, semantics)

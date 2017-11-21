@@ -535,6 +535,21 @@ local BUILTIN_DEFINITIONS = freeze {
 					[false] = {{true, false}},
 				},
 			},
+			{
+				name = "not",
+				parameters = {},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Boolean",
+				foreign = true,
+				bang = false,
+				ensuresAST = {},
+				requiresAST = {},
+				logic = {
+					[true] = {{false}},
+					[false] = {{true}},
+				},
+			},
 		},
 	},
 	{
@@ -769,7 +784,7 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 		}
 	end
 
-	local out = {
+	local out = freeze {
 		tag = "verify",
 		variable = out[1],
 		body = evaluation,
@@ -2552,6 +2567,40 @@ local function semanticsSmol(sources, main)
 		local compileBlock
 
 		-- RETURNS a StatementIR
+		local function verifyForEnsures(scope, returnOuts, location)
+			assertis(returnOuts, listType "VariableIR")
+			assertis(scope, listType(mapType("string", "VariableIR")))
+			assertis(location, "Location")
+
+			local sequence = {}
+			-- Check that all ensured statements are true at this point
+			for i, ensures in ipairs(containingSignature.ensuresAST) do
+				local arguments = {}
+				for _, a in ipairs(containingSignature.parameters) do
+					table.insert(arguments, getFromScope(scope, a.name))
+				end
+				local invocation = {arguments = arguments, this = thisVariable, container = containerType}
+				assertis(invocation.container, "Type+")
+
+				local sub = table.with(environment, "returnOuts", returnOuts)
+				
+				local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.name
+				local verify = generatePreconditionVerify(
+					ensures,
+					containingSignature,
+					invocation,
+					sub,
+					context,
+					location
+				)
+				
+				assertis(verify, "VerifySt")
+				table.insert(sequence, verify)
+			end
+			return buildBlock(sequence)
+		end
+
+		-- RETURNS a StatementIR
 		local function compileStatement(pStatement, scope)
 			assertis(scope, listType(mapType("string", "VariableIR")))
 
@@ -2647,13 +2696,30 @@ local function semanticsSmol(sources, main)
 
 					table.insert(evaluation, subEvaluation)
 					sources = subsources
+				elseif #pStatement.values == 0 then
+					-- Returning no values is equivalent to returning one unit
+					local unitVariable = freeze {
+						type = UNIT_TYPE,
+						name = generateLocalID("unit_return"),
+						location = pStatement.location,
+					}
+					local execution = buildBlock {
+						localSt(unitVariable),
+						{
+							tag = "unit",
+							destination = unitVariable,
+							returns = "no",
+						}
+					}
+					table.insert(evaluation, execution)
+					table.insert(sources, unitVariable)
 				else
 					-- If multiple values are given, each must be a 1-tuple
 					for _, value in ipairs(pStatement.values) do
 						local subevaluation, subsources = compileExpression(value, scope, environment)
 						if #subsources ~= 1 then
 							Report.WRONG_VALUE_COUNT {
-								purpose = "value in multiple-value return statement",
+								purpose = "expression in multiple-value return statement",
 								expectedCount = 1,
 								givenCount = #subsources,
 								location = value.location,
@@ -2665,29 +2731,8 @@ local function semanticsSmol(sources, main)
 					end
 				end
 
-				for i, ensures in ipairs(containingSignature.ensuresAST) do
-					local arguments = {}
-					for _, a in ipairs(containingSignature.parameters) do
-						table.insert(arguments, getFromScope(scope, a.name))
-					end
-					local invocation = {arguments = arguments, this = thisVariable, container = containerType}
-					assertis(invocation.container, "Type+")
-
-					local sub = table.with(environment, "returnOuts", sources)
-					
-					local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.name
-					local verify = generatePreconditionVerify(
-						ensures,
-						containingSignature,
-						invocation,
-						sub,
-						context,
-						pStatement.location
-					)
-					
-					assertis(verify, "VerifySt")
-					table.insert(evaluation, verify)
-				end
+				-- Generate an ensures
+				table.insert(evaluation, verifyForEnsures(scope, sources, pStatement.location))
 
 				local returnSt = {
 					tag = "return",
@@ -3088,6 +3133,7 @@ local function semanticsSmol(sources, main)
 			}
 		end
 
+		-- Create assumptions for all of the hypotheses in `requires` clauses
 		local assumptions = {}
 		for _, requires in ipairs(containingSignature.requiresAST) do
 			assertis(environment.containerType, "Type+")
@@ -3109,6 +3155,7 @@ local function semanticsSmol(sources, main)
 			}
 			assertis(body, "StatementIR")
 			if body.returns ~= "yes" then
+				-- An implicit return of unit must be added
 				local returns = {}
 				for _, returnType in ipairs(containingSignature.returnTypes) do
 					table.insert(returns, showType(returnType))
@@ -3116,6 +3163,7 @@ local function semanticsSmol(sources, main)
 				returns = table.concat(returns, ", ")
 
 				if returns ~= "Unit" then
+					-- But only for unit functions
 					Report.FUNCTION_DOESNT_RETURN {
 						name = containingSignature.container .. ":" .. containingSignature.name,
 						modifier = containingSignature.modifier,
@@ -3123,6 +3171,26 @@ local function semanticsSmol(sources, main)
 						returns = returns,
 					}
 				end
+
+				-- Returning no values is equivalent to returning one unit
+				local unitVariable = freeze {
+					type = UNIT_TYPE,
+					name = generateLocalID("unit_return"),
+					location = containingSignature.body.location,
+				}
+				local returnSt = {
+					tag = "unit",
+					destination = unitVariable,
+					returns = "no",
+				}
+
+				-- Check post conditions
+				body = buildBlock {
+					body,
+					localSt(unitVariable),
+					verifyForEnsures(functionScope, {unitVariable}, containingSignature.body.location),
+					returnSt
+				}
 			end
 		end
 
