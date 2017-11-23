@@ -215,7 +215,9 @@ local function getTypeConstraints(type, typeScope, allDefinitions)
 		local constraints = table.map(substitute, definition.implements)
 		return constraints
 	elseif type.tag == "keyword-type+" then
-		error("TODO: getTypeConstraints(keyword-type+")
+		-- XXX: Right now, keyword types do not implement any interfaces,
+		-- requiring explicit boxing
+		return {}
 	elseif type.tag == "generic+" then
 		local parameter = table.findwith(typeScope, "name", type.name)
 		assert(parameter)
@@ -531,7 +533,7 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = {
-					[true] = {{false, false}, {false, true}, {true, true}},
+					[true] = {{false, "*"}, {true, true}},
 					[false] = {{true, false}},
 				},
 			},

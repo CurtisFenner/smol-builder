@@ -1,0 +1,15 @@
+package test;
+
+interface C {
+}
+
+class Foo[#T | #T is C] {
+	static nothing() Unit {
+	}
+}
+
+class Test {
+	static main() Unit {
+		do Foo[String].nothing();
+	}
+}
