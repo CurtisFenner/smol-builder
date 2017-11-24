@@ -222,8 +222,7 @@ local function cConstraint(constraint, semantics)
 	elseif constraint.tag == "this-constraint" then
 		return localName(constraint.instance.name) .. "->" .. structConstraintField(constraint.name)
 	end
-	print("unimplemented constraint tag `" .. constraint.tag .. "`")
-	return "TODO"
+	error("unimplemented constraint tag `" .. constraint.tag .. "`")
 end
 
 -- RETURNS a string representing a interface struct field name

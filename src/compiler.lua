@@ -275,6 +275,13 @@ local function lexSmol(source, filename)
 	local sourceLines = {}
 	for line in (source .. "\n"):gmatch("(.-)\n") do
 		line = line:gsub("\r", "")
+		repeat
+			local index = line:find("\t")
+			if index then
+				local spaces = string.rep(" ", 4 - (index - 1) % 4)
+				line = line:sub(1, index - 1) .. spaces .. line:sub(index + 1)
+			end
+		until not index
 		line = line:gsub("\t", "    ") -- TODO: this should be aligned
 		table.insert(sourceLines, line)
 	end
