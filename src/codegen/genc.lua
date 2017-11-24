@@ -211,7 +211,8 @@ local function cConstraint(constraint, semantics)
 		for i, generic in ipairs(definition.generics) do
 			for j, c in ipairs(generic.constraints) do
 				-- XXX
-				local assignment = constraint.assignments["#" .. i .. "_" .. j]
+				local key = "#" .. i .. "_" .. j
+				local assignment = constraint.assignments[key]
 				table.insert(argumentValues, cConstraint(assignment, semantics))
 			end
 		end

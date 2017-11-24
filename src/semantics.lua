@@ -600,7 +600,7 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS TODO
+-- RETURNS record with interface, signature, constraint, name, etc.
 local function findConstraintByMember(genericType, modifier, name, location, generics, allDefinitions, containingSignature)
 	assertis(genericType, "GenericType+")
 	assertis(modifier, choiceType(constantType "static", constantType "method"))
@@ -688,19 +688,41 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 	return out
 end
 
+-- generics: the generics IN SCOPE, not the generics of interface/implementer.
 -- RETURNS a ConstraintIR
-local function constraintFromStruct(interface, implementer, generics, containingSignature, thisVariable)
+local function constraintFromStruct(interface, implementer, generics, containingSignature, environment)
 	assertis(interface, "InterfaceType+")
 	assertis(implementer, "Type+")
 	assertis(generics, listType "TypeParameterIR")
 	assertis(containingSignature, "Signature")
 
 	if implementer.tag == "concrete-type+" then
+		local definition = definitionFromType(implementer, environment.allDefinitions)
+		assert(definition)
+
+		-- Constraints of parameterized types depend on the constraints they
+		-- require
 		local assignments = {}
-		if #implementer.arguments > 0 then
-			-- Fill assignments
-			error "TODO"
+		for i, generic in ipairs(definition.generics) do
+			for j, c in ipairs(generic.constraints) do
+				local key = "#" .. i .. "_" .. j
+				
+				local interface = c.interface
+				assertis(interface, "InterfaceType+")
+
+				local implementer = implementer.arguments[i]
+				assertis(implementer, "Type+")
+
+				local constraint = constraintFromStruct(
+					interface, implementer,
+					generics, containingSignature, environment
+				)
+				assertis(constraint, "ConstraintIR")
+
+				assignments[key] = constraint
+			end
 		end
+
 		return freeze {
 			tag = "concrete-constraint",
 			interface = interface,
@@ -726,10 +748,10 @@ local function constraintFromStruct(interface, implementer, generics, containing
 			}
 		else
 			-- Get a this constraint
-			assertis(thisVariable, "VariableIR")
+			assertis(environment.thisVariable, "VariableIR")
 			return freeze {
 				tag = "this-constraint",
-				instance = thisVariable,
+				instance = environment.thisVariable,
 				interface = interface,
 				name = name,
 			}
@@ -1213,7 +1235,7 @@ function compileExpression(pExpression, scope, environment)
 					t.arguments[gi],
 					containingDefinition.generics,
 					containingSignature,
-					environment.thisVariable
+					environment
 				)
 			end
 		end
@@ -1603,9 +1625,15 @@ function compileExpression(pExpression, scope, environment)
 		elseif pExpression.keyword == "return" then
 			-- TODO: mark as uncomputable
 			local returns = environment.containingSignature.returnTypes
-			assert(#returns == 1, "TODO: deal with multiple return values")
-			if not environment.returnOuts then
-				error "foo"
+
+			if #returns ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "`return` expression",
+					expectedCount = 1,
+					givenCount = #returns,
+					location = pExpression.location,
+				}
+			elseif not environment.returnOuts then
 				Report.RETURN_USED_IN_IMPLEMENTATION {
 					location = pExpression.location
 				}

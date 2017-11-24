@@ -41,9 +41,20 @@ local function printHeader(text, symbol, align)
 	print("")
 end
 
+-- Converts tabs to 4 spaces in a string that doesn't contain newlines
 function string.spaces(s)
-	-- TODO: make tabs align to columns
-	return (s:gsub("\t", "    "))
+	assert(not s:find("\n"))
+	local out = ""
+	for i = 1, #s do
+		if s:sub(i, i) ~= "\t" then
+			out = out .. s:sub(i, i)
+		else
+			repeat
+				out = out .. " "
+			until #out % 4 == 0
+		end
+	end
+	return out
 end
 
 local function printBox(lines)
