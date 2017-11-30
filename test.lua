@@ -1,4 +1,51 @@
--- Test script for the Lua smol compiler
+-- Test script for the Lua smol compiler.
+-- To run all tests,
+--         lua test.lua
+
+-- usage:
+--         lua test.lua <query>
+-- if <query> is blank, all tests are run.
+-- if <query> begins with -, only negative tests are run.
+-- if <query> begins with +, only positive tests are run.
+-- if <query> contains text after an (optional) initial + or -, only tests whose
+--     names contain the query string are run.
+
+-- For example, to run all verification tests that the compiler should reject,
+--         lua test.lua -verify
+
+--------------------------------------------------------------------------------
+
+-- ENVIRONMENT REQUIREMENTS
+
+-- `ls` must be a utility available in the shell that lists file names in a
+-- directory, one per line.
+
+-- `gcc` must be a utility available in the shell that compiles C programs.
+-- The `-std=c99` flag is specified with `-pedantic`.
+
+--- `diff` must be a utility available in the shell that compares text files.
+
+-- Searches the current directory for folders named `tests-positive` and
+-- `tests-negative`.
+
+-- `tests-positive` should contain one or more folders; each is a test-category.
+-- Each test category should contain one or more folders; each is a test-case.
+-- Each positive test-case should contain:
+-- + `out.correct`, the text that the test case should generate on standard
+--   output
+-- + `test.smol`, a test file in the `test` package with main class `test:Test`.
+-- + any additional `.smol` files.
+-- Positive test-cases should compile and run successfully.
+
+-- `tests-negative` should contain one or more folders; each is a test-category.
+-- Each test category should contain one or more folders; each is a test-case.
+-- Each negative test-case should contain:
+-- + `test.smol`, a test file in the `test` package with main class `test:Test`.
+-- + any additional `.smol` files.
+-- Negative test-cases should be rejected by the compiler gracefully. They
+-- should not create any executable or output.
+
+--------------------------------------------------------------------------------
 
 local filter = arg[1] or ""
 local mode = filter:sub(1, 1)
@@ -13,6 +60,15 @@ end
 local function shell(command)
 	local status = os.execute(command)
 	return status == 0, status
+end
+
+local function ls(directory)
+	local contents = {}
+	-- TODO: make this more portable and robus
+	for line in io.popen("ls " .. directory, "r"):lines() do
+		table.insert(contents, line)
+	end
+	return contents
 end
 
 --------------------------------------------------------------------------------
@@ -141,9 +197,12 @@ local function compiler(sources, main)
 	return status
 end
 
+local positiveTests = ls "tests-positive"
+local negativeTests = ls "tests-negative"
+
 if mode ~= "+" then
 	-- (1) Run all negative tests
-	for test in io.popen("ls tests-negative", "r"):lines() do
+	for _, test in ipairs(negativeTests) do
 		if test:find(filter, 1, true) then
 			printHeader("TEST " .. test)
 			local status = compiler("tests-negative/" .. test, "test:Test")
@@ -158,7 +217,7 @@ end
 
 if mode ~= "-" then
 	-- (2) Run all positive tests
-	for test in io.popen("ls tests-positive", "r"):lines() do
+	for _, test in ipairs(positiveTests) do
 		if test:find(filter, 1, true) then
 			printHeader("TEST " .. test)
 			local status = compiler("tests-positive/" .. test, "test:Test")

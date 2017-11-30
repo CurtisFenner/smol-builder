@@ -2527,11 +2527,11 @@ local function semanticsSmol(sources, main)
 					local _, outs = compileExpression(requires, scope, environment)
 					if #outs ~= 1 then
 						Report.WRONG_VALUE_COUNT {
-
+							-- TODO
 						}
 					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
 						Report.TYPES_DONT_MATCH {
-
+							-- TODO
 						}
 					end
 				end
@@ -2541,11 +2541,11 @@ local function semanticsSmol(sources, main)
 					local _, outs = compileExpression(ensures, scope, environment)
 					if #outs ~= 1 then
 						Report.WRONG_VALUE_COUNT {
-
+							-- TODO
 						}
 					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
 						Report.TYPES_DONT_MATCH {
-
+							-- TODO
 						}
 					end
 				end
