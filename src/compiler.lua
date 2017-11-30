@@ -829,12 +829,13 @@ local function parseSmol(tokens)
 
 		-- Represents a smol statement / control structure
 		["statement"] = parser.choice {
-			parser.named "return-statement",
-			parser.named "do-statement",
 			parser.named "var-statement",
-			parser.named "assign-statement",
+			parser.named "do-statement",
 			parser.named "if-statement",
 			parser.named "match-statement",
+			parser.named "assert-statement",
+			parser.named "return-statement",
+			parser.named "assign-statement",
 		},
 
 		["block"] = parser.composite {
@@ -855,6 +856,17 @@ local function parseSmol(tokens)
 			{"_", K_RETURN},
 			{"values", parser.query "expression,0+"},
 			{"_", K_SEMICOLON, "`;` to end return-statement"},
+		},
+
+		["assert-statement"] = parser.composite {
+			tag = "assert-statement",
+			{"_", K_ASSERT},
+			{
+				"expression",
+				parser.named "expression",
+				"an expression to assert the truth of after `assert`"
+			},
+			{"_", K_SEMICOLON, "`;` to end assert-statement"},
 		},
 
 		["do-statement"] = parser.composite {

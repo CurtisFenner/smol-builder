@@ -3080,6 +3080,7 @@ local function semanticsSmol(sources, main)
 							purpose = string.ordinal(i) .. " value in the assignment statement",
 							expectedType = showType(variable.type),
 							expectedLocation = variable.location,
+							givenType = showType(valueOut[i].type),
 						}
 					end
 					table.insert(out, {
@@ -3091,6 +3092,51 @@ local function semanticsSmol(sources, main)
 				end
 
 				return buildBlock(out)
+			elseif pStatement.tag == "assert-statement" then
+				-- Evaluate the right-hand-side
+				-- TODO: environment must be annotated to allow `forall`
+				local valueEvaluation, valueOut = compileExpression(pStatement.expression, scope, environment)
+				if #valueOut ~= 1 then
+					Report.WRONG_VALUE_COUNT {
+						purpose = "assert statement",
+						expectedCount = 1,
+						givenCount = #valueOut,
+						location = pStatement.expression.location,
+					}
+				elseif not areTypesEqual(valueOut[1].type, BOOLEAN_TYPE) then
+					Report.TYPES_DONT_MATCH {
+						purpose = "expression in assert statement",
+						expectedType = "Boolean",
+						expectedLocation = pStatement.expression.location,
+						givenType = showType(valueOut[1].type),
+					}
+				end
+
+				local verify = {
+					tag = "verify",
+					body = buildBlock {},
+					variable = valueOut[1],
+					checkLocation = pStatement.location,
+					conditionLocation = pStatement.location,
+					reason = "the asserted condition",
+					returns = "no",
+				}
+				assertis(verify, "VerifySt")
+
+				local assume = {
+					tag = "assume",
+					body = buildBlock {},
+					variable = valueOut[1],
+					returns = "no",
+					location = pStatement.location,
+				}
+				assertis(assume, "AssumeSt")
+
+				return buildBlock {
+					valueEvaluation,
+					verify,
+					assume,
+				}
 			end
 			error("TODO: compileStatement")
 		end
