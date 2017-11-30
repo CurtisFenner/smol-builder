@@ -523,6 +523,21 @@ local BUILTIN_DEFINITIONS = freeze {
 				},
 			},
 			{
+				name = "or",
+				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Boolean",
+				foreign = true,
+				bang = false,
+				ensuresAST = {},
+				requiresAST = {},
+				logic = {
+					[true] = {{true, "*"}, {false, true}},
+					[false] = {{false, false}},
+				},
+			},
+			{
 				name = "implies",
 				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
 				returnTypes = {BOOLEAN_TYPE},

@@ -1,0 +1,14 @@
+package test;
+
+class Test {
+
+	static foo(u Int) Unit {
+		var x Int = u;
+
+		assert (x == 0).or(x == 1);
+	}
+
+	static main() Unit {
+		
+	}
+}

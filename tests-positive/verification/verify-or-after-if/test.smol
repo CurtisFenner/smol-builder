@@ -1,0 +1,20 @@
+package test;
+
+class Test {
+
+	static foo(u Int, opaque Boolean) Unit {
+		var x Int = u;
+
+		if opaque {
+			x = 0;
+		} else {
+			x = 1;
+		}
+
+		assert (x == 0).or(x == 1);
+	}
+
+	static main() Unit {
+		
+	}
+}

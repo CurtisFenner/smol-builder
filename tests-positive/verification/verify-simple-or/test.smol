@@ -1,0 +1,16 @@
+package test;
+
+class Test {
+
+	static foo1(a Boolean, b Boolean) Unit requires a {
+		assert a.or(b);
+	}
+
+	static foo2(a Boolean, b Boolean) Unit requires b {
+		assert a.or(b);
+	}
+
+	static main() Unit {
+		
+	}
+}
