@@ -556,6 +556,10 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit(localName(statement.destination.name) .. " = ")
 		emit("\t" .. localName(statement.base.name) .. "->" .. unionFieldName(statement.variant) .. ";")
 		return
+	elseif statement.tag == "assume" then
+		comment("assume ???")
+	elseif statement.tag == "verify" then
+		comment("verify ???")
 	end
 	
 	comment(statement.tag .. " ????")

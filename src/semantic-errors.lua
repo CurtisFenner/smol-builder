@@ -9,21 +9,21 @@ function Report.TYPE_DEFINED_TWICE(first, second)
 
 	quit("The type `", name, "` was already defined ",
 		first.location,
-		".\nHowever, you are attempting to redefine it ",
+		"\nHowever, you are attempting to redefine it ",
 		second.location)
 end
 
 function Report.GENERIC_DEFINED_TWICE(p)
 	quit("The generic variable `#", p.name, "` was already defined ",
 		p.firstLocation,
-		".\nHowever, you are attempting to redefine it ",
+		"\nHowever, you are attempting to redefine it ",
 		p.secondLocation)
 end
 
 function Report.MEMBER_DEFINED_TWICE(p)
 	quit("The member `" .. p.name .. "` was already defined ",
 		p.firstLocation,
-		".\nHowever, you are attempting to redefine it ",
+		"\nHowever, you are attempting to redefine it ",
 		p.secondLocation)
 end
 

@@ -197,8 +197,19 @@ local function compiler(sources, main)
 	return status
 end
 
-local positiveTests = ls "tests-positive"
-local negativeTests = ls "tests-negative"
+local positiveTests = {}
+for _, category in ipairs(ls "tests-positive") do
+	for _, test in ipairs(ls("tests-positive/" .. category)) do
+		table.insert(positiveTests, category .. "/" .. test)
+	end
+end
+
+local negativeTests = {}
+for _, category in ipairs(ls "tests-negative") do
+	for _, test in ipairs(ls("tests-negative/" .. category)) do
+		table.insert(negativeTests, category .. "/" .. test)
+	end
+end
 
 if mode ~= "+" then
 	-- (1) Run all negative tests
