@@ -31,6 +31,13 @@ REGISTER_TYPE("Action", choiceType(
 		tag = constantType "assignment",
 		destination = "VariableIR",
 		value = "Assertion",
+	},
+	recordType {
+		tag = constantType "branch",
+		branches = listType(recordType {
+			condition = "Assertion",
+			scope = listType "Action",
+		})
 	}
 ))
 
@@ -131,9 +138,83 @@ local function makeEqSignature(t)
 		requiresAST = {},
 		logic = false
 	}
+
+	if t.name == "Boolean" then
+		local logic = {
+			[true] = {{true, true}, {false, false}},
+			[false] = {{true, false}, {false, true}},
+		}
+		eqSignature = table.with(eqSignature, "logic", logic)
+	end
+
 	assertis(eqSignature, "Signature")
 
 	return eqSignature
+end
+
+-- RETURNS an Assertion representing the negation of a
+local function notAssertion(a)
+	assertis(a, "Assertion")
+
+	local p = freeze {
+		tag = "method",
+		methodName = "not",
+		base = a,
+		arguments = {},
+
+		signature = {
+			name = "not",
+			parameters = {},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{false}},
+				[false] = {{true}},
+			},
+		},
+	}
+	assertis(p, "MethodAssertion")
+	return p
+end
+
+-- RETURNS an Assertion representing a => b
+local function impliesAssertion(a, b)
+	assertis(a, "Assertion")
+	assertis(b, "Assertion")
+
+	local BUILTIN_LOC = {
+		begins = "builtin",
+		ends = "builtin",
+	}
+
+	local p = freeze {
+		tag = "method",
+		methodName = "implies",
+		base = a,
+		arguments = {b},
+		signature = {
+			name = "implies",
+			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{false, "*"}, {true, true}},
+				[false] = {{true, false}},
+			},
+		},
+	}
+	assertis(p, "MethodAssertion")
+	return p
 end
 
 -- RETURNS an Assertion
@@ -301,10 +382,10 @@ end
 -- MODIFIES scope
 -- RETURNS nothing
 local function addPredicate(scope, value)
-	assertis(scope, listType(listType "Action"))
+	assertis(scope, listType "Action")
 	assertis(value, "Assertion")
 
-	table.insert(scope[#scope], {
+	table.insert(scope, freeze {
 		tag = "predicate",
 		value = value,
 	})
@@ -313,76 +394,147 @@ end
 -- RETURNS nothing
 -- MODIFIES scope
 local function assignRaw(scope, destination, value)
-	--assertis(scope, listType(listType "Action"))
+	assertis(scope, listType "Action")
 	assertis(destination, "VariableIR")
 	assertis(value, "Assertion")
 	
-	table.insert(scope[#scope], {
+	table.insert(scope, freeze {
 		tag = "assignment",
 		destination = destination,
 		value = value,
 	})
 end
 
--- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
-local function mustModel(scope, target)
-	--assertis(scope, listType(listType "Action"))
-	assertis(target, "Assertion")
+-- RETURNS nothing
+-- MODIFIES scope
+local function addMerge(scope, branches)
+	-- Learn the disjunction of branches
+	assertis(scope, listType "Action")
+	assertis(branches, listType(recordType {
+		scope = listType "Action",
+		condition = "Assertion",
+	}))
 
+	local action = freeze {
+		tag = "branch",
+		branches = branches,
+	}
+	assertis(action, "Action")
+	table.insert(scope, action)
+end
+
+local function eqAssertion(a, b, t)
+	assertis(a, "Assertion")
+	assertis(b, "Assertion")
+	assertis(t, "Type+")
+
+	local p = freeze {
+		tag = "method",
+		methodName = "eq",
+		base = a,
+		arguments = {b},
+		signature = makeEqSignature(t),
+	}
+	assertis(p, "MethodAssertion")
+	return p
+end
+
+-- RETURNS a list of true Assertion predicates, inNow
+-- path: a string used to generate unique names
+local function getPredicateSet(scope, assignments, path)
+	assertis(scope, listType "Action")
+	assertis(assignments, mapType("string", recordType{
+		value = "Assertion",
+		definition = "VariableIR",
+	}))
+	assertis(path, "string")
+	
 	-- TODO: come up with something that deals with loops
 	local predicates = {}
-	local assignments = {}
 
 	-- RETURNS an Assertion
 	local function inNow(a)
 		assertis(a, "Assertion")
-		--assertis(assignments, mapType("string", "Assertion"))
 		for variable, replacement in pairs(assignments) do
-			a = assertionReplaced(a, variable, replacement)
+			assertis(replacement, recordType {
+				value = "Assertion",
+				definition = "VariableIR",
+			})
+			a = assertionReplaced(a, variable, replacement.value)
 		end
 		return a
 	end
-
-	profile.open "translating-in-scope"
-
 	-- Translate assignments as a substitution in all subsequent predicates
-	for i, frame in ipairs(scope) do
-		for j, action in ipairs(frame) do
-			if action.tag == "assignment" then
-				local t = action.destination.type
-				local eqSignature = makeEqSignature(t)
+	for i, action in ipairs(scope) do
+		if action.tag == "assignment" then
+			local t = action.destination.type
 
-				if action.destination.type.name == "Boolean" then
-					local logic = {
-						[true] = {{true, true}, {false, false}},
-						[false] = {{true, false}, {false, true}},
-					}
-					eqSignature = table.with(eqSignature, "logic", logic)
+			local newID = action.destination.name .. "'" .. i .. "'" .. path
+			local newV = variableAssertion(table.with(action.destination, "name", newID))
+			
+			local p = eqAssertion(inNow(action.value), newV, t)
+			assertis(p, "Assertion")
+			table.insert(predicates, p)
+			assignments[action.destination.name] = freeze {
+				value = newV,
+				definition = action.destination,
+			}
+		elseif action.tag == "predicate" then
+			table.insert(predicates, inNow(action.value))
+		elseif action.tag == "branch" then
+			-- Learn the facts of both, predicated by condition => ...
+			for bi, branch in ipairs(action.branches) do
+				local condition = inNow(branch.condition)
+				local notCondition = notAssertion(condition)
+
+				local branchAssignments = {}
+				for key, value in pairs(assignments) do
+					branchAssignments[key] = value
 				end
 
-				local newID = action.destination.name .. "'" .. i .. "'" .. j
-				local newV = variableAssertion(table.with(action.destination, "name", newID))
-				
-				local p = freeze {
-					tag = "method",
-					methodName = "eq",
-					base = inNow(action.value),
-					arguments = {newV},
+				local branchPredicates = getPredicateSet(branch.scope, branchAssignments, path .. "'" .. bi)
+				for _, p in ipairs(branchPredicates) do
+					table.insert(predicates, impliesAssertion(condition, p))
+				end
 
-					signature = eqSignature,
-				}
-				assertis(p, "MethodAssertion")
-				table.insert(predicates, p)
-				assignments[action.destination.name] = newV
-			elseif action.tag == "predicate" then
-				table.insert(predicates, inNow(action.value))
-			else
-				error("unknown action tag `" .. action.tag .. "`")
+				-- Capture modified variables into a select operation
+				for variable, newValue in pairs(branchAssignments) do
+					local oldValue = assignments[variable]
+					if oldValue == nil then
+						oldValue = newValue
+					elseif newValue.value ~= oldValue.value then
+						-- Create new dummy variable
+						local id = "merged'" .. variable .. "'" .. path .. "'" .. i
+						local merged = variableAssertion(
+							table.with(newValue.definition, "name", id)
+						)
+						assignments[variable] = freeze {
+							value = merged,
+							definition = newValue.definition,
+						}
+
+						-- Given it old meaning when condition does not hold
+						local isOld = eqAssertion(merged, oldValue.value, oldValue.definition.type)
+						table.insert(predicates, impliesAssertion(notCondition, isOld))
+						
+						-- Give it new meaning when condition does hold
+						local isNew = eqAssertion(merged, newValue.value, newValue.definition.type)
+						table.insert(predicates, impliesAssertion(condition, isNew))
+					end
+				end
 			end
+		else
+			error("unknown action tag `" .. action.tag .. "`")
 		end
 	end
 	assertis(predicates, listType "Assertion")
+	return predicates, inNow
+end
 
+-- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
+local function mustModel(scope, target)
+	profile.open "translating-in-scope"	
+	local predicates, inNow = getPredicateSet(scope, {}, "")
 	profile.close "translating-in-scope"
 
 	--print("\n\n\n\n")
@@ -390,51 +542,36 @@ local function mustModel(scope, target)
 	--	print("& " .. verifyTheory:canonKey(p))
 	--end
 
+	assertis(target, "Assertion")
 	local result = inNow(target)
-	--print(" =?=> " .. verifyTheory:canonKey(result))
+	--print("=?=> " .. verifyTheory:canonKey(result))
 	local tautology = smt.implies(verifyTheory, predicates, result)
 	--print("<-", tautology)
+
 	return tautology
-end
-
--- MODIFIES scope
--- RETURNS nothing
-local function beginSubscope(scope)
-	assertis(scope, listType(listType "Action"))
-	assert(#scope >= 1)
-	table.insert(scope, {})
-end
-
--- MODIFIES scope
-local function endSubscope(scope)
-	assertis(scope, listType(listType "Action"))
-	assert(#scope >= 2)
-	return table.remove(scope)
 end
 
 -- RETURNS nothing
 -- MODIFIES nothing
 local function dumpScope(scope)
-	assertis(scope, listType(listType "Action"))
+	assertis(scope, listType "Action")
 
-	for i, frame in ipairs(scope) do
-		print("$ -- Frame " .. i)
-		for j, v in ipairs(frame) do
-			io.write("$\t" .. j .. "\t")
-			if v.tag == "assignment" then
-				print(v.destination.name .. " := " .. verifyTheory:canonKey(v.value))
-			elseif v.tag == "predicate" then
-				print(verifyTheory:canonKey(v.value))
-			else
-				error("unknown action tag `" .. v.tag .. "` in dumpScope")
-			end
+	for i, v in ipairs(scope) do
+		io.write("$ -- " .. i .. "\t")
+		if v.tag == "assignment" then
+			print(v.destination.name .. " := " .. verifyTheory:canonKey(v.value))
+		elseif v.tag == "predicate" then
+			print(verifyTheory:canonKey(v.value))
+		elseif v.tag == "branch" then
+			print("branch TODO")
+		else
+			error("unknown action tag `" .. v.tag .. "` in dumpScope")
 		end
 	end
 end
 
 -- RETURNS an Assertion
-local function resultAssertion(scope, statement)
-	--assertis(scope, listType(listType "Action"))
+local function resultAssertion(statement)
 	assertis(statement, "StatementIR")
 	statement = freeze(statement)
 
@@ -486,11 +623,47 @@ local function variantAssertion(scope, statement)
 	}
 end
 
+-- RETURNS a mutable list of Actions, a copy of the given scope.
+local function scopeCopy(scope)
+	assertis(scope, listType "Action")
+
+	local out = {}
+	for _, action in ipairs(scope) do
+		-- Actions are immutable, so these can be copied by keeping a reference
+		table.insert(out, action)
+	end
+	return out
+end
+
+-- RETURNS the subset of the new scope that is not in the old scope
+local function scopeAdditional(old, new)
+	-- Right now assumes that the new scope has the old scope as a prefix
+	assert(#new >= #old)
+	for i = 1, #old do
+		assert(old[i] == new[i])
+	end
+
+	local out = {}
+	for i = #old + 1, #new do
+		table.insert(out, new[i])
+	end
+	return out
+end
+
+-- RETURNS a assertion representing the disjunction of all facts given in each
+-- list
+local function scopeDisjunction(a, b)
+	assertis(a, listType "Action")
+	assertis(b, listType "Action")
+
+	error "TODO!"
+end
+
 -- MODIFIES scope
 -- RETURNS nothing
 local function verifyStatement(statement, scope, semantics)
 	assertis(statement, "StatementIR")
-	--assertis(scope, listType(listType "Action"))
+	assertis(scope, listType "Action")
 	assertis(semantics, "Semantics")
 
 	local allDefinitions = table.concatted(
@@ -562,7 +735,7 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "method-call" or statement.tag == "generic-method-call" then
 		-- TODO: reject impure
-		local source = resultAssertion(scope, statement)
+		local source = resultAssertion(statement)
 		for i, destination in ipairs(statement.destinations) do
 			if #statement.destinations > 1 then
 				source = tupleAccess(source, i)
@@ -572,7 +745,7 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
 		-- TODO: reject impure
-		local source = resultAssertion(scope, statement)
+		local source = resultAssertion(statement)
 		for i, destination in ipairs(statement.destinations) do
 			if #statement.destinations > 1 then
 				source = tupleAccess(source, i)
@@ -638,22 +811,38 @@ local function verifyStatement(statement, scope, semantics)
 			endSubscope(scope)
 		end
 
-		-- TODO: incorporate intersection (see if)
+		-- TODO: incorporate intersection (see if also)
 		return
 	elseif statement.tag == "if" then
-		-- Check then branch
-		beginSubscope(scope)
-		assignRaw(scope, statement.condition, valueBoolean(true))
-		verifyStatement(statement.bodyThen, scope, semantics)
-		endSubscope(scope)
-		
-		-- Check else branch
-		beginSubscope(scope)
-		assignRaw(scope, statement.condition, valueBoolean(false))
-		verifyStatement(statement.bodyElse, scope, semantics)
-		endSubscope(scope)
+		-- Evaluate the then body with flow
+		local thenScope = scopeCopy(scope)
+		assignRaw(thenScope, statement.condition, valueBoolean(true))
+		verifyStatement(statement.bodyThen, thenScope, semantics)
 
-		-- TODO: incorporate intersection (see match)
+		-- Evaluate the else body with flow
+		local elseScope = scopeCopy(scope)
+		assignRaw(elseScope, statement.condition, valueBoolean(false))
+		verifyStatement(statement.bodyElse, elseScope, semantics)
+
+		-- Learn the disjunction of new statements
+		local conditionAssertion = variableAssertion(statement.condition)
+		local branches = {}
+		if statement.bodyThen.returns ~= "yes" then
+			local newThen = scopeAdditional(scope, thenScope)
+			table.insert(branches, {scope = newThen, condition = conditionAssertion})
+		end
+		if statement.bodyElse.returns ~= "yes" then
+			local newElse = scopeAdditional(scope, elseScope)
+			table.insert(branches, {scope = newElse, condition = notAssertion(conditionAssertion)})
+		end
+
+		if #branches == 0 then
+			-- No code follows here
+			assert(statement.returns == "yes")
+			return
+		end
+
+		addMerge(scope, branches)
 		return
 	elseif statement.tag == "isa" then
 		assertis(statement, "IsASt")
@@ -678,7 +867,7 @@ local function verifyFunction(func, semantics)
 	print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
-	verifyStatement(func.body, {{}}, semantics)
+	verifyStatement(func.body, {}, semantics)
 	profile.close("verifyFunction " .. func.name)
 end
 

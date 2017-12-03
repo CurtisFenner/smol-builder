@@ -558,8 +558,10 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		return
 	elseif statement.tag == "assume" then
 		comment("assume ???")
+		return
 	elseif statement.tag == "verify" then
 		comment("verify ???")
+		return
 	end
 	
 	comment(statement.tag .. " ????")
@@ -1028,6 +1030,47 @@ struct _smol_Int {
 	table.insert(code, [[
 ////////////////////////////////////////////////////////////////////////////////
 
+// Boolean method and(Boolean) Boolean
+tuple1_1_smol_Boolean_ptr smol_method_Boolean_and(smol_Boolean* this, smol_Boolean* other) {
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = this->value && other->value;
+	return out;
+}
+
+// Boolean method or(Boolean) Boolean
+tuple1_1_smol_Boolean_ptr smol_method_Boolean_or(smol_Boolean* this, smol_Boolean* other) {
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = this->value || other->value;
+	return out;
+}
+
+// Boolean method not() Boolean
+tuple1_1_smol_Boolean_ptr smol_method_Boolean_not(smol_Boolean* this) {
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = !this->value;
+	return out;
+}
+
+// Boolean method implies(Boolean) Boolean
+tuple1_1_smol_Boolean_ptr smol_method_Boolean_implies(smol_Boolean* this, smol_Boolean* other) {
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = !this->value || other->value;
+	return out;
+}
+
+// Boolean method eq(Boolean) Boolean
+tuple1_1_smol_Boolean_ptr smol_method_Boolean_eq(smol_Boolean* this, smol_Boolean* other) {
+	tuple1_1_smol_Boolean_ptr out;
+	out._1 = ALLOCATE(smol_Boolean);
+	out._1->value = this->value == other->value;
+	return out;
+}
+
+// Int method isPositive() Boolean
 tuple1_1_smol_Boolean_ptr smol_method_Int_isPositive(smol_Int* this) {
 	tuple1_1_smol_Boolean_ptr out;
 	out._1 = ALLOCATE(smol_Boolean);
@@ -1035,6 +1078,7 @@ tuple1_1_smol_Boolean_ptr smol_method_Int_isPositive(smol_Int* this) {
 	return out;
 }
 
+// Int method negate() Int
 tuple1_1_smol_Int_ptr smol_method_Int_negate(smol_Int* this) {
 	tuple1_1_smol_Int_ptr out;
 	out._1 = ALLOCATE(smol_Int);
@@ -1042,6 +1086,7 @@ tuple1_1_smol_Int_ptr smol_method_Int_negate(smol_Int* this) {
 	return out;
 }
 
+// Int method lessThan(Int) Boolean
 tuple1_1_smol_Boolean_ptr smol_method_Int_lessThan(smol_Int* this, smol_Int* smol_local_one) {
 	tuple1_1_smol_Boolean_ptr out;
 	out._1 = ALLOCATE(smol_Boolean);
@@ -1049,6 +1094,7 @@ tuple1_1_smol_Boolean_ptr smol_method_Int_lessThan(smol_Int* this, smol_Int* smo
 	return out;
 }
 
+// Int method eq(Int) Boolean
 tuple1_1_smol_Boolean_ptr smol_method_Int_eq(smol_Int* this, smol_Int* smol_local_other) {
 	tuple1_1_smol_Boolean_ptr out;
 	out._1 = ALLOCATE(smol_Boolean);
@@ -1056,6 +1102,7 @@ tuple1_1_smol_Boolean_ptr smol_method_Int_eq(smol_Int* this, smol_Int* smol_loca
 	return out;
 }
 
+// Int method quotient(Int) Int
 tuple1_1_smol_Int_ptr smol_method_Int_quotient(smol_Int* this, smol_Int* smol_local_other) {
 	tuple1_1_smol_Int_ptr out;
 	out._1 = ALLOCATE(smol_Int);
@@ -1063,6 +1110,7 @@ tuple1_1_smol_Int_ptr smol_method_Int_quotient(smol_Int* this, smol_Int* smol_lo
 	return out;
 }
 
+// Int method product(Int) Int
 tuple1_1_smol_Int_ptr smol_method_Int_product(smol_Int* this, smol_Int* smol_local_other) {
 	tuple1_1_smol_Int_ptr out;
 	out._1 = ALLOCATE(smol_Int);
@@ -1070,6 +1118,7 @@ tuple1_1_smol_Int_ptr smol_method_Int_product(smol_Int* this, smol_Int* smol_loc
 	return out;
 }
 
+// Int method sum(Int) Int
 tuple1_1_smol_Int_ptr smol_method_Int_sum(smol_Int* this, smol_Int* smol_local_other) {
 	tuple1_1_smol_Int_ptr out;
 	out._1 = ALLOCATE(smol_Int);
@@ -1077,6 +1126,7 @@ tuple1_1_smol_Int_ptr smol_method_Int_sum(smol_Int* this, smol_Int* smol_local_o
 	return out;
 }
 
+// Int method difference(Int) Int
 tuple1_1_smol_Int_ptr smol_method_Int_difference(smol_Int* this, smol_Int* smol_local_other) {
 	tuple1_1_smol_Int_ptr out;
 	out._1 = ALLOCATE(smol_Int);
@@ -1084,6 +1134,7 @@ tuple1_1_smol_Int_ptr smol_method_Int_difference(smol_Int* this, smol_Int* smol_
 	return out;
 }
 
+// String method concatenate(String) String
 tuple1_1_smol_String_ptr smol_method_String_concatenate(smol_String* this, smol_String* other) {
 	tuple1_1_smol_String_ptr out;
 	out._1 = ALLOCATE(smol_String);
@@ -1100,6 +1151,7 @@ tuple1_1_smol_String_ptr smol_method_String_concatenate(smol_String* this, smol_
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// core:Out static println(String) Unit
 tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
 	// TODO: allow nulls, etc.
 	for (size_t i = 0; i < message->length; i++) {
@@ -1115,6 +1167,7 @@ typedef struct {
 	void** data;
 } realarray;
 
+// core:Array[#T] static make() Array[#T]
 tuple1_1_smol_class_core_Array_T_ptr smol_static_core_Array_make() {
 	realarray* real = ALLOCATE(realarray);
 	real->size = 0;
@@ -1125,6 +1178,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_static_core_Array_make() {
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 
+// core:Array[#T] method get(Int) #T
 tuple1_1_void_ptr smol_method_core_Array_get(smol_class_core_Array_T* this, smol_Int* smol_local_index) {
 	realarray* real = this->foreign;
 	if (smol_local_index->value < 0) {
@@ -1136,6 +1190,7 @@ tuple1_1_void_ptr smol_method_core_Array_get(smol_class_core_Array_T* this, smol
 	return (tuple1_1_void_ptr){out};
 }
 
+// core:Array[#T] method set(Int, #T) Array[#T]
 tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_set(smol_class_core_Array_T* this, smol_Int* smol_local_index, void* smol_local_value) {
 	realarray* old = this->foreign;
 	if (smol_local_index->value < 0) {
@@ -1160,6 +1215,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_set(smol_class_core_
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 
+// core:Array method append(#T) Array[#T]
 tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_append(smol_class_core_Array_T* this, void* smol_local_value) {
 	realarray* old = this->foreign;
 	realarray* prime = ALLOCATE(realarray);
@@ -1178,6 +1234,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_append(smol_class_co
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 
+// core:Array method pop() Array[#T]
 tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_pop(smol_class_core_Array_T* this) {
 	realarray* old = this->foreign;
 	realarray* prime = ALLOCATE(realarray);
@@ -1193,6 +1250,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_pop(smol_class_core_
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 
+// core:Array method size() Int
 tuple1_1_smol_Int_ptr smol_method_core_Array_size(smol_class_core_Array_T* this) {
 	realarray* real = this->foreign;
 	smol_Int* out = ALLOCATE(smol_Int);
@@ -1200,6 +1258,7 @@ tuple1_1_smol_Int_ptr smol_method_core_Array_size(smol_class_core_Array_T* this)
 	return (tuple1_1_smol_Int_ptr){out};
 }
 
+// core:ASCII static formatInt(Int) String
 tuple1_1_smol_String_ptr smol_static_core_ASCII_formatInt(smol_Int* smol_local_value) {
 	tuple1_1_smol_String_ptr out;
 	out._1 = ALLOCATE(smol_String);

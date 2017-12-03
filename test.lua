@@ -218,9 +218,9 @@ if mode ~= "+" then
 			printHeader("TEST " .. test)
 			local status = compiler("tests-negative/" .. test, "test:Test")
 			if status ~= 45 then
-				FAIL {name = test, expected = 45, got = status}
+				FAIL {name = "- " .. test, expected = 45, got = status}
 			else
-				PASS {name = test}
+				PASS {name = "- " .. test}
 			end
 		end
 	end
@@ -233,7 +233,7 @@ if mode ~= "-" then
 			printHeader("TEST " .. test)
 			local status = compiler("tests-positive/" .. test, "test:Test")
 			if status ~= 0 then
-				FAIL {name = test, expected = 0, got = status}
+				FAIL {name = "+ " .. test, expected = 0, got = status}
 			else
 				local bin = "tests-positive/" .. test .. "/bin"
 				local flags = {
@@ -257,15 +257,15 @@ if mode ~= "-" then
 						local correctFile = "tests-positive/" .. test .. "/out.correct"
 						local correct = shell("diff -w " .. correctFile .. " " .. outFile)
 						if correct then
-							PASS {name = test}
+							PASS {name = "+ " .. test}
 						else
-							FAIL {name = test, expected = 0, got = 1, reason = "wrong output"}
+							FAIL {name = "+ " .. test, expected = 0, got = 1, reason = "wrong output"}
 						end
 					else
-						FAIL {name = test, expected = 0, got = 1, reason = "bin failed"}
+						FAIL {name = "+ " .. test, expected = 0, got = 1, reason = "bin failed"}
 					end
 				else
-					FAIL {name = test, expected = 0, got = 1, reason = "gcc rejected"}
+					FAIL {name = "+ " .. test, expected = 0, got = 1, reason = "gcc rejected"}
 				end
 			end
 		end
