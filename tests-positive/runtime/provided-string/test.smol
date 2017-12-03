@@ -1,0 +1,17 @@
+package test;
+import core;
+
+class Test {
+	static main!() Unit {
+		do core:Out.println!("".concatenate(""));
+		do core:Out.println!("a".concatenate(""));
+		do core:Out.println!("".concatenate("b"));
+		do core:Out.println!("x".concatenate("y"));
+		if "abc" == ("ab" ++ "c") {
+			do core:Out.println!("good1");
+		}
+		if ("ab" ++ "c") == "ab" {
+			do core:Out.println!("bad1");
+		}
+	}
+}

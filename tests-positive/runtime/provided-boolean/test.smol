@@ -1,0 +1,71 @@
+package test;
+
+import core;
+
+class Test {
+	static main!() Unit {
+		// Test and
+		if false.and(false) {
+			do core:Out.println!("bad1");
+		}
+		if false.and(true) {
+			do core:Out.println!("bad2");
+		}
+		if true.and(false) {
+			do core:Out.println!("bad3");
+		}
+		if true.and(true) {
+			do core:Out.println!("good1");
+		}
+		
+		// Test or
+		if false.or(false) {
+			do core:Out.println!("bad4");
+		}
+		if false.or(true) {
+			do core:Out.println!("good2");
+		}
+		if true.or(false) {
+			do core:Out.println!("good3");
+		}
+		if true.or(true) {
+			do core:Out.println!("good4");
+		}
+
+		// Test implies
+		if false.implies(false) {
+			do core:Out.println!("good5");
+		}
+		if false.implies(true) {
+			do core:Out.println!("good6");
+		}
+		if true.implies(false) {
+			do core:Out.println!("bad5");
+		}
+		if true.implies(true) {
+			do core:Out.println!("good7");
+		}
+
+		// Test not
+		if false.not() {
+			do core:Out.println!("good8");
+		}
+		if true.not() {
+			do core:Out.println!("bad6");
+		}
+
+		// Test eq
+		if false == false {
+			do core:Out.println!("good9");
+		}
+		if false == true {
+			do core:Out.println!("bad7");
+		}
+		if true == false {
+			do core:Out.println!("bad8");
+		}
+		if true == true {
+			do core:Out.println!("good10");
+		}
+	}
+}

@@ -508,6 +508,21 @@ local BUILTIN_DEFINITIONS = freeze {
 		tag = "builtin",
 		signatures = {
 			{
+				name = "eq",
+				parameters = {{location = BUILTIN_LOC, name = "other", type = BOOLEAN_TYPE}},
+				returnTypes = {BOOLEAN_TYPE},
+				modifier = "method",
+				container = "Boolean",
+				foreign = true,
+				bang = false,
+				ensuresAST = {},
+				requiresAST = {},
+				logic = {
+					[true] = {{true, true}, {false, false}},
+					[false] = {{true, false}, {false, true}},
+				},
+			},
+			{
 				name = "and",
 				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
 				returnTypes = {BOOLEAN_TYPE},
@@ -1046,7 +1061,6 @@ function compileExpression(pExpression, scope, environment)
 				end
 			end
 		end
-
 
 		local block = buildBlock(table.concatted(
 			evaluation, {localSt(out), newSt}
