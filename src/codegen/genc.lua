@@ -326,7 +326,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		assert(cT:sub(-1) == "*")
 		cT = cT:sub(1, -2)
 		emit(name .. " = ALLOCATE(" .. cT .. ");")
-		
+
 		for key, value in pairs(statement.fields) do
 			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
 		end
@@ -546,7 +546,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 			local id = tostring(i)
 			comment("case ? " .. case.variant)
 			emit("if (" .. localName(statement.base.name) .. "->" .. TAG_FIELD .. " == " .. id .. ") {")
-			generateStatement(case.statement, indentedEmitter(emit), structScope, semantics, demandTuple)	
+			generateStatement(case.statement, indentedEmitter(emit), structScope, semantics, demandTuple)
 			emit("}")
 		end
 		comment("}")
@@ -563,7 +563,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		comment("verify ???")
 		return
 	end
-	
+
 	comment(statement.tag .. " ????")
 	print("unknown statement tag `" .. statement.tag .. "`")
 end
@@ -572,7 +572,7 @@ end
 local function cEqMethodName(kind, name)
 	assert(kind == "class" or kind == "union")
 	assertis(name, "string")
-	
+
 	return "smol_eq_" .. kind .. "_" .. name:gsub(":", "_")
 end
 
@@ -1211,7 +1211,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_set(smol_class_core_
 
 	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
 	out->foreign = prime;
-	
+
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 
@@ -1230,7 +1230,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_append(smol_class_co
 
 	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
 	out->foreign = prime;
-	
+
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 
@@ -1246,7 +1246,7 @@ tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_pop(smol_class_core_
 
 	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
 	out->foreign = prime;
-	
+
 	return (tuple1_1_smol_class_core_Array_T_ptr){out};
 }
 

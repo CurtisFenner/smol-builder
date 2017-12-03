@@ -122,7 +122,7 @@ local assertionRecursionMap = freeze {
 local function makeEqSignature(t)
 	assertis(t, "Type+")
 	local unknown = freeze {begins = "???", ends = "???"}
-	
+
 	local eqSignature = freeze {
 		name = "eq",
 		parameters = {
@@ -302,7 +302,7 @@ end
 local function tupleAccess(value, index)
 	assertis(value, "Assertion")
 	assertis(index, "integer")
-	
+
 	return freeze {
 		tag = "tuple",
 		index = index,
@@ -397,7 +397,7 @@ local function assignRaw(scope, destination, value)
 	assertis(scope, listType "Action")
 	assertis(destination, "VariableIR")
 	assertis(value, "Assertion")
-	
+
 	table.insert(scope, freeze {
 		tag = "assignment",
 		destination = destination,
@@ -448,7 +448,7 @@ local function getPredicateSet(scope, assignments, path)
 		definition = "VariableIR",
 	}))
 	assertis(path, "string")
-	
+
 	-- TODO: come up with something that deals with loops
 	local predicates = {}
 
@@ -471,7 +471,7 @@ local function getPredicateSet(scope, assignments, path)
 
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
 			local newV = variableAssertion(table.with(action.destination, "name", newID))
-			
+
 			local p = eqAssertion(inNow(action.value), newV, t)
 			assertis(p, "Assertion")
 			table.insert(predicates, p)
@@ -516,7 +516,7 @@ local function getPredicateSet(scope, assignments, path)
 						-- Given it old meaning when condition does not hold
 						local isOld = eqAssertion(merged, oldValue.value, oldValue.definition.type)
 						table.insert(predicates, impliesAssertion(notCondition, isOld))
-						
+
 						-- Give it new meaning when condition does hold
 						local isNew = eqAssertion(merged, newValue.value, newValue.definition.type)
 						table.insert(predicates, impliesAssertion(condition, isNew))
@@ -533,7 +533,7 @@ end
 
 -- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
 local function mustModel(scope, target)
-	profile.open "translating-in-scope"	
+	profile.open "translating-in-scope"
 	local predicates, inNow = getPredicateSet(scope, {}, "")
 	profile.close "translating-in-scope"
 
@@ -604,7 +604,7 @@ end
 -- RETURNS an Assertion
 local function fieldAssertion(scope, statement)
 	assertis(statement, "FieldSt")
-	
+
 	return freeze {
 		tag = "field",
 		fieldName = statement.name,
@@ -693,7 +693,7 @@ local function verifyStatement(statement, scope, semantics)
 				checkLocation = statement.checkLocation,
 			}
 		end
-	
+
 		return
 	elseif statement.tag == "assume" then
 		verifyStatement(statement.body, scope, semantics)
