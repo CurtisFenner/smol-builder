@@ -1,0 +1,36 @@
+package test;
+
+union AB {
+	var a Unit;
+	var b Unit;
+
+	static makeA() AB {
+		return new(a = unit);
+	}
+
+	static makeB() AB {
+		return new(b = unit);
+	}
+}
+
+class Test {
+
+	static foo(u Int, opaque AB) Unit {
+		var x Int = u;
+
+		match opaque {
+			case a a {
+				x = 0;
+			}
+			case b b {
+				x = 1;
+			}
+		}
+
+		assert (x == 0).or(x == 1);
+	}
+
+	static main() Unit {
+
+	}
+}

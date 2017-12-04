@@ -47,8 +47,10 @@ local function showAssertion(assertion)
 		return "(isa " .. assertion.variant .. " " .. showAssertion(assertion.base) .. ")"
 	elseif assertion.tag == "string" then
 		return "(string " .. string.format("%q", assertion.value) .. ")"
+	elseif assertion.tag == "variant" then
+		return "(variant " .. string.format("%q", assertion.variant) .. " " .. showAssertion(assertion.base) .. ")"
 	end
-	error("unknown assertion tag `" .. show(assertion) .. "` in showAssertion")
+	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
 showAssertion = memoized(1, showAssertion)
 

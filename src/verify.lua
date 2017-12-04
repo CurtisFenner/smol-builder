@@ -800,18 +800,37 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, variableAssertion(statement.source))
 		return
 	elseif statement.tag == "match" then
+		local branches = {}
+	
 		-- Check each case
+		assert(#statement.cases > 0)
 		for _, case in ipairs(statement.cases) do
-			beginSubscope(scope)
-			-- Add variant predicate
-			addPredicate(scope, freeze {
+			local subscope = scopeCopy(scope)
+
+			local condition = freeze {
 				tag = "isa", base = variableAssertion(statement.base), variant = case.variant
-			})
-			verifyStatement(case.statement, scope, semantics)
-			endSubscope(scope)
+			}
+
+			-- Add variant predicate
+			addPredicate(subscope, condition)
+			verifyStatement(case.statement, subscope, semantics)
+			
+			if case.statement.returns ~= "yes" then
+				table.insert(branches, {
+					scope = subscope,
+					condition = condition,
+				})
+			end
 		end
 
-		-- TODO: incorporate intersection (see if also)
+		if #branches == 0 then
+			-- The code after this is unreachable, so the scope is irrelevant
+			assert(statement.returns == "yes")
+			return
+		end
+
+		-- Learn the disjunction of the new statements
+		addMerge(scope, branches)
 		return
 	elseif statement.tag == "if" then
 		-- Evaluate the then body with flow
