@@ -2957,6 +2957,7 @@ local function semanticsSmol(sources, main)
 				assertis(definition, "UnionIR")
 
 				-- Check that the fields exist and are distinct
+				local unionSubstituter = getSubstituterFromConcreteType(base.type, allDefinitions)
 				local cases = {}
 				for _, case in ipairs(pStatement.cases) do
 					-- Create a subscope
@@ -2994,7 +2995,7 @@ local function semanticsSmol(sources, main)
 					-- Add the variable to the current scope
 					local variable = {
 						name = case.variable,
-						type = field.type,
+						type = unionSubstituter(field.type),
 						location = case.location,
 					}
 

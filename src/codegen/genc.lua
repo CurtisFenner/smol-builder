@@ -539,6 +539,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		return
 	elseif statement.tag == "match" then
 		comment("match " .. statement.base.name .. " {")
+		assert(#statement.cases >= 1)
 		for i, case in ipairs(statement.cases) do
 			if i > 1 then
 				emit("else")
@@ -549,6 +550,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 			generateStatement(case.statement, indentedEmitter(emit), structScope, semantics, demandTuple)
 			emit("}")
 		end
+		emit("else { assert(0); }")
 		comment("}")
 		return
 	elseif statement.tag == "variant" then

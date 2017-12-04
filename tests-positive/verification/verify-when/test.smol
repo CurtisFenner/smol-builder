@@ -1,0 +1,25 @@
+package test;
+import core;
+
+class Test {
+	static get(option core:Option[Int]) Int
+	requires option is some {
+		match option {
+			case some some {
+				return some;
+			}
+		}
+	}
+
+	static boxPositive(n Int) core:Option[Int]
+	ensures Test.get(return) == n when return is some {
+		if 0 < n {
+			return core:Option[Int].makeSome(n);
+		}
+		return core:Option[Int].makeNone();
+	}
+
+	static main() Unit {
+
+	}
+}
