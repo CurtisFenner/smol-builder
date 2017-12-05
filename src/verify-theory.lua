@@ -83,6 +83,8 @@ local function scanned(self, children)
 	return out
 end
 
+-- Canonicalizes objects so that syntactically equivalent subtrees become the
+-- same reference
 function m_scan(self, object)
 	assertis(object, "Assertion")
 
@@ -429,23 +431,12 @@ function theory:isSatisfiable(modelInput)
 				return true
 			end
 		end
-		
+
 		for given, t in pairs(simple) do
 			assert(rootRepresentative(given))
 			local eq = areEqual(given, assertion)
 			if t == truth and eq then
 				return true
-			end
-		end
-
-		if assertion.tag == "method" and assertion.methodName == "eq" then
-			assert(#assertion.arguments == 1)
-			local left = rootRepresentative(assertion.base)
-			local right = rootRepresentative(assertion.arguments[1])
-			if truth then
-				return areEqual(left, right)
-			else
-				return negated[left] and negated[left][right]
 			end
 		end
 		return false
@@ -461,6 +452,15 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	profile.close "#immediately?"
+
+	-- Show everything that's equal
+	--for key1 in pairs(representative) do
+	--	for key2 in pairs(representative) do
+	--		if areEqual(key1, key2) and key1 ~= key2 then
+	--			print("", showAssertion(key1) .. "    ====    " .. showAssertion(key2))
+	--		end
+	--	end
+	--end
 
 	return true
 end

@@ -848,16 +848,19 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 	assert(#out == 1)
 	assert(areTypesEqual(out[1].type, BOOLEAN_TYPE))
 
-	local out = freeze {
+	local verify = freeze {
 		tag = "verify",
 		variable = out[1],
-		body = evaluation,
 		returns = "no",
 		reason = context,
 		conditionLocation = assertion.condition.location,
 		checkLocation = checkLocation,
 	}
-	assertis(out, "VerifySt")
+	local out = buildBlock {
+		evaluation,
+		verify,
+	}
+	assertis(out, "StatementIR")
 
 	-- Add a guard
 	if assertion.when then
@@ -867,7 +870,6 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 
 		local assume = freeze {
 			tag = "assume",
-			body = buildBlock {},
 			variable = cVars[1],
 			location = cVars[1].location,
 			returns = "no",
@@ -886,7 +888,7 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 		})
 	end
 
-	return out
+	return buildProof(out)
 end
 
 -- RETURNS a StatementIR
@@ -925,12 +927,16 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 	assert(#out == 1)
 	assert(areTypesEqual(out[1].type, BOOLEAN_TYPE))
 
-	local out = freeze {
+	local assume = freeze {
 		tag = "assume",
-		body = evaluation,
 		variable = out[1],
 		returns = "no",
 		location = assertion.condition.location,
+	}
+
+	local out = buildBlock {
+		evaluation,
+		assume,
 	}
 	assertis(out, "StatementIR")
 
@@ -942,7 +948,6 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 
 		local assume = freeze {
 			tag = "assume",
-			body = buildBlock {},
 			variable = cVars[1],
 			location = cVars[1].location,
 			returns = "no",
@@ -961,7 +966,7 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 		})
 	end
 
-	return out
+	return buildProof(out)
 end
 
 -- RETURNS StatementIR, [Variable]
@@ -3216,7 +3221,6 @@ local function semanticsSmol(sources, main)
 
 				local verify = {
 					tag = "verify",
-					body = buildBlock {},
 					variable = valueOut[1],
 					checkLocation = pStatement.location,
 					conditionLocation = pStatement.location,
@@ -3227,18 +3231,17 @@ local function semanticsSmol(sources, main)
 
 				local assume = {
 					tag = "assume",
-					body = buildBlock {},
 					variable = valueOut[1],
 					returns = "no",
 					location = pStatement.location,
 				}
 				assertis(assume, "AssumeSt")
 
-				return buildBlock {
+				return buildProof(buildBlock {
 					valueEvaluation,
 					verify,
 					assume,
-				}
+				})
 			end
 			error("TODO: compileStatement")
 		end

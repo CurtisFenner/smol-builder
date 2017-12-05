@@ -274,20 +274,29 @@ local function showStatement(statement, indent)
 	elseif statement.tag == "proof" then
 		return pre .. " {\n" .. showStatement(statement.body, indent .. "\t") .. "\n" .. indent .. "}"
 	elseif statement.tag == "assume" then
-		return pre .. " " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
+		return pre .. " " .. statement.variable.name
 	elseif statement.tag == "verify" then
 		local x = {}
 		table.insert(x, pre)
 		table.insert(x, " ")
 		table.insert(x, statement.variable.name)
-		table.insert(x, " in // ")
+		table.insert(x, " // ")
 		table.insert(x, show(statement.reason))
-		table.insert(x, "\n")
-		return table.concat(x) .. showStatement(statement.body, "\t" .. indent)
+		return table.concat(x)
 	elseif statement.tag == "local" then
 		return pre .. " " .. statement.variable.name .. " " .. showType(statement.variable.type)
 	elseif statement.tag == "assign" then
 		return pre .. " " .. statement.destination.name .. " := " .. statement.source.name
+	elseif statement.tag == "isa" then
+		local x = {
+			pre .. " ",
+			statement.destination.name,
+			" := ",
+			statement.base.name,
+			" is ",
+			statement.variant,
+		}
+		return table.concat(x)
 	elseif statement.tag == "method-call" then
 		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
@@ -489,15 +498,20 @@ local function getPredicateSet(scope, assignments, path)
 			local t = action.destination.type
 
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
+				.. "'" .. verifyTheory:canonKey(action.value):gsub("[^a-zA-Z0-9]+", "_")
 			local newV = variableAssertion(table.with(action.destination, "name", newID))
-
+			
+			-- Record the value of this new assignment at this time
 			local p = eqAssertion(inNow(action.value), newV, t)
-			assertis(p, "Assertion")
-			table.insert(predicates, p)
+
+			-- Update the mapping to point to the new variable
 			assignments[action.destination.name] = freeze {
 				value = newV,
 				definition = action.destination,
 			}
+
+			assertis(p, "Assertion")
+			table.insert(predicates, p)
 		elseif action.tag == "predicate" then
 			table.insert(predicates, inNow(action.value))
 		elseif action.tag == "branch" then
@@ -696,11 +710,7 @@ local function verifyStatement(statement, scope, semantics)
 		end
 		return
 	elseif statement.tag == "verify" then
-		profile.open "verify VerifySt's body"
-		verifyStatement(statement.body, scope, semantics)
-		profile.close"verify VerifySt's body"
-
-		-- Check
+		-- Check that this variable is true in the current scope
 		local models = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
 			--print("$ !!!", models)
@@ -715,8 +725,7 @@ local function verifyStatement(statement, scope, semantics)
 
 		return
 	elseif statement.tag == "assume" then
-		verifyStatement(statement.body, scope, semantics)
-
+		-- Make this expression become true in the current scope
 		addPredicate(scope, variableAssertion(statement.variable))
 
 		return
@@ -852,18 +861,19 @@ local function verifyStatement(statement, scope, semantics)
 		addMerge(scope, branches)
 		return
 	elseif statement.tag == "if" then
-		-- Evaluate the then body with flow
+		local conditionAssertion = variableAssertion(statement.condition)
+
+		-- Evaluate the then body with condition given
 		local thenScope = scopeCopy(scope)
-		assignRaw(thenScope, statement.condition, valueBoolean(true))
+		addPredicate(thenScope, conditionAssertion)
 		verifyStatement(statement.bodyThen, thenScope, semantics)
 
-		-- Evaluate the else body with flow
+		-- Evaluate the else body with negation of the condtion given
 		local elseScope = scopeCopy(scope)
-		assignRaw(elseScope, statement.condition, valueBoolean(false))
+		addPredicate(elseScope, notAssertion(conditionAssertion))
 		verifyStatement(statement.bodyElse, elseScope, semantics)
 
 		-- Learn the disjunction of new statements
-		local conditionAssertion = variableAssertion(statement.condition)
 		local branches = {}
 		if statement.bodyThen.returns ~= "yes" then
 			local newThen = scopeAdditional(scope, thenScope)

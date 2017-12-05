@@ -559,10 +559,11 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("\t" .. localName(statement.base.name) .. "->" .. unionFieldName(statement.variant) .. ";")
 		return
 	elseif statement.tag == "assume" then
-		comment("assume ???")
-		return
+		error "assume statements should be guarded by proof"
 	elseif statement.tag == "verify" then
-		comment("verify ???")
+		error "verify statements should be guarded by proof"
+	elseif statement.tag == "proof" then
+		comment("proof")
 		return
 	end
 
