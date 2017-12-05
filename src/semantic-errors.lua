@@ -169,9 +169,19 @@ function Report.TYPES_DONT_MATCH(p)
 	assertis(p.expectedType, "string")
 	assertis(p.givenType, "string")
 	assertis(p.location, "Location")
+	assertis(p.purpose, "string")
 	quit("The ", p.purpose, " expects `", p.expectedType, "` as defined ",
 		p.expectedLocation,
 		"\nHowever, you pass a `", p.givenType, "` ", p.location)
+end
+
+function Report.EXPECTED_DIFFERENT_TYPE(p)
+	assertis(p.expectedType, "string")
+	assertis(p.givenType, "string")
+	assertis(p.location, "Location")
+	assertis(p.purpose, "string")
+	quit("The ", p.purpose, " expects `", p.expectedType, "` but was given `",
+		p.givenType, "` ", p.location)
 end
 
 function Report.EQ_TYPE_MISMATCH(p)

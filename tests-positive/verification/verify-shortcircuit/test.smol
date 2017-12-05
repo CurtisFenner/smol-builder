@@ -12,7 +12,7 @@ class Foo {
 	}
 
 	static skip!(x Foo) Unit
-	ensures x.a().implies(Foo.short(x).not()) {
+	ensures Foo.short(x).not() when x.a() {
 
 	}
 

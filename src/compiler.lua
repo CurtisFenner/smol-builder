@@ -93,7 +93,7 @@ function showLocation(location)
 		end
 	end
 	local sourceContext = table.concat(context, "\n")
-	
+
 	local location = "at " .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
 		.. "\n" .. sourceContext .. "\n"
 
@@ -197,7 +197,7 @@ local function lexSmol(source, filename)
 		["assert"] = true,
 		["ensures"] = true,
 		["requires"] = true,
-		
+
 		-- built-in types
 		["Boolean"] = true,
 		["Int"] = true,
@@ -549,9 +549,10 @@ local function parseSmol(tokens)
 	local K_UNION = LEXEME "union"
 	local K_VAR = LEXEME "var"
 
-	local K_REQUIRES = LEXEME "requires"
 	local K_ASSERT = LEXEME "assert"
 	local K_ENSURES = LEXEME "ensures"
+	local K_REQUIRES = LEXEME "requires"
+	local K_WHEN = LEXEME "when"
 
 	-- Built-in types
 	local K_STRING = LEXEME "String"
@@ -814,12 +815,28 @@ local function parseSmol(tokens)
 		["requires"] = parser.composite {
 			tag = "requires",
 			{"_", K_REQUIRES},
-			{"#expression", parser.named "expression", "an expression"},
+			{"condition", parser.named "expression", "an expression"},
+			{
+				"when",
+				parser.optional(parser.composite {
+					tag = "when",
+					{"_", K_WHEN},
+					{"#when", parser.named "expression", "an expression"},
+				}),
+			},
 		},
 		["ensures"] = parser.composite {
 			tag = "ensures",
 			{"_", K_ENSURES},
-			{"#expression", parser.named "expression", "an expression"},
+			{"condition", parser.named "expression", "an expression"},
+			{
+				"when",
+				parser.optional(parser.composite {
+					tag = "when",
+					{"_", K_WHEN},
+					{"#when", parser.named "expression", "an expression"},
+				}),
+			},
 		},
 
 		["method-modifier"] = parser.choice {
@@ -1125,7 +1142,7 @@ REGISTER_TYPE("UnionIR", recordType {
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
 	implements = listType "InterfaceType+",
-	signatures = listType "Signature",	
+	signatures = listType "Signature",
 	constraints = mapType("string", "InterfaceType+"),
 })
 
@@ -1211,6 +1228,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	-- Verification
 	"AssumeSt",
 	"VerifySt",
+	"ProofSt",
 
 	-- Nothing
 	"NothingSt"
@@ -1222,7 +1240,7 @@ REGISTER_TYPE("AbstractStatementIR", recordType {
 })
 
 EXTEND_TYPE("AssumeSt", "AbstractStatementIR", recordType {
-	tag = constantType "assume", 
+	tag = constantType "assume",
 	body = "StatementIR",
 	variable = "VariableIR",
 	location = "Location",
@@ -1237,6 +1255,13 @@ EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
 	reason = "string",
 })
 
+-- Represents proof-only code (a block, but without codegen)
+EXTEND_TYPE("ProofSt", "AbstractStatementIR", recordType {
+	tag = constantType "proof",
+	body = "StatementIR",
+	returns = constantType "no",
+})
+
 EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {
 	tag = constantType "block",
 	statements = listType "StatementIR",
@@ -1246,18 +1271,18 @@ EXTEND_TYPE("StringLoadSt", "AbstractStatementIR", recordType {
 	tag = constantType "string",
 	destination = "VariableIR",
 	string = "string",
-	returns = constantType "no",	
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("LocalSt", "AbstractStatementIR", recordType {
 	tag = constantType "local",
 	variable = "VariableIR",
-	returns = constantType "no",	
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("NothingSt", "AbstractStatementIR", recordType {
 	tag = constantType "nothing",
-	returns = constantType "no",	
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("AssignSt", "AbstractStatementIR", recordType {
@@ -1583,7 +1608,7 @@ for _, sourceFile in ipairs(sourceFiles) do
 	end
 	assert(contents)
 	profile.close("reading")
-	
+
 	-- Lex contents
 	profile.open("lexing")
 	local tokens = lexSmol(contents, sourceFile.short)

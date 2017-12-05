@@ -76,6 +76,18 @@ local function buildBlock(statements)
 	}
 end
 
+-- RETURNS a StatementIR representing the same execution, but to be ignored by
+-- codegeneration
+local function buildProof(statement)
+	assertis(statement, "StatementIR")
+
+	return freeze {
+		tag = "proof",
+		body = statement,
+		returns = "no",
+	}
+end
+
 -- RETURNS a LocalSt
 local function localSt(variable)
 	assertis(variable, "VariableIR")
@@ -795,8 +807,12 @@ end
 local compileExpression
 
 -- RETURNS a StatementIR
-local function generatePreconditionVerify(expression, method, invocation, environment, context, checkLocation)
-	assertis(expression, "any")
+-- REQUIRES assertion has already been checked for type and value count
+local function generatePreconditionVerify(assertion, method, invocation, environment, context, checkLocation)
+	assertis(assertion, recordType {
+		when = choiceType(constantType(false), "object"),
+		condition = "object",
+	})
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
 		arguments = listType "VariableIR",
@@ -827,16 +843,10 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 	end
 	assertis(scope, listType(mapType("string", "VariableIR")))
 
-	local evaluation, out = compileExpression(expression, scope, subEnvironment)
-	if #out ~= 1 or not areTypesEqual(out[1].type, BOOLEAN_TYPE) then
-		-- TODO: this is the wrong error message for wrong count
-		Report.TYPES_DONT_MATCH {
-			purpose = context,
-			expectedType = showType(BOOLEAN_TYPE),
-			givenType = showType(out[1].type),
-			location = out[1].location,
-		}
-	end
+	-- Evaluate the condition
+	local evaluation, out = compileExpression(assertion.condition, scope, subEnvironment)
+	assert(#out == 1)
+	assert(areTypesEqual(out[1].type, BOOLEAN_TYPE))
 
 	local out = freeze {
 		tag = "verify",
@@ -844,16 +854,48 @@ local function generatePreconditionVerify(expression, method, invocation, enviro
 		body = evaluation,
 		returns = "no",
 		reason = context,
-		conditionLocation = expression.location,
+		conditionLocation = assertion.condition.location,
 		checkLocation = checkLocation,
 	}
 	assertis(out, "VerifySt")
+
+	-- Add a guard
+	if assertion.when then
+		local cEval, cVars = compileExpression(assertion.when, scope, subEnvironment)
+		assert(#cVars == 1)
+		assert(areTypesEqual(cVars[1].type, BOOLEAN_TYPE))
+
+		local assume = freeze {
+			tag = "assume",
+			body = buildBlock {},
+			variable = cVars[1],
+			location = cVars[1].location,
+			returns = "no",
+		}
+
+		local guarded = freeze {
+			tag = "if",
+			condition = cVars[1],
+			bodyThen = buildBlock {assume, out},
+			bodyElse = buildBlock {},
+			returns = "no",
+		}
+		return buildProof(buildBlock {
+			cEval,
+			guarded,
+		})
+	end
+
 	return out
 end
 
 -- RETURNS a StatementIR
-local function generatePostconditionAssume(expression, method, invocation, environment, returnOuts)
-	assertis(expression, "any")
+-- REQUIRES assertion has already been checked for type and value count
+local function generatePostconditionAssume(assertion, method, invocation, environment, returnOuts)
+	assertis(assertion, recordType {
+		when = choiceType(constantType(false), "object"),
+		condition = "object",
+	})
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
 		arguments = listType "VariableIR",
@@ -879,24 +921,47 @@ local function generatePostconditionAssume(expression, method, invocation, envir
 	end
 	assertis(scope, listType(mapType("string", "VariableIR")))
 
-	local evaluation, out = compileExpression(expression, scope, subEnvironment)
-	if #out ~= 1 or not areTypesEqual(out[1].type, BOOLEAN_TYPE) then
-		-- TODO: this is the wrong error message for wrong count
-		Report.TYPES_DONT_MATCH {
-			purpose = "assertion expression in `ensures`",
-			expectedType = showType(BOOLEAN_TYPE),
-			givenType = showType(out[1].type),
-			location = out[1].location,
-		}
-	end
+	local evaluation, out = compileExpression(assertion.condition, scope, subEnvironment)
+	assert(#out == 1)
+	assert(areTypesEqual(out[1].type, BOOLEAN_TYPE))
 
-	return {
+	local out = freeze {
 		tag = "assume",
 		body = evaluation,
 		variable = out[1],
 		returns = "no",
-		location = expression.location,
+		location = assertion.condition.location,
 	}
+	assertis(out, "StatementIR")
+
+	-- Add a guard
+	if assertion.when then
+		local cEval, cVars = compileExpression(assertion.when, scope, subEnvironment)
+		assert(#cVars == 1)
+		assert(areTypesEqual(cVars[1].type, BOOLEAN_TYPE))
+
+		local assume = freeze {
+			tag = "assume",
+			body = buildBlock {},
+			variable = cVars[1],
+			location = cVars[1].location,
+			returns = "no",
+		}
+
+		local guarded = freeze {
+			tag = "if",
+			condition = cVars[1],
+			bodyThen = buildBlock {assume, out},
+			bodyElse = buildBlock {},
+			returns = "no",
+		}
+		return buildProof(buildBlock {
+			cEval,
+			guarded,
+		})
+	end
+
+	return out
 end
 
 -- RETURNS StatementIR, [Variable]
@@ -2512,7 +2577,7 @@ local function semanticsSmol(sources, main)
 	profile.close "check prototypes"
 	profile.open "check ensures"
 
-	-- (4.5) Verify all ensures/requires
+	-- (4.5) Verify the type of all ensures/requires
 	for _, definition in ipairs(allDefinitions) do
 		if definition.tag == "class" or definition.tag == "union" then
 			for _, signature in ipairs(definition.signatures) do
@@ -2551,31 +2616,40 @@ local function semanticsSmol(sources, main)
 					returnOuts = returnOuts,
 				}
 
-				-- Check each requires
-				for _, requires in ipairs(signature.requiresAST) do
-					local _, outs = compileExpression(requires, scope, environment)
+				local function checkBoolean(e, purpose)
+					assertis(purpose, "string")
+
+					local _, outs = compileExpression(e, scope, environment)
 					if #outs ~= 1 then
 						Report.WRONG_VALUE_COUNT {
-							-- TODO
+							purpose = purpose,
+							expectedCount = 1,
+							givenCount = #outs,
+							location = e.location,
 						}
 					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
-						Report.TYPES_DONT_MATCH {
-							-- TODO
+						Report.EXPECTED_DIFFERENT_TYPE {
+							expectedType = "Boolean",
+							givenType = showType(outs[1].type),
+							location = e.location,
+							purpose = purpose,
 						}
 					end
 				end
 
-				-- Check each ensures
+				-- Check that each requires has type Boolean
+				for _, requires in ipairs(signature.requiresAST) do
+					checkBoolean(requires.condition, "requires condition")
+					if requires.when then
+						checkBoolean(requires.when, "requires when condition")
+					end
+				end
+
+				-- Check that each ensures has type Boolean
 				for _, ensures in ipairs(signature.ensuresAST) do
-					local _, outs = compileExpression(ensures, scope, environment)
-					if #outs ~= 1 then
-						Report.WRONG_VALUE_COUNT {
-							-- TODO
-						}
-					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
-						Report.TYPES_DONT_MATCH {
-							-- TODO
-						}
+					checkBoolean(ensures.condition, "ensures condition")
+					if ensures.when then
+						checkBoolean(ensures.when, "ensures when condition")
 					end
 				end
 			end
@@ -2632,6 +2706,7 @@ local function semanticsSmol(sources, main)
 			assertis(location, "Location")
 
 			local sequence = {}
+
 			-- Check that all ensured statements are true at this point
 			for i, ensures in ipairs(containingSignature.ensuresAST) do
 				local arguments = {}
@@ -2653,7 +2728,7 @@ local function semanticsSmol(sources, main)
 					location
 				)
 
-				assertis(verify, "VerifySt")
+				assertis(verify, "StatementIR")
 				table.insert(sequence, verify)
 			end
 			return buildBlock(sequence)
@@ -2833,11 +2908,10 @@ local function semanticsSmol(sources, main)
 						location = pStatement.location,
 					}
 				elseif not areTypesEqual(out[1].type, UNIT_TYPE) then
-					Report.TYPES_DONT_MATCH {
+					Report.EXPECTED_DIFFERENT_TYPE {
 						purpose = "do-statement expression",
 						expectedType = "Unit",
 						givenType = showType(out[1].type),
-						expectedLocation = pStatement.expression.location,
 						location = pStatement.expression.location,
 					}
 				end
@@ -2854,10 +2928,9 @@ local function semanticsSmol(sources, main)
 						location = pStatement.condition.location,
 					}
 				elseif not areTypesEqual(conditionOut[1].type, BOOLEAN_TYPE) then
-					Report.TYPES_DONT_MATCH {
+					Report.EXPECTED_DIFFERENT_TYPE {
 						purpose = "if-statement condition",
 						expectedType = "Boolean",
-						expectedLocation = pStatement.condition.location,
 						givenType = showType(conditionOut[1].type),
 						location = pStatement.condition.location,
 					}
@@ -2886,10 +2959,9 @@ local function semanticsSmol(sources, main)
 							location = pStatement.elseifs[i].location,
 						}
 					elseif not areTypesEqual(elseIfConditionOut[1].type, BOOLEAN_TYPE) then
-						Report.TYPES_DONT_MATCH {
+						Report.EXPECTED_DIFFERENT_TYPE {
 							purpose = "else-if-statement condition",
 							expectedType = "Boolean",
-							expectedLocation = pStatement.elseifs[i].condition.location,
 							givenType = showType(elseIfConditionOut[1].type),
 							location = pStatement.elseifs[i].condition.location,
 						}

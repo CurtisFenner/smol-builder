@@ -255,7 +255,7 @@ end
 local function showStatement(statement, indent)
 	indent = (indent or "")
 	local color = ansi.blue
-	if statement.tag == "verify" or statement.tag == "assume" then
+	if statement.tag == "verify" or statement.tag == "assume" or statement.tag == "proof" then
 		color = ansi.red
 	elseif statement.tag == "block" then
 		color = ansi.gray
@@ -271,10 +271,19 @@ local function showStatement(statement, indent)
 			out = out .. showStatement(element, indent .. "\t") .. "\n"
 		end
 		return out .. indent .. "}"
+	elseif statement.tag == "proof" then
+		return pre .. " {\n" .. showStatement(statement.body, indent .. "\t") .. "\n" .. indent .. "}"
 	elseif statement.tag == "assume" then
 		return pre .. " " .. statement.variable.name .. " in\n" .. showStatement(statement.body, "\t" .. indent)
 	elseif statement.tag == "verify" then
-		return pre .. " " .. statement.variable.name .. " in // " .. show(statement.reason) .. "\n" .. showStatement(statement.body, "\t" .. indent)
+		local x = {}
+		table.insert(x, pre)
+		table.insert(x, " ")
+		table.insert(x, statement.variable.name)
+		table.insert(x, " in // ")
+		table.insert(x, show(statement.reason))
+		table.insert(x, "\n")
+		return table.concat(x) .. showStatement(statement.body, "\t" .. indent)
 	elseif statement.tag == "local" then
 		return pre .. " " .. statement.variable.name .. " " .. showType(statement.variable.type)
 	elseif statement.tag == "assign" then
@@ -293,6 +302,16 @@ local function showStatement(statement, indent)
 			table.insert(out, s.name)
 		end
 		return pre .. " " .. table.concat(out, ", ")
+	elseif statement.tag == "if" then
+		local x = {}
+		table.insert(x, pre)
+		table.insert(x, " ")
+		table.insert(x, statement.condition.name)
+		table.insert(x, " then\n")
+		table.insert(x, showStatement(statement.bodyThen, indent .. "\t"))
+		table.insert(x, "\n" .. indent .. "else\n")
+		table.insert(x, showStatement(statement.bodyElse, indent .. "\t"))
+		return table.concat(x, "")
 	else
 		return pre .. " <?>"
 	end
@@ -870,6 +889,9 @@ local function verifyStatement(statement, scope, semantics)
 			base = variableAssertion(statement.base),
 			variant = statement.variant,
 		})
+		return
+	elseif statement.tag == "proof" then
+		verifyStatement(statement.body, scope, semantics)
 		return
 	end
 
