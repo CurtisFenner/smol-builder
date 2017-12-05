@@ -98,7 +98,7 @@ REGISTER_TYPE("Assertion", choiceType(
 	},
 	recordType {
 		tag = constantType "variant",
-		variant = "string",
+		variantName = "string",
 		base = "Assertion",
 	}
 ))
@@ -651,7 +651,7 @@ local function variantAssertion(scope, statement)
 
 	return freeze {
 		tag = "variant",
-		variant = statement.variant,
+		variantName = statement.variant,
 		base = variableAssertion(statement.base),
 	}
 end
@@ -815,14 +815,21 @@ local function verifyStatement(statement, scope, semantics)
 
 		return
 	elseif statement.tag == "new-union" then
-		-- TODO
+		-- Record the tag
 		addPredicate(scope, freeze {
 			tag = "isa",
 			variant = statement.field,
 			base = variableAssertion(statement.destination),
 		})
 
-		-- TODO: add field information? so that matches get same value put in
+		-- Record the variant contents
+		local extract = freeze {
+			tag = "variant",
+			variantName = statement.field,
+			base = variableAssertion(statement.destination),
+		}
+		local right = variableAssertion(statement.value)
+		addPredicate(scope, eqAssertion(extract, right, statement.value.type))
 		return
 	elseif statement.tag == "assign" then
 		assignRaw(scope, statement.destination, variableAssertion(statement.source))

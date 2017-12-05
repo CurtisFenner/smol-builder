@@ -48,7 +48,7 @@ local function showAssertion(assertion)
 	elseif assertion.tag == "string" then
 		return "(string " .. string.format("%q", assertion.value) .. ")"
 	elseif assertion.tag == "variant" then
-		return "(variant " .. string.format("%q", assertion.variant) .. " " .. showAssertion(assertion.base) .. ")"
+		return "(variant " .. string.format("%q", assertion.variantName) .. " " .. showAssertion(assertion.base) .. ")"
 	end
 	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
@@ -132,6 +132,14 @@ function m_scan(self, object)
 			tag = "field",
 			base = self:scan(object.base),
 			fieldName = object.fieldName,
+		}
+		self.relevant[shown] = canon
+		ref(canon.base)
+	elseif object.tag == "variant" then
+		local canon = freeze {
+			tag = "variant",
+			base = self:scan(object.base),
+			variantName = object.variantName,
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)

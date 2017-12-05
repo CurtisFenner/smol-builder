@@ -1,0 +1,13 @@
+package test;
+
+class Test {
+
+	static f() Unit
+	ensures false when false {
+	
+	}
+
+	static main() Unit {
+		
+	}
+}

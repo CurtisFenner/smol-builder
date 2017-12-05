@@ -65,7 +65,8 @@ function Report.INTERFACE_REQUIRES_MEMBER(p)
 	quit("The class/union `", p.class, "` claims to implement interface",
 		" `", p.interface, "` ", p.implementsLocation,
 		"\nHowever, `" .. p.class .. "` does not implement the required",
-		" member `" .. p.memberName .. "` which is defined ",
+		" member `" .. p.memberName .. "` which is required by the interface `",
+		p.interface, "` ",
 		p.memberLocation)
 end
 
@@ -139,7 +140,7 @@ function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 	quit("The type `", p.container, "` requires its ",
 		string.ordinal(p.nth), " type-parameter to implement ", p.constraint,
 		" ", p.cause,
-		"\nHowever, the type `", p.type, "` does not implement `",
+		"\nHowever, the type `", p.type, "` does not implement the interface `",
 		p.constraint, "` ", p.location)
 end
 
@@ -199,7 +200,7 @@ end
 function Report.NO_SUCH_VARIANT(p)
 	quit("The type `", p.container, "` does not have a variant called `",
 		p.name, "`",
-		"\nHowever, you try to access `", p.name, "` ", p.location)
+		"\nHowever, you try to access variant `", p.name, "` ", p.location)
 end
 
 function Report.NO_SUCH_VARIABLE(p)

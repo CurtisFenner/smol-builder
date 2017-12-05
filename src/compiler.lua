@@ -1160,6 +1160,7 @@ REGISTER_TYPE("TypeParameterIR", recordType {
 	constraints = listType(recordType {
 		interface = "InterfaceType+",
 	}),
+	location = "Location",
 })
 
 REGISTER_TYPE("FunctionIR", recordType {
@@ -1515,7 +1516,7 @@ end
 table.insert(sourceFiles, {
 	path = "<compiler-core>",
 	short = "<compiler-core>",
-	contents = [[
+	contents = [==[
 package core;
 
 class Out {
@@ -1560,15 +1561,18 @@ interface Showable {
 	method show() String;
 }
 
-union Option[#T] {
+union Option[#T | #T is Eq[#T]] {
 	var some #T;
 	var none Unit;
 
-	static makeSome(value #T) Option[#T] {
+	static makeSome(value #T) Option[#T]
+	ensures return is some
+	ensures return.some == value {
 		return new(some = value);
 	}
 
-	static makeNone() Option[#T] {
+	static makeNone() Option[#T]
+	ensures return is none {
 		return new(none = unit);
 	}
 }
@@ -1584,7 +1588,23 @@ interface Eq[#T] {
 	method eq(other #T) Boolean;
 }
 
-]]
+class WInt is Eq[WInt] {
+	var value Int;
+
+	method get() Int ensures return == this.value{
+		return this.value;
+	}
+
+	static make(n Int) WInt ensures return.get() == n {
+		return new(value = n);
+	}
+
+	method eq(other WInt) Boolean {
+		return this.value == other.value;
+	}
+}
+
+]==]
 })
 
 profile.open "parsing"

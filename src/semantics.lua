@@ -655,6 +655,9 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 
 	local parameter, pi = table.findwith(generics, "name", genericType.name)
 	assert(parameter)
+	assertis(parameter, recordType {
+		location = "Location",
+	})
 
 	local matches = {}
 	for ci, constraint in ipairs(parameter.constraints) do
@@ -1761,39 +1764,104 @@ function compileExpression(pExpression, scope, environment)
 			}
 		end
 
+		local substituter = getSubstituterFromConcreteType(base.type, allDefinitions)
 		local definition = definitionFromType(base.type, allDefinitions)
-		if definition.tag ~= "class" then
+		if definition.tag == "class" then
+			-- Class field access
+			local field = table.findwith(definition.fields, "name", pExpression.field)
+			if not field then
+				Report.NO_SUCH_FIELD {
+					container = showType(base.type),
+					name = pExpression.field,
+					location = pExpression.location,
+				}
+			end
+
+			-- TODO: verify that access is to the current class
+
+			local result = {
+				type = substituter(field.type),
+				name = generateLocalID("field"),
+				location = pExpression.location,
+			}
+			local accessStatement = {
+				tag = "field",
+				name = pExpression.field,
+				base = base,
+				destination = result,
+				returns = "no",
+			}
+
+			local block = buildBlock {
+				baseEvaluation,
+				localSt(result),
+				accessStatement,
+			}
+			return block, freeze {result}
+		elseif definition.tag == "union" then
+			-- Union variant access
+			local field = table.findwith(definition.fields, "name", pExpression.field)
+			if not field then
+				Report.NO_SUCH_VARIANT {
+					container = definition.name,
+					name = pExpression.field,
+					location = pExpression.location,
+				}
+			end
+
+			local result = {
+				type = substituter(field.type),
+				name = generateLocalID("variant"),
+				location = pExpression.location,
+			}
+			local access = {
+				tag = "variant",
+				variant = pExpression.field,
+				base = base,
+				destination = result,
+				returns = "no",
+			}
+
+			local isVar = {
+				type = BOOLEAN_TYPE,
+				name = generateLocalID("variantis"),
+				location = pExpression.location,
+			}
+			local isStatement = {
+				tag = "isa",
+				base = base,
+				destination = isVar,
+				variant = pExpression.field,
+				returns = "no",
+			}
+			local verify = {
+				tag = "verify",
+				variable = isVar,
+				checkLocation = pExpression.location,
+				conditionLocation = pExpression.location,
+				reason = "base is a `" .. pExpression.field .. "`",
+				returns = "no",
+			}
+
+			local block = buildBlock {
+				baseEvaluation,
+				buildProof(buildBlock {
+					localSt(isVar),
+					isStatement,
+					verify,
+				}),
+				localSt(result),
+				access,
+			}
+
+			return block, freeze {result}
+		else
 			Report.TYPE_MUST_BE_CLASS {
 				purpose = "base of the `." .. pExpression.field .. "` field access",
 				givenType = showType(base.type),
 				location = pExpression.location,
 			}
 		end
-
-		local field = table.findwith(definition.fields, "name", pExpression.field)
-		if not field then
-			Report.NO_SUCH_FIELD {
-				container = showType(base.type),
-				name = pExpression.field,
-				location = pExpression.location,
-			}
-		end
-
-		-- TODO: verify that access is to the current class
-
-		local result = {
-			type = field.type,
-			name = generateLocalID("field"),
-			location = pExpression.location,
-		}
-		local accessStatement = {
-			tag = "field",
-			name = pExpression.field,
-			base = base,
-			destination = result,
-			returns = "no",
-		}
-		return buildBlock {baseEvaluation, localSt(result), accessStatement}, freeze {result}
 	elseif pExpression.tag == "binary" then
 		-- Compile the two operands
 		profile.open("compileExpression binary recursive")
@@ -2220,6 +2288,7 @@ local function semanticsSmol(sources, main)
 				local parameter = {
 					name = parameterAST,
 					constraints = {},
+					location = generics.location,
 				}
 				table.insert(parametersOut, parameter)
 

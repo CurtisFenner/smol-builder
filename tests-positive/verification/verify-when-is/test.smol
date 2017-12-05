@@ -1,0 +1,27 @@
+package test;
+import core;
+import core:WInt;
+
+class Test {
+	static get(option core:Option[WInt]) WInt
+	requires option is some
+	ensures option.some == return when option is some{
+		match option {
+			case some some {
+				return some;
+			}
+		}
+	}
+
+	static boxPositive(n WInt) core:Option[WInt]
+	ensures Test.get(return) == n when return is some {
+		if 0 < n.get() {
+			return core:Option[WInt].makeSome(n);
+		}
+		return core:Option[WInt].makeNone();
+	}
+
+	static main() Unit {
+
+	}
+}
