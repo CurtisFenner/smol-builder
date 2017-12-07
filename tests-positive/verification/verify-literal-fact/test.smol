@@ -1,0 +1,8 @@
+package test;
+
+class Test {
+	static main() Unit {
+		assert 0 < 5;
+		assert (5 < 0).not();
+	}
+}
