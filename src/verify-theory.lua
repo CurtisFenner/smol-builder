@@ -320,20 +320,15 @@ function theory:isSatisfiable(modelInput)
 				local constant = evaluateConstantAssertion(other, function() return nil end)
 				if constant ~= nil then
 					table.insert(out, constant)
-					print("of vs other", showAssertion(other))
 				end
 			end
 		end
 		for i = 2, #out do
 			if out[i] ~= out[1] then
-				print("constantConflict!", out[i], out[1], "for", showAssertion(of))
 				constantConflict = true
 			end
 		end
 
-		print("equivalentConstant", showAssertion(of), "=>", unpack(out))
-		print()
-		
 		return out[1]
 	end
 
