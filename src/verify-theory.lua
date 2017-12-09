@@ -72,6 +72,70 @@ local TERMINAL_TAG = {
 	["string"] = true,
 }
 
+-- RETURNS a description of the value of an assertion
+-- a Lua boolean, number, string
+-- RETURNS nil when the value is not known at compile time
+local function evaluateConstantAssertion(e, lowerConstant)
+	assertis(e, "Assertion")
+	assertis(lowerConstant, "function")
+
+	if e.tag == "tuple" then
+		error "TODO: tuples in evaluateConstantAssertion"
+	elseif e.tag == "int" then
+		return e.value
+	elseif e.tag == "string" then
+		return e.value
+	elseif e.tag == "boolean" then
+		return e.value
+	elseif e.tag == "method" then
+		local left = lowerConstant(e.base)
+		if left == nil then
+			return nil
+		end
+
+		local arguments = {}
+		for i, a in ipairs(e.arguments) do
+			arguments[i] = lowerConstant(a)
+			if arguments[i] == nil then
+				return nil
+			end
+		end
+
+		local signature = e.signature
+		if signature.eval == false then
+			return nil
+		end
+
+		return signature.eval(left, unpack(arguments))
+	end
+
+	-- No static representation is possible
+	return nil
+end
+
+-- RETURNS an Assertion
+local function boxConstant(constant)
+	if type(constant) == "number" then
+		-- Assert that constant is finite and an integer
+		assert(constant % 1 == 0)
+		
+		return freeze {
+			tag = "int",
+			value = constant,
+		}
+	elseif type(constant) == "string" then
+		return freeze {
+			tag = "string",
+			value = constant,
+		}
+	elseif type(constant) == "boolean" then
+		return freeze {
+			tag = "boolean",
+			value = constant,
+		}
+	end
+	error("Unknown constant type value")
+end
 
 local m_scan
 
@@ -242,6 +306,70 @@ function theory:isSatisfiable(modelInput)
 		return rootRepresentative(x) == rootRepresentative(y)
 	end
 
+	-- RETURNS an unboxed constant that is equal to the given assertion
+	-- RETURNS nil if there is no such constant
+	local constantConflict = false
+	local function equivalentConstant(of)
+		assertis(of, "Assertion")
+
+		local out = {}
+		for _, other in pairs(canon.relevant) do
+			if areEqual(other, of) then
+				-- Only evaluate "terminal" constants
+				-- (Builds bottom up iteratively)
+				local constant = evaluateConstantAssertion(other, function() return nil end)
+				if constant ~= nil then
+					table.insert(out, constant)
+					print("of vs other", showAssertion(other))
+				end
+			end
+		end
+		for i = 2, #out do
+			if out[i] ~= out[1] then
+				print("constantConflict!", out[i], out[1], "for", showAssertion(of))
+				constantConflict = true
+			end
+		end
+
+		print("equivalentConstant", showAssertion(of), "=>", unpack(out))
+		print()
+		
+		return out[1]
+	end
+
+	-- RETURNS nothing
+	local function propagateConstants()
+		local keys = table.keys(canon.relevant)
+		local eqs = {}
+		for _, key in ipairs(keys) do
+			local a = canon.relevant[key]
+			local constant = evaluateConstantAssertion(a, equivalentConstant)
+			if constant ~= nil then
+				local boxed = canon:scan(boxConstant(constant))
+				
+				-- Insert representative, so that it can be used in UF
+				representative[boxed] = representative[boxed] or boxed
+
+				if not areEqual(a, boxed) then
+					print("const eq", showAssertion(a), "==", constant)
+					table.insert(eqs, {a, boxed})
+				end
+			end
+		end
+
+		return eqs
+	end
+
+	-- RETURNS a map from root => [eq assertion set]
+	local function eqClasses()
+		local out = {}
+		for key, root in pairs(representative) do
+			out[root] = out[root] or {}
+			table.insert(out[root], key)
+		end
+		return out
+	end
+
 	local byStructure = {}
 	-- RETURNS a string such that for x, y
 	-- if approximateStructure(x) ~= approximateStructure(y)
@@ -317,16 +445,6 @@ function theory:isSatisfiable(modelInput)
 		error("TODO childrenSame for tag `" .. x.tag .. "`")
 	end
 
-	-- RETURNS a map from root => [eq assertion set]
-	local function eqClasses()
-		local out = {}
-		for key, root in pairs(representative) do
-			out[root] = out[root] or {}
-			table.insert(out[root], key)
-		end
-		return out
-	end
-
 	-- RETURNS a set (map from Assertion to true)
 	local function thoseReferencingAny(list)
 		assertis(list, listType "Assertion")
@@ -361,12 +479,8 @@ function theory:isSatisfiable(modelInput)
 				representative[rootB] = rootA
 			end
 
-
+			-- Union all functions of equal arguments
 			profile.open("#recursive union")
-
-			-- Union all functions of equal value
-
-			-- TODO: need only consider `x`s that are reference a or b
 			for x in pairs(thoseThatReferenceA) do
 				local rootX = rootRepresentative(x)
 				for y in pairs(thoseThatReferenceB) do
@@ -390,12 +504,13 @@ function theory:isSatisfiable(modelInput)
 		end
 	end
 
-	profile.open "#union-find"
 	-- Union find
-	for i, eq in ipairs(positiveEq) do
-		profile.open("#union-find " .. i .. "/" .. #positiveEq)
-		union(eq[1], eq[2])
-		profile.close("#union-find " .. i .. "/" .. #positiveEq)
+	profile.open "#union-find"
+	while #positiveEq > 0 do
+		for _, eq in ipairs(positiveEq) do
+			union(eq[1], eq[2])
+		end
+		positiveEq = propagateConstants()
 	end
 	profile.close "#union-find"
 
@@ -470,7 +585,7 @@ function theory:isSatisfiable(modelInput)
 	--	end
 	--end
 
-	return true
+	return not constantConflict
 end
 local old = theory.inModel
 theory.inModel = function(...)

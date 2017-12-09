@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+
+	static foo() Unit
+	ensures forall x Boolean: x when x{
+
+	}
+
+	static main() Unit {
+	}
+}

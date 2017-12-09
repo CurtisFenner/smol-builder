@@ -1190,6 +1190,7 @@ REGISTER_TYPE("Signature", recordType {
 			listType(listType(choiceType("boolean", constantType "*")))
 		)
 	),
+	eval = choiceType(constantType(false), "function"),
 })
 
 REGISTER_TYPE("ASTExpression", recordType {
@@ -1574,6 +1575,11 @@ union Option[#T | #T is Eq[#T]] {
 	static makeNone() Option[#T]
 	ensures return is none {
 		return new(none = unit);
+	}
+
+	method get() #T
+	requires this is some {
+		return this.some;
 	}
 }
 

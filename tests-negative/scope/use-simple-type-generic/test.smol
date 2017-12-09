@@ -1,9 +1,10 @@
 package test;
 
+
+
 class Test {
-	method foo() Test {
-		return new();
-	}
+	var t Test[Int];
+
 	static main() Unit {
 	}
 }

@@ -1,0 +1,89 @@
+package test;
+import core;
+
+class KVPair[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
+	var key #K;
+	var value #V;
+
+	static make(key #K, value #V) KVPair[#K, #V]
+	ensures return.getKey() == key
+	ensures return.getValue() == value {
+		return new(key=key, value=value);
+	}
+
+	method getKey() #K ensures return == this.key {
+		return this.key;
+	}
+
+	method getValue() #V ensures return == this.value {
+		return this.value;
+	}
+}
+
+class KVAdd[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
+	var pair KVPair[#K, #V];
+	var rest Map[#K, #V];
+
+	static make(pair KVPair[#K, #V], rest Map[#K, #V]) KVAdd[#K, #V] {
+		return new(pair = pair, rest = rest);
+	}
+
+	method getRest() Map[#K, #V] {
+		return this.rest;
+	}
+
+	method getPair() KVPair[#K, #V] {
+		return this.pair;
+	}
+}
+
+// Represents a linked-list map
+union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
+	var empty Unit;
+	var addition KVAdd[#K, #V];
+
+	static makeEmpty() Map[#K, #V] {
+		return new(empty = unit);
+	}
+
+	method size() Int {
+		match this {
+			case empty empty {
+				return 0;
+			}
+			case add addition {
+				return 1 + add.getRest().size();
+			}
+		}
+	}
+
+	method get(key #K) core:Option[#V]
+	ensures (this.addition.getPair().getKey() == key).implies(return is some) when this is addition
+	ensures (this.addition.getPair().getKey() == key).implies(return.get() == this.addition.getPair().getValue()) when this is addition
+	{
+		match this {
+			case empty empty {
+				assert (this is addition).not();
+				return core:Option[#V].makeNone();
+			}
+			case add addition {
+				if add.getPair().getKey() == key {
+					return core:Option[#V].makeSome(add.getPair().getValue());
+				}
+				return add.getRest().get(key);
+			}
+		}
+	}
+
+	method add(key #K, value #V) Map[#K, #V]
+	ensures return.get(key) is some
+	ensures return.get(key).get() == value {
+		var next KVAdd[#K, #V] = KVAdd[#K, #V].make(KVPair[#K, #V].make(key, value), this);
+		return new(addition = next);
+	}
+}
+
+class Test {
+	static main!() Unit {
+	}
+}

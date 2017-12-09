@@ -20,6 +20,10 @@ local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
 local UNIT_TYPE = provided.UNIT_TYPE
 local NEVER_TYPE = provided.NEVER_TYPE
 
+local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
+
+local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -121,6 +125,12 @@ local assertionRecursionMap = freeze {
 -- RETURNS a Signature for t.eq(t)
 local function makeEqSignature(t)
 	assertis(t, "Type+")
+
+
+	if t.name == "Boolean" then
+		return table.findwith(BOOLEAN_DEF.signatures, "name", "eq")
+	end
+
 	local unknown = freeze {begins = "???", ends = "???"}
 
 	local eqSignature = freeze {
@@ -136,16 +146,9 @@ local function makeEqSignature(t)
 		foreign = true,
 		ensuresAST = {},
 		requiresAST = {},
-		logic = false
+		logic = false,
+		eval = false,
 	}
-
-	if t.name == "Boolean" then
-		local logic = {
-			[true] = {{true, true}, {false, false}},
-			[false] = {{true, false}, {false, true}},
-		}
-		eqSignature = table.with(eqSignature, "logic", logic)
-	end
 
 	assertis(eqSignature, "Signature")
 
@@ -156,30 +159,14 @@ end
 local function notAssertion(a)
 	assertis(a, "Assertion")
 
-	local p = freeze {
+	return freeze {
 		tag = "method",
 		methodName = "not",
 		base = a,
 		arguments = {},
 
-		signature = {
-			name = "not",
-			parameters = {},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			container = "Boolean",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{false}},
-				[false] = {{true}},
-			},
-		},
+		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "not"),
 	}
-	assertis(p, "MethodAssertion")
-	return p
 end
 
 -- RETURNS an Assertion representing a => b
@@ -197,21 +184,7 @@ local function impliesAssertion(a, b)
 		methodName = "implies",
 		base = a,
 		arguments = {b},
-		signature = {
-			name = "implies",
-			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			container = "Boolean",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{false, "*"}, {true, true}},
-				[false] = {{true, false}},
-			},
-		},
+		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "implies")
 	}
 	assertis(p, "MethodAssertion")
 	return p
@@ -300,11 +273,13 @@ local function showStatement(statement, indent)
 	elseif statement.tag == "method-call" then
 		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		return pre .. " " .. destinations.. " := " .. statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
+		local rhs = statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations.. " := " .. rhs
 	elseif statement.tag == "static-call" then
 		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		return pre .. " " .. destinations.. " := " .. showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
+		local rhs = showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations.. " := " .. rhs
 	elseif statement.tag == "return" then
 		local out = {}
 		for _, s in ipairs(statement.sources) do
@@ -613,7 +588,7 @@ local function resultAssertion(statement)
 			tag = "method",
 			base = variableAssertion(statement.baseInstance),
 			methodName = statement.methodName,
-			arguments = table.map(function(x) return variableAssertion(x) end, statement.arguments),
+			arguments = table.map(variableAssertion, statement.arguments),
 
 			signature = statement.signature,
 		}
@@ -628,7 +603,7 @@ local function resultAssertion(statement)
 			tag = "static",
 			base = base,
 			staticName = statement.staticName,
-			arguments = table.map(function(x) return variableAssertion(x) end, statement.arguments),
+			arguments = table.map(variableAssertion, statement.arguments),
 		}
 	end
 	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
@@ -843,7 +818,9 @@ local function verifyStatement(statement, scope, semantics)
 			local subscope = scopeCopy(scope)
 
 			local condition = freeze {
-				tag = "isa", base = variableAssertion(statement.base), variant = case.variant
+				tag = "isa",
+				base = variableAssertion(statement.base),
+				variant = case.variant,
 			}
 
 			-- Add variant predicate
@@ -884,11 +861,17 @@ local function verifyStatement(statement, scope, semantics)
 		local branches = {}
 		if statement.bodyThen.returns ~= "yes" then
 			local newThen = scopeAdditional(scope, thenScope)
-			table.insert(branches, {scope = newThen, condition = conditionAssertion})
+			table.insert(branches, {
+				scope = newThen,
+				condition = conditionAssertion
+			})
 		end
 		if statement.bodyElse.returns ~= "yes" then
 			local newElse = scopeAdditional(scope, elseScope)
-			table.insert(branches, {scope = newElse, condition = notAssertion(conditionAssertion)})
+			table.insert(branches, {
+				scope = newElse,
+				condition = notAssertion(conditionAssertion)
+			})
 		end
 
 		if #branches == 0 then

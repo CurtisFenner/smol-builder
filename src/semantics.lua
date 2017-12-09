@@ -373,242 +373,10 @@ local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
 local UNIT_TYPE = provided.UNIT_TYPE
 local NEVER_TYPE = provided.NEVER_TYPE
 
+local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
+
 --------------------------------------------------------------------------------
 
-local BUILTIN_LOC = {
-	begins = "builtin",
-	ends = "builtin",
-}
-local BUILTIN_DEFINITIONS = freeze {
-	{
-		type = INT_TYPE,
-		name = "Int",
-		tag = "builtin",
-		signatures = {
-			{
-				name = "isPositive",
-				parameters = {},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "negate",
-				parameters = {},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "lessThan",
-				parameters = {{location = BUILTIN_LOC, name = "one", type = INT_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "eq",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "quotient",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "product",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "sum",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "difference",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-		},
-	},
-	{
-		type = STRING_TYPE,
-		name = "String",
-		tag = "builtin",
-		signatures = {
-			{
-				name = "concatenate",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = STRING_TYPE}},
-				returnTypes = {STRING_TYPE},
-				modifier = "method",
-				container = "String",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			},
-			{
-				name = "eq",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = STRING_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "String",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-			}
-		},
-	},
-	{
-		type = BOOLEAN_TYPE,
-		name = "Boolean",
-		tag = "builtin",
-		signatures = {
-			{
-				name = "eq",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{true, true}, {false, false}},
-					[false] = {{true, false}, {false, true}},
-				},
-			},
-			{
-				name = "and",
-				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{true, true}},
-					[false] = {{false, false}, {false, true}, {true, false}},
-				},
-			},
-			{
-				name = "or",
-				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{true, "*"}, {false, true}},
-					[false] = {{false, false}},
-				},
-			},
-			{
-				name = "implies",
-				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{false, "*"}, {true, true}},
-					[false] = {{true, false}},
-				},
-			},
-			{
-				name = "not",
-				parameters = {},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{false}},
-					[false] = {{true}},
-				},
-			},
-		},
-	},
-	{
-		type = UNIT_TYPE,
-		name = "Unit",
-		tag = "builtin",
-		signatures = {},
-	},
-	{
-		type = NEVER_TYPE,
-		name = "Never",
-		tag = "builtin",
-		signatures = {},
-	}
-}
 
 -- RETURNS a Definition
 local function interfaceDefinitionFromConstraint(t, allDefinitions)
@@ -643,15 +411,20 @@ end
 --------------------------------------------------------------------------------
 
 -- RETURNS record with interface, signature, constraint, name, etc.
-local function findConstraintByMember(genericType, modifier, name, location, generics, allDefinitions, containingSignature)
+local function findConstraintByMember(genericType, modifier, name, location, generics, environment)
 	assertis(genericType, "GenericType+")
 	assertis(modifier, choiceType(constantType "static", constantType "method"))
 	assertis(name, "string")
 	assertis(location, "Location")
 	assert(name:sub(1, 1):lower() == name:sub(1, 1))
 	assertis(generics, listType "TypeParameterIR")
+	
+	local allDefinitions = environment.allDefinitions
+	local containingSignature = environment.containingSignature
 	assertis(allDefinitions, listType "Definition")
 	assertis(containingSignature, "Signature")
+	local thisVariable = environment.thisVariable
+	assertis(thisVariable, choiceType(constantType(false), "VariableIR"))
 
 	local parameter, pi = table.findwith(generics, "name", genericType.name)
 	assert(parameter)
@@ -1033,12 +806,6 @@ function compileExpression(pExpression, scope, environment)
 		}
 		assertis(out.type, "ConcreteType+")
 
-		if containingSignature.modifier ~= "static" then
-			Report.NEW_USED_OUTSIDE_STATIC {
-				location = pExpression.location,
-			}
-		end
-
 		local newTag
 		if containingDefinition.tag == "union" then
 			newTag = "new-union"
@@ -1179,7 +946,11 @@ function compileExpression(pExpression, scope, environment)
 
 		if t.tag == "generic+" then
 			-- Generic static function
-			local static = findConstraintByMember(t, "static", pExpression.funcName, t.location, containingDefinition.generics, allDefinitions, containingSignature)
+			local static = findConstraintByMember(t, "static", pExpression.funcName, t.location, containingDefinition.generics, {
+				allDefinitions = allDefinitions,
+				containingSignature = containingSignature,
+				thisVariable = environment.thisVariable,
+			})
 			assert(static and static.signature.modifier == "static")
 			assertis(static.constraint, "InterfaceType+")
 
@@ -1456,8 +1227,11 @@ function compileExpression(pExpression, scope, environment)
 				pExpression.methodName,
 				pExpression.location,
 				containingDefinition.generics,
-				allDefinitions,
-				containingSignature
+				{
+					allDefinitions = allDefinitions,
+					containingSignature = containingSignature,
+					thisVariable = environment.thisVariable,
+				}
 			)
 			assertis(method.signature, "Signature")
 
@@ -2277,6 +2051,9 @@ local function semanticsSmol(sources, main)
 
 				-- TODO: total boolean functions might have this computed:
 				logic = false,
+
+				-- TODO: total functions might have this computed:
+				eval = false,
 			}
 		end
 

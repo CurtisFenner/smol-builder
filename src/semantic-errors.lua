@@ -71,9 +71,11 @@ function Report.INTERFACE_REQUIRES_MEMBER(p)
 end
 
 function Report.WRONG_ARITY(p)
+	assertis(p.definitionLocation, "Location")
+
 	quit("The type `", p.name, "` was defined ", p.definitionLocation,
 		"to take exactly ", p.expectedArity, " type arguments.",
-		"\nHowever, it you provide ", p.givenArity, " ",
+		"\nHowever, you provide ", p.givenArity, " ",
 		p.location)
 end
 
@@ -205,11 +207,6 @@ end
 
 function Report.NO_SUCH_VARIABLE(p)
 	quit("There is no variable named `", p.name, "` in scope ", p.location)
-end
-
-function Report.NEW_USED_OUTSIDE_STATIC(p)
-	quit("You can only use `new` expressions in static methods.",
-		"\nHowever, you try to invoke `new` ", p.location)
 end
 
 function Report.NO_SUCH_METHOD(p)
