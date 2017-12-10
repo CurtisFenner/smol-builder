@@ -659,6 +659,7 @@ local function mustModel(scope, target)
 		local explanation = {}
 		for assertion, truth in pairs(counter) do
 			local shown = assertionExprString(assertion)
+			--.. "\t" .. verifyTheory:canonKey(assertion)
 			table.insert(explanation, {expression = shown, truth = truth})
 		end
 		return false, explanation
