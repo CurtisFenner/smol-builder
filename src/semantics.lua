@@ -374,6 +374,7 @@ local UNIT_TYPE = provided.UNIT_TYPE
 local NEVER_TYPE = provided.NEVER_TYPE
 
 local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
+local OPERATOR_ALIAS = provided.OPERATOR_ALIAS
 
 --------------------------------------------------------------------------------
 
@@ -1674,17 +1675,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 		end
 
-		local remap = {
-			["=="] = "eq",
-			["/"] = "quotient",
-			["*"] = "product",
-			["+"] = "sum",
-			["-"] = "difference",
-			["<"] = "lessThan",
-			["++"] = "concatenate",
-		}
-
-		local methodName = remap[pExpression.operator]
+		local methodName = OPERATOR_ALIAS[pExpression.operator]
 		if not methodName then
 			return Report.UNKNOWN_OPERATOR_USED {
 				operator = pExpression.operator,

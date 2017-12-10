@@ -107,6 +107,105 @@ REGISTER_TYPE("Assertion", choiceType(
 	}
 ))
 
+local function excerpt(location)
+	assertis(location, "Location")
+
+	local begins = location.begins
+	local ends = location.ends
+
+	if type(begins) == "string" or type(ends) == "string" then
+		-- Internal code
+		return "<at " .. begins .. ">"
+	end
+
+	local source = begins.sourceLines
+	local out = ""
+	for line = begins.line, ends.line do
+		local low = 1
+		local high = #source[line]
+		if line == begins.line then
+			low = begins.column
+		end
+		if line == ends.line then
+			high = ends.column
+		end
+		for i = low, high do
+			out = out .. source[line]:sub(i, i)
+		end
+	end
+	return out
+end
+
+-- RETURNS a string (as executable Smol code)
+local function assertionExprString(a, grouped)
+	assertis(a, "Assertion")
+	if a.tag == "tuple" then
+		print("TODO: cannot show tuple expression!")
+		return assertionExprString(a.value) .. "[" .. a.index .. "]"
+	elseif a.tag == "int" then
+		return tostring(a.value)
+	elseif a.tag == "string" then
+		return tostring(a.value)
+	elseif a.tag == "boolean" then
+		return tostring(a.value)
+	elseif a.tag == "this" then
+		return "this"
+	elseif a.tag == "unit" then
+		return "unit"
+	elseif a.tag == "field" then
+		local base = assertionExprString(a.base)
+		return base .. "." .. a.fieldName
+	elseif a.tag == "method" then
+		local base = assertionExprString(a.base, true)
+		local arguments = {}
+		for _, v in ipairs(a.arguments) do
+			table.insert(arguments, assertionExprString(v))
+		end
+
+		-- Search for aliasing operator
+		local hit = false
+		for key, v in pairs(provided.OPERATOR_ALIAS) do
+			if v == a.methodName then
+				hit = key
+			end
+		end
+
+		if hit and #arguments == 1 then
+			local inner = base .. " " .. hit .. " " .. assertionExprString(a.arguments[1])
+			if grouped then
+				return "(" .. inner .. ")"
+			end
+			return inner
+		end
+
+		return base .. "." .. a.methodName .. "(" .. table.concat(arguments, ", ") .. ")"
+	elseif a.tag == "static" then
+		local arguments = {}
+		for _, v in ipairs(a.arguments) do
+			table.insert(arguments, assertionExprString(v))
+		end
+		return a.base .. "." .. a.staticName .. "(" .. table.concat(arguments, ", ") .. ")"
+	elseif a.tag == "variable" then
+		if not a.variable.name:find("['_]") then
+			return a.variable.name
+		end
+		local inner = excerpt(a.variable.location)
+		if grouped and inner:find("%s") then
+			return "(" .. inner .. ")"
+		end
+		return inner
+	elseif a.tag == "isa" then
+		local inner = assertionExprString(a.base, true) .. " is " .. a.variant
+		if grouped then
+			return "(" .. inner .. ")"
+		end
+		return inner
+	elseif a.tag == "variant" then
+		local base = assertionExprString(a.base)
+		return base .. "." .. a.variantName
+	end
+end
+
 local assertionRecursionMap = freeze {
 	["static"] = {"arguments{}"},
 	["method"] = {"base", "arguments{}"},
@@ -553,8 +652,17 @@ local function mustModel(scope, target)
 	assertis(target, "Assertion")
 	local result = inNow(target)
 	--print("=?=> " .. verifyTheory:canonKey(result))
-	local tautology = smt.implies(verifyTheory, predicates, result)
+	local tautology, counter = smt.implies(verifyTheory, predicates, result)
 	--print("<-", tautology)
+
+	if not tautology then
+		local explanation = {}
+		for assertion, truth in pairs(counter) do
+			local shown = assertionExprString(assertion)
+			table.insert(explanation, {expression = shown, truth = truth})
+		end
+		return false, explanation
+	end
 
 	return tautology
 end
@@ -686,7 +794,7 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "verify" then
 		-- Check that this variable is true in the current scope
-		local models = mustModel(scope, variableAssertion(statement.variable))
+		local models, counter = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
 			--print("$ !!!", models)
 			--dumpScope(scope)
@@ -695,6 +803,7 @@ local function verifyStatement(statement, scope, semantics)
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
 				checkLocation = statement.checkLocation,
+				counter = counter,
 			}
 		end
 

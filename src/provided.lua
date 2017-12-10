@@ -30,6 +30,18 @@ local NEVER_TYPE = freeze {
 
 --------------------------------------------------------------------------------
 
+local OPERATOR_ALIAS = {
+	["=="] = "eq",
+	["/"] = "quotient",
+	["*"] = "product",
+	["+"] = "sum",
+	["-"] = "difference",
+	["<"] = "lessThan",
+	["++"] = "concatenate",
+}
+
+--------------------------------------------------------------------------------
+
 local BUILTIN_LOC = {
 	begins = "builtin",
 	ends = "builtin",
@@ -290,4 +302,5 @@ return freeze {
 	UNIT_TYPE = UNIT_TYPE,
 	NEVER_TYPE = NEVER_TYPE,
 	BUILTIN_DEFINITIONS = BUILTIN_DEFINITIONS,
+	OPERATOR_ALIAS = OPERATOR_ALIAS,
 }

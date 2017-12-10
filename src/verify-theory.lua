@@ -88,6 +88,13 @@ local function evaluateConstantAssertion(e, lowerConstant)
 	elseif e.tag == "boolean" then
 		return e.value
 	elseif e.tag == "method" then
+		local signature = e.signature
+		if e.methodName == "eq" and #e.arguments == 1 then
+			if showAssertion(e.base) == showAssertion(e.arguments[1]) then
+				return true
+			end
+		end
+
 		local left = lowerConstant(e.base)
 		if left == nil then
 			return nil
@@ -101,7 +108,6 @@ local function evaluateConstantAssertion(e, lowerConstant)
 			end
 		end
 
-		local signature = e.signature
 		if signature.eval == false then
 			return nil
 		end
@@ -346,7 +352,6 @@ function theory:isSatisfiable(modelInput)
 				representative[boxed] = representative[boxed] or boxed
 
 				if not areEqual(a, boxed) then
-					print("const eq", showAssertion(a), "==", constant)
 					table.insert(eqs, {a, boxed})
 				end
 			end
@@ -629,4 +634,5 @@ end
 -- Tests
 
 
+theory.evaluateConstantAssertion = evaluateConstantAssertion
 return freeze(theory)
