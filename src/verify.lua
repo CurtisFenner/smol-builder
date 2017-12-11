@@ -57,14 +57,10 @@ REGISTER_TYPE("FieldAssertion", recordType {
 	tag = constantType "field",
 	base = "Assertion",
 	fieldName = "string",
+	definition = "VariableIR",
 })
 
 REGISTER_TYPE("Assertion", choiceType(
-	recordType {
-		tag = constantType "tuple",
-		index = "integer",
-		value = "Assertion",
-	},
 	recordType {
 		tag = constantType "int",
 		value = "integer",
@@ -79,6 +75,7 @@ REGISTER_TYPE("Assertion", choiceType(
 	},
 	recordType {
 		tag = constantType "this",
+		type = "Type+",
 	},
 	recordType {
 		tag = constantType "unit",
@@ -90,6 +87,7 @@ REGISTER_TYPE("Assertion", choiceType(
 		base = "string",
 		arguments = listType "Assertion",
 		staticName = "string",
+		signature = "Signature",
 	},
 	recordType {
 		tag = constantType "variable",
@@ -104,6 +102,7 @@ REGISTER_TYPE("Assertion", choiceType(
 		tag = constantType "variant",
 		variantName = "string",
 		base = "Assertion",
+		definition = "VariableIR",
 	}
 ))
 
@@ -139,10 +138,7 @@ end
 -- RETURNS a string (as executable Smol code)
 local function assertionExprString(a, grouped)
 	assertis(a, "Assertion")
-	if a.tag == "tuple" then
-		print("TODO: cannot show tuple expression!")
-		return assertionExprString(a.value) .. "[" .. a.index .. "]"
-	elseif a.tag == "int" then
+	if a.tag == "int" then
 		return tostring(a.value)
 	elseif a.tag == "string" then
 		return tostring(a.value)
@@ -215,7 +211,6 @@ local assertionRecursionMap = freeze {
 	["boolean"] = {},
 	["string"] = {},
 	["int"] = {},
-	["tuple"] = {"value"},
 	["variable"] = {},
 	["isa"] = {"base"},
 	["variant"] = {"base"},
@@ -224,7 +219,6 @@ local assertionRecursionMap = freeze {
 -- RETURNS a Signature for t.eq(t)
 local function makeEqSignature(t)
 	assertis(t, "Type+")
-
 
 	if t.name == "Boolean" then
 		return table.findwith(BOOLEAN_DEF.signatures, "name", "eq")
@@ -400,18 +394,6 @@ local function showStatement(statement, indent)
 	end
 end
 
--- RETURNS an Assertion
-local function tupleAccess(value, index)
-	assertis(value, "Assertion")
-	assertis(index, "integer")
-
-	return freeze {
-		tag = "tuple",
-		index = index,
-		value = value,
-	}
-end
-
 local VALUE_THIS = freeze {tag = "this"}
 local VALUE_UNIT = freeze {tag = "unit"}
 
@@ -536,6 +518,7 @@ local function eqAssertion(a, b, t)
 		base = a,
 		arguments = {b},
 		signature = makeEqSignature(t),
+		index = 1,
 	}
 	assertis(p, "MethodAssertion")
 	return p
@@ -688,11 +671,13 @@ local function dumpScope(scope)
 end
 
 -- RETURNS an Assertion
-local function resultAssertion(statement)
+local function resultAssertion(statement, index)
 	assertis(statement, "StatementIR")
 	statement = freeze(statement)
 
 	if statement.tag == "method-call" or statement.tag == "generic-method-call" then
+		assertis(index, "integer")
+
 		return freeze {
 			tag = "method",
 			base = variableAssertion(statement.baseInstance),
@@ -702,6 +687,8 @@ local function resultAssertion(statement)
 			signature = statement.signature,
 		}
 	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
+		assertis(index, "integer")
+
 		local base
 		if statement.tag == "static-call" then
 			base = showType(statement.baseType)
@@ -713,6 +700,7 @@ local function resultAssertion(statement)
 			base = base,
 			staticName = statement.staticName,
 			arguments = table.map(variableAssertion, statement.arguments),
+			signature = statement.signature,
 		}
 	end
 	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
@@ -726,6 +714,7 @@ local function fieldAssertion(scope, statement)
 		tag = "field",
 		fieldName = statement.name,
 		base = variableAssertion(statement.base),
+		definition = statement.fieldDefinition,
 	}
 end
 
@@ -737,6 +726,7 @@ local function variantAssertion(scope, statement)
 		tag = "variant",
 		variantName = statement.variant,
 		base = variableAssertion(statement.base),
+		definition = statement.variantDefinition,
 	}
 end
 
@@ -819,7 +809,8 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "this" then
 		-- This
-		assignRaw(scope, statement.destination, VALUE_THIS)
+		local this = table.with(VALUE_THIS, "type", statement.destination.type)
+		assignRaw(scope, statement.destination, this)
 		return
 	elseif statement.tag == "unit" then
 		-- Unit
@@ -848,21 +839,15 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "method-call" or statement.tag == "generic-method-call" then
 		-- TODO: reject impure
-		local source = resultAssertion(statement)
 		for i, destination in ipairs(statement.destinations) do
-			if #statement.destinations > 1 then
-				source = tupleAccess(source, i)
-			end
+			local source = resultAssertion(statement, i)
 			assignRaw(scope, destination, source)
 		end
 		return
 	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
 		-- TODO: reject impure
-		local source = resultAssertion(statement)
 		for i, destination in ipairs(statement.destinations) do
-			if #statement.destinations > 1 then
-				source = tupleAccess(source, i)
-			end
+			local source = resultAssertion(statement, i)
 			assignRaw(scope, destination, source)
 		end
 		return
@@ -885,16 +870,13 @@ local function verifyStatement(statement, scope, semantics)
 				tag = "field",
 				base = instance,
 				fieldName = fieldName,
+				definition = statement.memberDefinitions[fieldName],
 			}
+			assertis(fieldAssertion, "Assertion")
 			assertis(value, "VariableIR")
-			local eq = freeze {
-				tag = "method",
-				base = fieldAssertion,
-				arguments = {variableAssertion(value)},
-				methodName = "eq",
-				signature = makeEqSignature(value.type),
-			}
-			assertis(eq, "MethodAssertion")
+			local t = value.type
+			local eq = eqAssertion(fieldAssertion, variableAssertion(value), t)
+			assertis(eq, "Assertion")
 			addPredicate(scope, eq)
 		end
 
@@ -912,7 +894,10 @@ local function verifyStatement(statement, scope, semantics)
 			tag = "variant",
 			variantName = statement.field,
 			base = variableAssertion(statement.destination),
+			definition = statement.variantDefinition,
 		}
+		assertis(extract, "Assertion")
+
 		local right = variableAssertion(statement.value)
 		addPredicate(scope, eqAssertion(extract, right, statement.value.type))
 		return

@@ -1321,6 +1321,7 @@ EXTEND_TYPE("NewClassSt", "AbstractStatementIR", recordType {
 	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",
+	memberDefinitions = mapType("string", "VariableIR"),
 })
 
 EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
@@ -1331,6 +1332,7 @@ EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
 	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",
+	variantDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
@@ -1388,6 +1390,7 @@ EXTEND_TYPE("FieldSt", "AbstractStatementIR", recordType {
 	base = "VariableIR",
 	destination = "VariableIR",
 	returns = constantType "no",
+	fieldDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("ThisSt", "AbstractStatementIR", recordType {
@@ -1408,6 +1411,7 @@ EXTEND_TYPE("VariantSt", "AbstractStatementIR", recordType {
 	base = "VariableIR",
 	variant = "string",
 	returns = constantType "no",
+	variantDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {

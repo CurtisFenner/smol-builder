@@ -806,21 +806,19 @@ function compileExpression(pExpression, scope, environment)
 			location = pExpression.location
 		}
 		assertis(out.type, "ConcreteType+")
-
-		local newTag
-		if containingDefinition.tag == "union" then
-			newTag = "new-union"
-		elseif containingDefinition.tag == "class" then
-			newTag = "new-class"
-		end
-
+		
 		local newSt = {
-			tag = newTag,
 			type = containerType,
 			returns = "no",
 			constraints = {},
 			destination = out,
 		}
+		
+		if containingDefinition.tag == "union" then
+			newSt.tag = "new-union"
+		elseif containingDefinition.tag == "class" then
+			newSt.tag = "new-class"
+		end
 
 		-- All of the constraints are provided as arguments to this
 		-- static function
@@ -837,6 +835,8 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Map is a map from field name to value variable
 		local map = {}
+
+		local memberDefinitions = {}
 
 		-- Evaluate all arguments to new
 		for _, argument in ipairs(pExpression.arguments) do
@@ -861,6 +861,7 @@ function compileExpression(pExpression, scope, environment)
 					location = argument.location,
 				}
 			end
+			memberDefinitions[field.name] = field
 
 			if not areTypesEqual(field.type, subOut[1].type) then
 				Report.TYPES_DONT_MATCH {
@@ -878,6 +879,7 @@ function compileExpression(pExpression, scope, environment)
 		-- Record the map as fields
 		if containingDefinition.tag == "union" then
 			newSt.field, newSt.value = next(map)
+			newSt.variantDefinition = memberDefinitions[newSt.field]
 
 			-- Verify that exactly one field is given for union new
 			if #pExpression.arguments ~= 1 then
@@ -890,6 +892,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 		elseif containingDefinition.tag == "class" then
 			newSt.fields = map
+			newSt.memberDefinitions = memberDefinitions
 
 			-- Check that no fields are missing for class new
 			for _, field in ipairs(containingDefinition.fields) do
@@ -1565,6 +1568,7 @@ function compileExpression(pExpression, scope, environment)
 				base = base,
 				destination = result,
 				returns = "no",
+				fieldDefinition = field,
 			}
 
 			local block = buildBlock {
@@ -1595,6 +1599,7 @@ function compileExpression(pExpression, scope, environment)
 				base = base,
 				destination = result,
 				returns = "no",
+				variantDefinition = field,
 			}
 
 			local isVar = {
@@ -2926,6 +2931,7 @@ local function semanticsSmol(sources, main)
 						base = base,
 						destination = variable,
 						returns = "no",
+						variantDefinition = field,
 					})
 
 					local sub = compileBlock(case.body, scope)

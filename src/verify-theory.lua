@@ -79,9 +79,7 @@ local function evaluateConstantAssertion(e, lowerConstant)
 	assertis(e, "Assertion")
 	assertis(lowerConstant, "function")
 
-	if e.tag == "tuple" then
-		error "TODO: tuples in evaluateConstantAssertion"
-	elseif e.tag == "int" then
+	if e.tag == "int" then
 		return e.value
 	elseif e.tag == "string" then
 		return e.value
@@ -143,6 +141,33 @@ local function boxConstant(constant)
 	error("Unknown constant type value")
 end
 
+-- RETURNS a Type+
+local function typeOf(assertion)
+	if assertion.tag == "int" then
+		return INTEGER_TYPE
+	elseif assertion.tag == "string" then
+		return STRING_TYPE
+	elseif assertion.tag == "boolean" then
+		return BOOLEAN_TYPE
+	elseif assertion.tag == "this" then
+		return assertion.type
+	elseif assertion.tag == "unit" then
+		return UNIT_TYPE
+	elseif assertion.tag == "method" then
+		-- todo
+	elseif assertion.tag == "field" then
+		return assertion.definition.type
+	elseif assertion.tag == "static" then
+		-- todo
+	elseif assertion.tag == "variable" then
+		return assertion.variable.type
+	elseif assertion.tag == "isa" then
+		return BOOLEAN_TYPE
+	elseif assertion.tag == "variant" then
+		-- todo
+	end
+end
+
 local m_scan
 
 local function scanned(self, children)
@@ -179,6 +204,7 @@ function m_scan(self, object)
 			base = object.base,
 			staticName = object.staticName,
 			arguments = scanned(self, object.arguments),
+			signature = object.signature,
 		}
 		self.relevant[shown] = canon
 		for _, argument in ipairs(canon.arguments) do
@@ -202,6 +228,7 @@ function m_scan(self, object)
 			tag = "field",
 			base = self:scan(object.base),
 			fieldName = object.fieldName,
+			definition = object.definition,
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)
@@ -210,6 +237,7 @@ function m_scan(self, object)
 			tag = "variant",
 			base = self:scan(object.base),
 			variantName = object.variantName,
+			definition = object.definition,
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)
