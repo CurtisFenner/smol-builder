@@ -13,23 +13,7 @@ local function unclear(a, b)
 	return "maybe"
 end
 
--- RETURNS a string of smol representing the given type
-local function showType(t)
-	assertis(t, "Type+")
-
-	if t.tag == "concrete-type+" then
-		if #t.arguments == 0 then
-			return t.name
-		end
-		local arguments = table.map(showType, t.arguments)
-		return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
-	elseif t.tag == "keyword-type+" then
-		return t.name
-	elseif t.tag == "generic+" then
-		return "#" .. t.name
-	end
-	error("unknown Type+ tag `" .. t.tag .. "`")
-end
+local showType = import("provided.lua").showType
 
 -- RETURNS a string of smol representing the given interface type
 local function showInterfaceType(t)
@@ -581,6 +565,29 @@ end
 
 --------------------------------------------------------------------------------
 
+local function checkSingleBoolean(vs, purpose, location)
+	assertis(vs, listType "VariableIR")
+	assertis(purpose, "string")
+
+	if #vs ~= 1 then
+		Report.WRONG_VALUE_COUNT {
+			purpose = purpose,
+			expectedCount = 1,
+			givenCount = #vs,
+			location = location or vs[1].location,
+		}
+	elseif not areTypesEqual(vs[1].type, BOOLEAN_TYPE) then
+		Report.EXPECTED_DIFFERENT_TYPE {
+			expectedType = "Boolean",
+			givenType = showType(vs[1].type),
+			location = location or vs[1].location,
+			purpose = purpose,
+		}
+	end
+end
+
+--------------------------------------------------------------------------------
+
 local compileExpression
 
 -- RETURNS a StatementIR
@@ -642,6 +649,9 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 	-- Add a guard
 	if assertion.when then
 		local cEval, cVars = compileExpression(assertion.when, scope, subEnvironment)
+
+		checkSingleBoolean(cVars, "when")
+
 		assert(#cVars == 1)
 		assert(areTypesEqual(cVars[1].type, BOOLEAN_TYPE))
 
@@ -1750,6 +1760,125 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		return buildBlock {baseEvaluation, localSt(result), isA}, freeze {result}
+	elseif pExpression.tag == "forall-expr" then
+		-- TODO: verify this is in ghost context
+
+		local scopeCopy = {}
+
+		-- Check that the name is fresh
+		for _, frame in ipairs(scope) do
+			if frame[pExpression.variable.name] then
+				Report.VARIABLE_DEFINED_TWICE {
+					name = pExpression.variable.name,
+					first = frame[pExpression.variable.name].location,
+					second = pExpression.variable.location,
+				}
+			end
+			local frameCopy = {}
+			for key, value in pairs(frame) do
+				frameCopy[key] = value
+			end
+			table.insert(scopeCopy, frameCopy)
+		end
+
+		-- RETURNS StatementIR, VariableIR (how to execute for this target, and
+		-- what the result was)
+		local function instantiate(target)
+			table.insert(scopeCopy, {[pExpression.variable.name] = target})
+			local code, predicates = compileExpression(pExpression.predicate, scopeCopy, environment)
+			
+			local instantiatedResult = freeze {
+				type = BOOLEAN_TYPE,
+				name = generateLocalID("forall_result_" .. pExpression.variable.name),
+				location = pExpression.location,
+			}
+
+			-- Check types
+			checkSingleBoolean(predicates, "forall predicate")
+
+
+			-- Move the result into the instantiated result
+			local move = freeze {
+				tag = "assign",
+				destination = instantiatedResult,
+				source = predicates[1],
+				returns = "no",
+			}
+			code = buildBlock {code, move}
+
+			if pExpression.when then
+				local whenEval, whenVars = compileExpression(pExpression.when, scopeCopy, environment)
+	
+				checkSingleBoolean(whenVars, "forall when")
+	
+				-- Assume the when is true inside the if guard
+				local assumePredicate = freeze {
+					tag = "assume",
+					variable = whenVars[1],
+					location = whenVars[1].location,
+					returns = "no",
+				}
+
+				-- The result is true when the guard is false (vacuously)
+				local vacuous = freeze {
+					tag = "boolean",
+					value = true,
+					destination = instantiatedResult,
+					returns = "no",
+				}
+	
+				-- Guard the execution in an if
+				local ifSt = freeze {
+					tag = "if",
+					condition = whenVars[1],
+					bodyThen = buildBlock {assumePredicate, code},
+					bodyElse = vacuous,
+					returns = "no",
+				}
+
+				code = buildBlock {whenEval, ifSt}
+			end
+
+			-- Close the variable's scope
+			table.remove(scopeCopy)
+
+			return code, instantiatedResult
+		end
+
+		-- Generate the code once to verify that it is valid
+		-- (In particular, that preconditions hold!)
+		-- Bring the variable into scope
+		local variable1 = freeze {
+			type = resolveType(pExpression.variable.type),
+			name = generateLocalID(pExpression.variable.name),
+			location = pExpression.variable.location,
+		}
+		local testInstantiation = instantiate(variable1)
+
+		local result = freeze {
+			type = BOOLEAN_TYPE,
+			name = generateLocalID("forall_" .. pExpression.variable.name),
+			location = pExpression.location,
+		}
+
+		local forall = freeze {
+			tag = "forall",
+			destination = result,
+			instantiate = instantiate,
+			quantified = variable1.type,
+			location = pExpression.location,
+			returns = "no",
+		}
+		assertis(forall, "ForallSt")
+
+		local out = buildBlock {
+			localSt(variable1),
+			testInstantiation,
+			localSt(result),
+			forall,
+		}
+
+		return out, freeze {result}
 	end
 
 	error("TODO expression")
@@ -2467,21 +2596,7 @@ local function semanticsSmol(sources, main)
 					assertis(purpose, "string")
 
 					local _, outs = compileExpression(e, scope, environment)
-					if #outs ~= 1 then
-						Report.WRONG_VALUE_COUNT {
-							purpose = purpose,
-							expectedCount = 1,
-							givenCount = #outs,
-							location = e.location,
-						}
-					elseif not areTypesEqual(outs[1].type, BOOLEAN_TYPE) then
-						Report.EXPECTED_DIFFERENT_TYPE {
-							expectedType = "Boolean",
-							givenType = showType(outs[1].type),
-							location = e.location,
-							purpose = purpose,
-						}
-					end
+					checkSingleBoolean(outs, purpose, e.location)
 				end
 
 				-- Check that each requires has type Boolean
@@ -2767,21 +2882,7 @@ local function semanticsSmol(sources, main)
 			elseif pStatement.tag == "if-statement" then
 				local conditionEvaluation, conditionOut = compileExpression(pStatement.condition, scope, environment)
 				assert(#conditionOut ~= 0)
-				if #conditionOut > 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "if-statement condition",
-						expectedCount = 1,
-						givenCount = #conditionOut,
-						location = pStatement.condition.location,
-					}
-				elseif not areTypesEqual(conditionOut[1].type, BOOLEAN_TYPE) then
-					Report.EXPECTED_DIFFERENT_TYPE {
-						purpose = "if-statement condition",
-						expectedType = "Boolean",
-						givenType = showType(conditionOut[1].type),
-						location = pStatement.condition.location,
-					}
-				end
+				checkSingleBoolean(conditionOut, "if-statement condition", pStatement.condition.location)
 
 				-- Builds the else-if-chain IR instructions.
 				-- The index is the index of the first else-if clause to include.
@@ -2798,21 +2899,7 @@ local function semanticsSmol(sources, main)
 					end
 					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(pStatement.elseifs[i].condition, scope, environment)
 					assert(#elseIfConditionOut ~= 0)
-					if #elseIfConditionOut > 1 then
-						Report.WRONG_VALUE_COUNT {
-							purpose = "else-if-statement condition",
-							expectedCount = 1,
-							givenCount = #conditionOut,
-							location = pStatement.elseifs[i].location,
-						}
-					elseif not areTypesEqual(elseIfConditionOut[1].type, BOOLEAN_TYPE) then
-						Report.EXPECTED_DIFFERENT_TYPE {
-							purpose = "else-if-statement condition",
-							expectedType = "Boolean",
-							givenType = showType(elseIfConditionOut[1].type),
-							location = pStatement.elseifs[i].condition.location,
-						}
-					end
+					checkSingleBoolean(elseIfConditionOut, "else-if-statement condition")
 
 					local bodyThen = compileBlock(pStatement.elseifs[i].body, scope)
 					local bodyElse = compileElseChain(i + 1)

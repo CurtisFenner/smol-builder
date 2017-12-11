@@ -9,6 +9,7 @@ function Report.DOES_NOT_MODEL(p)
 		end
 	end
 
+	assertis(p.counter, listType(recordType {truth = "boolean", expression = "string"}))
 	-- Show false statements last
 	for _, kv in ipairs(p.counter) do
 		if not kv.truth then

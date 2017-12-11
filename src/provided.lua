@@ -295,6 +295,26 @@ local BUILTIN_DEFINITIONS = freeze {
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a string of smol representing the given type
+local function showType(t)
+	assertis(t, "Type+")
+
+	if t.tag == "concrete-type+" then
+		if #t.arguments == 0 then
+			return t.name
+		end
+		local arguments = table.map(showType, t.arguments)
+		return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
+	elseif t.tag == "keyword-type+" then
+		return t.name
+	elseif t.tag == "generic+" then
+		return "#" .. t.name
+	end
+	error("unknown Type+ tag `" .. t.tag .. "`")
+end
+
+--------------------------------------------------------------------------------
+
 return freeze {
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
@@ -303,4 +323,5 @@ return freeze {
 	NEVER_TYPE = NEVER_TYPE,
 	BUILTIN_DEFINITIONS = BUILTIN_DEFINITIONS,
 	OPERATOR_ALIAS = OPERATOR_ALIAS,
+	showType = showType,
 }

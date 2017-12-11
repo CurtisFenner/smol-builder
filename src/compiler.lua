@@ -196,7 +196,9 @@ local function lexSmol(source, filename)
 		-- verification
 		["assert"] = true,
 		["ensures"] = true,
+		["forall"] = true,
 		["requires"] = true,
+		["when"] = true,
 
 		-- built-in types
 		["Boolean"] = true,
@@ -553,6 +555,7 @@ local function parseSmol(tokens)
 	local K_ENSURES = LEXEME "ensures"
 	local K_REQUIRES = LEXEME "requires"
 	local K_WHEN = LEXEME "when"
+	local K_FORALL = LEXEME "forall"
 
 	-- Built-in types
 	local K_STRING = LEXEME "String"
@@ -1073,12 +1076,30 @@ local function parseSmol(tokens)
 			{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 		},
 
+		["forall"] = parser.composite {
+			tag = "forall-expr",
+			{"_", K_FORALL},
+			{"_", K_ROUND_OPEN, "`(` after `forall`"},
+			{"variable", parser.named "variable", "variable after `forall (`"},
+			{"_", K_ROUND_CLOSE, "`)` after variable"},
+			{"predicate", parser.named "expression", "predicate expression"},
+			{
+				"when",
+				parser.optional(parser.composite {
+					tag = "forall-when",
+					{"_", K_WHEN},
+					{"#e", parser.named "expression", "expression"}
+				}),
+			}
+		},
+
 		["atom-base"] = parser.choice {
 			parser.named "new-expression",
 			K_THIS,
 			K_TRUE,
 			K_FALSE,
 			K_UNIT_VALUE,
+			parser.named "forall",
 			parser.map(T_STRING_LITERAL, function(v)
 				return {tag = "string-literal", value = v}
 			end, true),
@@ -1231,6 +1252,7 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"AssumeSt",
 	"VerifySt",
 	"ProofSt",
+	"ForallSt",
 
 	-- Nothing
 	"NothingSt"
@@ -1429,6 +1451,16 @@ EXTEND_TYPE("IsASt", "AbstractStatementIR", recordType {
 	destination = "VariableIR",
 	returns = constantType "no",
 	variant = "string",
+})
+
+EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
+	tag = constantType "forall",
+	destination = "VariableIR",
+	quantified = "Type+",
+
+	-- VariableIR => StatementIR, VariableIR
+	instantiate = "function",
+	location = "Location",
 })
 
 REGISTER_TYPE("VariableIR", recordType {

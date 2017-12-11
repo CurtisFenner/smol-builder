@@ -103,6 +103,12 @@ REGISTER_TYPE("Assertion", choiceType(
 		variantName = "string",
 		base = "Assertion",
 		definition = "VariableIR",
+	},
+	recordType {
+		tag = constantType "forall",
+		quantified = "Type+",
+		instantiate = "function",
+		location = "Location",
 	}
 ))
 
@@ -199,7 +205,15 @@ local function assertionExprString(a, grouped)
 	elseif a.tag == "variant" then
 		local base = assertionExprString(a.base)
 		return base .. "." .. a.variantName
+	elseif a.tag == "forall" then
+		local inner = excerpt(a.location)
+		if grouped then
+			return "(" .. inner .. ")"
+		end
+		return inner
 	end
+
+	error("unhandled `" .. a.tag .. "`")
 end
 
 local assertionRecursionMap = freeze {
@@ -214,6 +228,7 @@ local assertionRecursionMap = freeze {
 	["variable"] = {},
 	["isa"] = {"base"},
 	["variant"] = {"base"},
+	["forall"] = {},
 }
 
 -- RETURNS a Signature for t.eq(t)
@@ -642,7 +657,7 @@ local function mustModel(scope, target)
 		local explanation = {}
 		for assertion, truth in pairs(counter) do
 			local shown = assertionExprString(assertion)
-			--.. "\t" .. verifyTheory:canonKey(assertion)
+			.. "\t" .. verifyTheory:canonKey(assertion)
 			table.insert(explanation, {expression = shown, truth = truth})
 		end
 		return false, explanation
@@ -987,6 +1002,18 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "proof" then
 		verifyStatement(statement.body, scope, semantics)
+		return
+	elseif statement.tag == "forall" then
+		-- No need to verify statement (as that is done externally)
+
+		-- Create a forall expression
+		assignRaw(scope, statement.destination, freeze {
+			tag = "forall",
+			quantified = statement.quantified,
+			instantiate = statement.instantiate,
+			location = statement.location,
+		})
+
 		return
 	end
 

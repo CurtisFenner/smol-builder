@@ -5,6 +5,8 @@ local theory = {
 	satisfaction_t = "any",
 }
 
+local showType = import("provided.lua").showType
+
 -- RETURNS a string
 local function showAssertion(assertion)
 	assertis(assertion, "Assertion")
@@ -49,6 +51,12 @@ local function showAssertion(assertion)
 		return "(string " .. string.format("%q", assertion.value) .. ")"
 	elseif assertion.tag == "variant" then
 		return "(variant " .. string.format("%q", assertion.variantName) .. " " .. showAssertion(assertion.base) .. ")"
+	elseif assertion.tag == "forall" then
+		local loc = assertion.location.begins
+		if type(loc) ~= "string" then
+			loc = loc.filename .. ":" .. loc.index
+		end
+		return "(forall " .. showType(assertion.quantified) .. " " .. loc .. ")"
 	end
 	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
@@ -154,17 +162,17 @@ local function typeOf(assertion)
 	elseif assertion.tag == "unit" then
 		return UNIT_TYPE
 	elseif assertion.tag == "method" then
-		-- todo
+		return assertion.signature.returnTypes[assertion.index]
 	elseif assertion.tag == "field" then
 		return assertion.definition.type
 	elseif assertion.tag == "static" then
-		-- todo
+		return assertion.signature.returnTypes[assertion.index]
 	elseif assertion.tag == "variable" then
 		return assertion.variable.type
 	elseif assertion.tag == "isa" then
 		return BOOLEAN_TYPE
 	elseif assertion.tag == "variant" then
-		-- todo
+		return assertion.definition.type
 	end
 end
 
@@ -249,6 +257,9 @@ function m_scan(self, object)
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)
+	elseif object.tag == "forall" then
+		-- Comparing by object identity is OK
+		self.relevant[shown] = object
 	end
 
 	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
@@ -258,6 +269,34 @@ end
 function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
 
+	local unquantifiedModel = {}
+	print("== Is satisfiable? ================================================")
+	for key, value in pairs(modelInput) do
+		print(showAssertion(key), "=>", value)
+		if key.tag == "forall" then
+			print("#!!!")
+			if value then
+				print("TODO!")
+			else
+				local constant = freeze {
+					-- TODO: don't use math.random()
+					name = "constant" .. math.random(),
+					type = key.quantified,
+					location = key.location,
+				}
+				-- Negated foralls are there-exists
+				-- Instantiate with a random constant
+				local ist, iout = key.instantiate(constant)
+				print("TODO!")
+
+				-- We can get the clauses, but we can't get the 
+			end
+		else
+			print("....")
+			unquantifiedModel[key] = value
+		end
+	end
+
 	-- 1) Generate a list of relevant subexpressions
 	profile.open "#canonicalization"
 	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
@@ -266,7 +305,7 @@ function theory:isSatisfiable(modelInput)
 	local falseAssertion = canon:scan(freeze {tag = "boolean", value = false})
 
 	local simple = {}
-	for key, value in pairs(modelInput) do
+	for key, value in pairs(unquantifiedModel) do
 		assertis(key, "Assertion")
 
 		local object = canon:scan(key)
@@ -308,6 +347,8 @@ function theory:isSatisfiable(modelInput)
 			table.insert(positiveEq, {falseAssertion, assertion})
 		end
 	end
+
+	table.insert(negativeEq, {falseAssertion, trueAssertion})
 
 	profile.close "#scan for equality"
 
@@ -663,4 +704,7 @@ end
 
 
 theory.evaluateConstantAssertion = evaluateConstantAssertion
-return freeze(theory)
+
+theory = freeze(theory)
+assertis(theory, "Theory")
+return theory

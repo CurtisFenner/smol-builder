@@ -16,6 +16,10 @@ REGISTER_TYPE("Theory", recordType {
 	-- argument: (self, assertion_t)
 	-- RETURNS an object with a consistent identity (strings are simple)
 	canonKey = "function",
+
+	-- argument: (self, simpleModel, cnf)
+	-- RETURNS [assertion_t]
+	additionalClauses = "function",
 })
 
 local function copywith(t, k, v)
@@ -137,6 +141,9 @@ end
 -- RETURNS a CNF description equivalent to (term == target)
 -- A CNF expression is [][](term, boolean).
 function toCNF(theory, bigTerm, target, normalization)
+	assertis(theory, "Theory")
+	assertis(bigTerm, theory.assertion_t)
+
 	assert(type(target) == "boolean")
 	assert(type(normalization) == "table")
 
@@ -234,6 +241,13 @@ local function cnfSAT(theory, cnf, assignment)
 		assert(assignment[term] == nil)
 		local with = copywith(assignment, term, truth)
 		local simplified = simplifyCNF(cnf, with)
+
+		-- Ask the theory for additional clauses
+		local additional = theory:additionalClauses(with, simplified)
+		for _, add in ipairs(additional) do
+			simplified = andCNF(simplified, toCNF(theory, add))
+		end
+
 		--print("\tunit cut", theory:canonKey(term), "is", truth)
 		--print(show(simplified))
 		return simplified and cnfSAT(theory, simplified, with)
@@ -308,6 +322,7 @@ end
 
 local plaintheory = {assertion_t = "any"}
 
+-- Test theory
 function plaintheory:isSatisfiable(model)
 	local anyGood = false
 	for x = 1, 2 do
@@ -382,6 +397,10 @@ function plaintheory:canonKey(e)
 		list[i] = plaintheory:canonKey(e[i])
 	end
 	return "{" .. table.concat(list, ", ") .. "}"
+end
+
+function plaintheory:additionalClauses()
+	return {}
 end
 
 plaintheory = freeze(plaintheory)
