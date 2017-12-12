@@ -7,6 +7,9 @@ local showType = provided.showType
 local areTypesEqual = provided.areTypesEqual
 local areInterfaceTypesEqual = provided.areInterfaceTypesEqual
 
+local BOOLEAN_DEF = table.findwith(provided.BUILTIN_DEFINITIONS, "name", "Boolean")
+
+
 -- RETURNS the clearest possible combination of a, and b.
 local function unclear(a, b)
 	assertis(a, "maybe")
@@ -705,6 +708,113 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 	end
 
 	return buildProof(out)
+end
+
+-- RETURNS an Assume that var is exactly one of the tags of union
+local function closedUnionAssumption(union, var)
+	assertis(var, "VariableIR")
+
+	local seq = {}
+	local ises = {}
+	for _, variant in ipairs(union.fields) do
+		local v = {
+			type = BOOLEAN_TYPE,
+			name = generateLocalID("closed_union_is_" .. variant.name),
+			location = var.location,
+		}
+		table.insert(ises, v)
+		table.insert(seq, localSt(v))
+		table.insert(seq, {
+			tag = "isa",
+			base = var,
+			destination = v,
+			variant = variant.name,
+			returns = "no",
+		})
+	end
+
+	-- Generate any (is a or is b or is c ...)
+	local any = freeze {
+		type = BOOLEAN_TYPE,
+		name = generateLocalID("any-closed"),
+		location = var.location,
+	}
+	table.insert(seq, localSt(any))
+
+	local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "not")
+	local OR_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "or")
+	local AND_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "and")
+
+	table.insert(seq, {
+		tag = "assign",
+		destination = any,
+		source = ises[1],
+		returns = "no",
+	})
+	for i = 2, #ises do
+		table.insert(seq, {
+			tag = "method-call",
+			destinations = {any},
+			baseInstance = any,
+			methodName = "or",
+			arguments = {ises[i]},
+			signature = OR_SIGNATURE,
+			returns = "no",
+		})
+	end
+
+	table.insert(seq, {
+		tag = "assume",
+		variable = any,
+		location = var.location,
+		returns = "no",
+	})
+
+	-- Generate at-most-one
+	for i, va in ipairs(ises) do
+		for j, vb in ipairs(ises) do
+			if i ~= j then
+				local both = {
+					type = BOOLEAN_TYPE,
+					name = generateLocalID("both_variant" .. va.name .. "_" .. vb.name),
+					location = var.location,
+				}
+				table.insert(seq, localSt(both))
+				table.insert(seq, {
+					tag = "method-call",
+					baseInstance = va,
+					arguments = {vb},
+					destinations = {both},
+					methodName = "and",
+					signature = AND_SIGNATURE,
+					returns = "no",
+				})
+				local bothNot = {
+					type = BOOLEAN_TYPE,
+					name = generateLocalID("bothNot_variant" .. va.name .. "_" .. vb.name),
+					location = var.location,
+				}
+				table.insert(seq, localSt(bothNot))
+				table.insert(seq, {
+					tag = "method-call",
+					baseInstance = both,
+					arguments = {},
+					destinations = {bothNot},
+					methodName = "not",
+					signature = NOT_SIGNATURE,
+					returns = "no",
+				})
+				table.insert(seq, {
+					tag = "assume",
+					variable = bothNot,
+					location = var.location,
+					returns = "no",
+				})
+			end
+		end
+	end
+
+	return buildBlock(seq)
 end
 
 -- RETURNS StatementIR, [Variable]
@@ -1464,7 +1574,6 @@ function compileExpression(pExpression, scope, environment)
 			}
 			return buildBlock(execution), freeze {variable}
 		elseif pExpression.keyword == "return" then
-			-- TODO: mark as uncomputable
 			local returns = environment.containingSignature.returnTypes
 
 			if #returns ~= 1 then
@@ -1563,6 +1672,9 @@ function compileExpression(pExpression, scope, environment)
 				variantDefinition = field,
 			}
 
+			-- Assert that the union variable comes from a closed set
+			local assumeUnion = closedUnionAssumption(definition, base)
+
 			local isVar = {
 				type = BOOLEAN_TYPE,
 				name = generateLocalID("variantis"),
@@ -1587,6 +1699,7 @@ function compileExpression(pExpression, scope, environment)
 			local block = buildBlock {
 				baseEvaluation,
 				buildProof(buildBlock {
+					assumeUnion,
 					localSt(isVar),
 					isStatement,
 					verify,
@@ -2998,8 +3111,14 @@ local function semanticsSmol(sources, main)
 						table.insert(unhandledVariants, field.name)
 					end
 				end
+
+				local verification = buildBlock {}
+				-- Check for inexhaustivity
 				if #unhandledVariants ~= 0 then
 					print "INEXHAUSTIVE MATCH: TODO HANDLE THIS"
+					local seq = {
+						closedUnionAssumption(definition, base),
+					}
 					if false then
 						Report.INEXHAUSTIVE_MATCH {
 							location = pStatement.location,
@@ -3007,6 +3126,46 @@ local function semanticsSmol(sources, main)
 							baseType = showType(base.type),
 						}
 					end
+					for _, variant in ipairs(unhandledVariants) do
+						local isBad = {
+							type = BOOLEAN_TYPE,
+							name = generateLocalID("isBad_" .. variant),
+							location = pStatement.location,
+						}
+						local isNotBad = {
+							type = BOOLEAN_TYPE,
+							name = generateLocalID("isNotBad_" .. variant),
+							location = pStatement.location,
+						}
+						table.insert(seq, localSt(isBad))
+						table.insert(seq, localSt(isNotBad))
+						table.insert(seq, {
+							tag = "isa",
+							base = base,
+							destination = isBad,
+							variant = variant,
+							returns = "no",
+						})
+						local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "not")
+						table.insert(seq, {
+							tag = "method-call",
+							baseInstance = isBad,
+							methodName = "not",
+							arguments = {},
+							destinations = {isNotBad},
+							signature = NOT_SIGNATURE,
+							returns = "no",
+						})
+						table.insert(seq, {
+							tag = "verify",
+							variable = isNotBad,
+							checkLocation = pStatement.location,
+							conditionLocation = pStatement.location,
+							reason = "exhaustivity of match",
+							returns = "no",
+						})
+					end
+					verification = buildProof(buildBlock(seq))
 				end
 
 				-- Determine if this match returns or not
@@ -3037,7 +3196,7 @@ local function semanticsSmol(sources, main)
 					returns = returns,
 				}
 				assertis(match, "MatchSt")
-				return buildBlock {baseEvaluation, match}
+				return buildBlock {baseEvaluation, verification, match}
 			elseif pStatement.tag == "assign-statement" then
 				local out = {}
 
