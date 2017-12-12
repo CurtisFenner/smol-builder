@@ -115,7 +115,9 @@ Compiler bugs are possible, exercise caution.
 
 ## VSCode Plugin
 
-TODO
+The VSCode extension can be found here: [https://marketplace.visualstudio.com/items?itemName=curtisfenner.smolcomp].
+
+This extension provides syntax highlighting and red-underlining of errors.
 
 # The Smol Programming Language
 
