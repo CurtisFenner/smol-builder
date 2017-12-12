@@ -250,12 +250,12 @@ local function cnfSAT(theory, cnf, assignment)
 
 		-- Ask the theory for additional clauses
 		local additional = theory:additionalClauses(with, term, simplified)
-		if #additional >= 1 then
-			print("SMT:")
-			print("\tbecause ", theory:canonKey(term), "=>", truth, "in model")
-		end
+		--if #additional >= 1 then
+		--	print("SMT:")
+		--	print("\tbecause ", theory:canonKey(term), "=>", truth, "in model")
+		--end
 		for _, add in ipairs(additional) do
-			print("\t\tlearned ", theory:canonKey(add))
+			--print("\t\tlearned ", theory:canonKey(add))
 			local addCNF = toCNF(theory, add, true, {})
 			simplified = andCNF(simplified, addCNF)
 		end
