@@ -9,6 +9,28 @@ local UnionFind = import "unionfind.lua"
 
 local showType = import("provided.lua").showType
 
+local provided = import "provided.lua"
+local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
+local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
+
+--------------------------------------------------------------------------------
+
+-- RETURNS an Assertion representing the negation of a
+local function notAssertion(a)
+	assertis(a, "Assertion")
+
+	return freeze {
+		tag = "method",
+		methodName = "not",
+		base = a,
+		arguments = {},
+
+		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "not"),
+	}
+end
+
+--------------------------------------------------------------------------------
+
 -- RETURNS a string
 local function showAssertion(assertion)
 	assertis(assertion, "Assertion")
@@ -268,8 +290,35 @@ function m_scan(self, object)
 	return self.relevant[shown]
 end
 
-function theory:additionalClauses()
-	print("TODO: additional clauses")
+local cID = 0
+local function newConst()
+	cID = cID + 1
+	return "const." .. cID
+end
+
+-- Learn additional clauses from the inclusion of `term` in `model`
+-- (Added to support quantifiers)
+-- model: the model so far
+-- cnf: the remaining clauses to satisfy
+-- term: the key just added to model
+function theory:additionalClauses(model, term, cnf)
+	assertis(term, "Assertion")
+
+	if term.tag == "forall" then
+		assertis(model[term], "boolean")
+		if model[term] then
+			-- Find all terms of the specified sort
+			error("TODO: additional clauses")
+		else
+			-- Instantiate with an arbitrary new constant
+			-- (There exists not P(c))
+			local constantName = newConst()
+			local newTerm, res = term:instantiate(constantName)
+
+			-- Push the negative through for exists
+			return {newTerm, notAssertion(res)}
+		end
+	end
 	return {}
 end
 
@@ -277,29 +326,12 @@ function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
 
 	local unquantifiedModel = {}
-	print("== Is satisfiable? ================================================")
 	for key, value in pairs(modelInput) do
-		print(showAssertion(key), "=>", value)
 		if key.tag == "forall" then
-			print("#!!!")
-			if value then
-				print("TODO!")
-			else
-				local constant = freeze {
-					-- TODO: don't use math.random()
-					name = "constant" .. math.random(),
-					type = key.quantified,
-					location = key.location,
-				}
-				-- Negated foralls are there-exists
-				-- Instantiate with a random constant
-				local ist, iout = key.instantiate(constant)
-				print("TODO!")
-
-				-- We can get the clauses, but we can't get the 
-			end
+			-- Do not handle here.
+			-- See theory:additionalClauses.
 		else
-			print("....")
+			-- Regular, non-quantifier expression
 			unquantifiedModel[key] = value
 		end
 	end
@@ -644,4 +676,7 @@ theory.evaluateConstantAssertion = evaluateConstantAssertion
 
 theory = freeze(theory)
 assertis(theory, "Theory")
-return theory
+return {
+	theory = theory,
+	notAssertion = notAssertion,
+}

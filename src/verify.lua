@@ -3,7 +3,9 @@ local showType = calculateSemantics.showType
 local showInterfaceType = calculateSemantics.showInterfaceType
 
 local smt = import "smt.lua"
-local verifyTheory = import "verify-theory.lua"
+
+local verifyTheory = (import "verify-theory.lua").theory
+local notAssertion = (import "verify-theory.lua").notAssertion
 
 local Report = import "verify-errors.lua"
 
@@ -107,8 +109,11 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "forall",
 		quantified = "Type+",
-		instantiate = "function",
 		location = "Location",
+
+		-- (self, constantName string) => Assertion
+		instantiate = "function",
+
 	}
 ))
 
@@ -263,18 +268,25 @@ local function makeEqSignature(t)
 	return eqSignature
 end
 
--- RETURNS an Assertion representing the negation of a
-local function notAssertion(a)
+-- RETURNS an Assertion representing a && b
+local function andAssertion(a, b)
 	assertis(a, "Assertion")
+	assertis(b, "Assertion")
 
-	return freeze {
-		tag = "method",
-		methodName = "not",
-		base = a,
-		arguments = {},
-
-		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "not"),
+	local BUILTIN_LOC = {
+		begins = "builtin",
+		ends = "builtin",
 	}
+
+	local p = freeze {
+		tag = "method",
+		methodName = "and",
+		base = a,
+		arguments = {b},
+		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "and")
+	}
+	assertis(p, "MethodAssertion")
+	return p
 end
 
 -- RETURNS an Assertion representing a => b
@@ -541,13 +553,14 @@ end
 
 -- RETURNS a list of true Assertion predicates, inNow
 -- path: a string used to generate unique names
-local function getPredicateSet(scope, assignments, path)
+local function getPredicateSet(scope, assignments, path, skip)
 	assertis(scope, listType "Action")
 	assertis(assignments, mapType("string", recordType{
 		value = "Assertion",
 		definition = "VariableIR",
 	}))
 	assertis(path, "string")
+	skip = skip or 0
 
 	-- TODO: come up with something that deals with loops
 	local predicates = {}
@@ -631,6 +644,11 @@ local function getPredicateSet(scope, assignments, path)
 		else
 			error("unknown action tag `" .. action.tag .. "`")
 		end
+
+		if i == skip then
+			-- Wipe out predicates learned before this point
+			predicates = {}
+		end
 	end
 	assertis(predicates, listType "Assertion")
 	return predicates, inNow
@@ -642,16 +660,16 @@ local function mustModel(scope, target)
 	local predicates, inNow = getPredicateSet(scope, {}, "")
 	profile.close "translating-in-scope"
 
-	--print("\n\n\n\n")
-	--for i, p in ipairs(predicates) do
-	--	print("& " .. verifyTheory:canonKey(p))
-	--end
+	print("\n\n\n\n")
+	for i, p in ipairs(predicates) do
+		print("& " .. verifyTheory:canonKey(p))
+	end
 
 	assertis(target, "Assertion")
 	local result = inNow(target)
-	--print("=?=> " .. verifyTheory:canonKey(result))
+	print("=?=> " .. verifyTheory:canonKey(result))
 	local tautology, counter = smt.implies(verifyTheory, predicates, result)
-	--print("<-", tautology)
+	print("<-", tautology)
 
 	if not tautology then
 		local explanation = {}
@@ -772,13 +790,65 @@ local function scopeAdditional(old, new)
 	return out
 end
 
--- RETURNS a assertion representing the disjunction of all facts given in each
--- list
-local function scopeDisjunction(a, b)
-	assertis(a, listType "Action")
-	assertis(b, listType "Action")
+-- RETURNS a list of VariableIRs
+local function localsInStatement(statement)
+	assertis(statement, "StatementIR")
 
-	error "TODO!"
+	if statement.tag == "local" then
+		return {statement.variable}
+	elseif statement.tag == "block" then
+		local out = {}
+		for _, child in ipairs(statement.statements) do
+			for _, e in ipairs(localsInStatement(child)) do
+				table.insert(out, e)
+			end
+		end
+		return out
+	elseif statement.tag == "match" then
+		local out = {}
+		for _, case in ipairs(statement.cases) do
+			for _, e in ipairs(localsInStatement(case.statement)) do
+				table.insert(out, e)
+			end
+		end
+		return out
+	end
+
+	local terminal = {
+		assume = {},
+		verify = {},
+
+		-- Proofs are recursive
+		proof = {"body"},
+
+		string = {},
+		nothing = {},
+		assign = {},
+		["return"] = {},
+		["if"] = {"bodyThen", "bodyElse"},
+		int = {},
+		["new-class"] = {},
+		["new-union"] = {},
+		["static-call"] = {},
+		["method-call"] = {},
+		["generic-method-call"] = {},
+		["generic-static-call"] = {},
+		boolean = {},
+		field = {},
+		this = {},
+		unit = {},
+		variant = {},
+		isa = {},
+		forall = {},
+	}
+
+	local out = {}
+	for _, property in ipairs(terminal[statement.tag]) do
+		for _, e in ipairs(localsInStatement(statement[property])) do
+			table.insert(out, e)
+		end
+	end
+	return out
 end
 
 -- MODIFIES scope
@@ -1004,13 +1074,61 @@ local function verifyStatement(statement, scope, semantics)
 		verifyStatement(statement.body, scope, semantics)
 		return
 	elseif statement.tag == "forall" then
-		-- No need to verify statement (as that is done externally)
+
+		local subscopePrime = scopeCopy(scope)
+		
+		-- RETURNS background assertions, result value
+		local function instantiate(self, name)
+			assertis(name, "string")
+			
+			-- Get an arbitrary instantiation
+			local arbitrary = freeze {
+				name = name,
+				type = statement.quantified,
+				location = statement.location,
+			}
+			assertis(arbitrary, "VariableIR")
+			
+			local subscope = scopeCopy(subscopePrime)
+			local inCode, inOut = statement.instantiate(arbitrary)
+			verifyStatement(inCode, subscope, semantics)
+			
+			-- Discover the newly learned facts in this hypothetical
+			local learnedPredicates, inNow = getPredicateSet(subscope, {}, "", #subscopePrime)
+
+			print()
+			print(string.rep("+ ", 40))
+			print("instantiate with name", name)
+
+			print()
+			print("facts are")
+			local post = {}
+			for _, p in ipairs(learnedPredicates) do
+				print("", verifyTheory:canonKey(p))
+				table.insert(post, p)
+			end
+
+			print(string.rep("+ ", 40))
+			print()
+
+			-- Return the conjunction
+			if #post == 0 then
+				return trueBoolean
+			end
+			local u = post[1]
+			for i = 2, #post do
+				u = andAssertion(u, post[i])
+			end
+
+			assertis(inOut, "VariableIR")
+			return u, inNow(variableAssertion(inOut))
+		end
 
 		-- Create a forall expression
 		assignRaw(scope, statement.destination, freeze {
 			tag = "forall",
 			quantified = statement.quantified,
-			instantiate = statement.instantiate,
+			instantiate = instantiate,
 			location = statement.location,
 		})
 

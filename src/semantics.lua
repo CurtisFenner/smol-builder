@@ -1761,7 +1761,7 @@ function compileExpression(pExpression, scope, environment)
 
 		return buildBlock {baseEvaluation, localSt(result), isA}, freeze {result}
 	elseif pExpression.tag == "forall-expr" then
-		-- TODO: verify this is in ghost context
+		-- TODO: check that this is in a ghost context
 
 		local scopeCopy = {}
 
@@ -1795,7 +1795,6 @@ function compileExpression(pExpression, scope, environment)
 
 			-- Check types
 			checkSingleBoolean(predicates, "forall predicate")
-
 
 			-- Move the result into the instantiated result
 			local move = freeze {

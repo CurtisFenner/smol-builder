@@ -1463,6 +1463,8 @@ EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
 	location = "Location",
 })
 
+--------------------------------------------------------------------------------
+
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "Type+",

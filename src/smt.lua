@@ -52,6 +52,12 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a CNF formula, [][](term, boolean)
+-- the conjunction of CNFs a and b
+local function andCNF(a, b)
+	return table.concatted(a, b)
+end
+
 -- clause: a CNF clause
 -- RETURNS a CNF clause, [](term, boolean)
 -- RETURNS true when the given clause is always true
@@ -243,13 +249,17 @@ local function cnfSAT(theory, cnf, assignment)
 		local simplified = simplifyCNF(cnf, with)
 
 		-- Ask the theory for additional clauses
-		local additional = theory:additionalClauses(with, simplified)
+		local additional = theory:additionalClauses(with, term, simplified)
+		if #additional >= 1 then
+			print("SMT:")
+			print("\tbecause ", theory:canonKey(term), "=>", truth, "in model")
+		end
 		for _, add in ipairs(additional) do
-			simplified = andCNF(simplified, toCNF(theory, add))
+			print("\t\tlearned ", theory:canonKey(add))
+			local addCNF = toCNF(theory, add, true, {})
+			simplified = andCNF(simplified, addCNF)
 		end
 
-		--print("\tunit cut", theory:canonKey(term), "is", truth)
-		--print(show(simplified))
 		return simplified and cnfSAT(theory, simplified, with)
 	end
 
