@@ -589,6 +589,11 @@ function theory:isSatisfiable(modelInput)
 				return false
 			end
 			return eq:query(x.base, y.base)
+		elseif x.tag == "variant" then
+			if x.variantName ~= y.variantName then
+				return false
+			end
+			return eq:query(x.base, y.base)
 		end
 		error("TODO childrenSame for tag `" .. x.tag .. "`")
 	end

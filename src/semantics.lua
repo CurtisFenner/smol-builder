@@ -8,7 +8,7 @@ local areTypesEqual = provided.areTypesEqual
 local areInterfaceTypesEqual = provided.areInterfaceTypesEqual
 
 local BOOLEAN_DEF = table.findwith(provided.BUILTIN_DEFINITIONS, "name", "Boolean")
-
+local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
 
 -- RETURNS the clearest possible combination of a, and b.
 local function unclear(a, b)
@@ -357,13 +357,17 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 	assertis(location, "Location")
 	assert(name:sub(1, 1):lower() == name:sub(1, 1))
 	assertis(generics, listType "TypeParameterIR")
+
+	assertis(environment, recordType {
+		allDefinitions = listType "object",
+		containingSignature = "Signature",
+		thisVariable = choiceType(constantType(false), "VariableIR"),
+	})
 	
 	local allDefinitions = environment.allDefinitions
 	local containingSignature = environment.containingSignature
 	assertis(allDefinitions, listType "Definition")
 	assertis(containingSignature, "Signature")
-	local thisVariable = environment.thisVariable
-	assertis(thisVariable, choiceType(constantType(false), "VariableIR"))
 
 	local parameter, pi = table.findwith(generics, "name", genericType.name)
 	assert(parameter)
@@ -383,9 +387,10 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 				interface = constraint.interface,
 			}
 			if containingSignature.modifier == "method" then
+				assert(environment.thisVariable)
 				constraintIR = {
 					tag = "this-constraint",
-					instance = thisVariable,
+					instance = environment.thisVariable,
 					name = "#" .. pi .. "_" .. ci,
 					interface = constraint.interface,
 				}
@@ -452,6 +457,10 @@ local function constraintFromStruct(interface, implementer, generics, containing
 	assertis(implementer, "Type+")
 	assertis(generics, listType "TypeParameterIR")
 	assertis(containingSignature, "Signature")
+	assertis(environment, recordType {
+		allDefinitions = listType "object",
+		thisVariable = choiceType(constantType(false), "VariableIR"),
+	})
 
 	if implementer.tag == "concrete-type+" then
 		local definition = definitionFromType(implementer, environment.allDefinitions)
@@ -505,7 +514,7 @@ local function constraintFromStruct(interface, implementer, generics, containing
 			}
 		else
 			-- Get a this constraint
-			assertis(environment.thisVariable, "VariableIR")
+			assert(environment.thisVariable)
 			return freeze {
 				tag = "this-constraint",
 				instance = environment.thisVariable,
@@ -1557,7 +1566,11 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 
-			return buildBlock {}, {environment.thisVariable}
+			-- Annotated the variable with the current location
+			local thisV = table.with(environment.thisVariable,
+				"location", pExpression.location)
+
+			return buildBlock {}, {thisV}
 		elseif pExpression.keyword == "unit" then
 			local variable = {
 				type = UNIT_TYPE,
@@ -2630,10 +2643,9 @@ local function semanticsSmol(sources, main)
 
 				local containerType = typeFromDefinition(definition)
 				local thisVariable = false
-				local unknownLocation = {begins = "???", ends = "???"}
 				if signature.modifier == "method" then
-					thisVariable = {
-						location = unknownLocation,
+					thisVariable = freeze {
+						location = UNKNOWN_LOCATION,
 						name = "this",
 						type = containerType,
 					}
@@ -2642,7 +2654,7 @@ local function semanticsSmol(sources, main)
 				local returnOuts = {}
 				for i, returned in ipairs(signature.returnTypes) do
 					table.insert(returnOuts, {
-						location = unknownLocation,
+						location = UNKNOWN_LOCATION,
 						name = "_r" .. i,
 						type = returned,
 					})
@@ -2697,14 +2709,12 @@ local function semanticsSmol(sources, main)
 
 		local thisVariable = false
 		if containingSignature.modifier == "method" then
-			thisVariable = {
+			thisVariable = freeze {
 				name = "this",
 				type = containerType,
-				location = containingSignature.location,
+				location = UNKNOWN_LOCATION,
 			}
 		end
-		assertis(thisVariable, choiceType("false", "VariableIR"))
-
 		local resolveType = makeTypeResolver(containingSignature, definition.generics, allDefinitions)
 
 		-- RETURNS a (verified) InterfaceType+
@@ -2740,7 +2750,11 @@ local function semanticsSmol(sources, main)
 				for _, a in ipairs(containingSignature.parameters) do
 					table.insert(arguments, getFromScope(scope, a.name))
 				end
-				local invocation = {arguments = arguments, this = thisVariable, container = containerType}
+				local invocation = {
+					arguments = arguments,
+					this = thisVariable,
+					container = containerType
+				}
 				assertis(invocation.container, "Type+")
 
 				local sub = table.with(environment, "returnOuts", returnOuts)
@@ -3036,22 +3050,22 @@ local function semanticsSmol(sources, main)
 					local sequence = {}
 
 					-- Verify that the variable name is not in scope
-					local previous = getFromScope(scope, case.variable)
+					local previous = getFromScope(scope, case.head.variable)
 					if previous then
 						Report.VARIABLE_DEFINED_TWICE {
 							first = previous.location,
-							second = case.location,
-							name = case.variable,
+							second = case.head.location,
+							name = case.head.variable,
 						}
 					end
 
 					-- Get the field
-					local field = table.findwith(definition.fields, "name", case.variant)
+					local field = table.findwith(definition.fields, "name", case.head.variant)
 					if not field then
 						Report.NO_SUCH_VARIANT {
 							container = showType(base.type),
-							name = case.variable,
-							location = case.location,
+							name = case.head.variable,
+							location = case.head.location,
 						}
 					end
 					local previous = table.findwith(cases, "variant", field.name)
@@ -3059,15 +3073,16 @@ local function semanticsSmol(sources, main)
 						Report.VARIANT_USED_TWICE {
 							variant = field.name,
 							firstLocation = previous.location,
-							secondLocation = case.location,
+							secondLocation = case.head.location,
 						}
 					end
 
 					-- Add the variable to the current scope
 					local variable = {
-						name = case.variable,
+						name = case.head.variable,
 						type = unionSubstituter(field.type),
-						location = case.location,
+						-- 
+						location = case.head.location,
 					}
 
 					scope[#scope][variable.name] = variable
@@ -3079,7 +3094,7 @@ local function semanticsSmol(sources, main)
 
 					table.insert(sequence, {
 						tag = "variant",
-						variant = case.variant,
+						variant = case.head.variant,
 						base = base,
 						destination = variable,
 						returns = "no",
@@ -3092,7 +3107,7 @@ local function semanticsSmol(sources, main)
 					table.remove(scope)
 					table.insert(cases, freeze {
 						variant = field.name,
-						location = case.location,
+						location = case.head.location,
 						statement = buildBlock(sequence),
 					})
 				end
@@ -3121,13 +3136,7 @@ local function semanticsSmol(sources, main)
 					local seq = {
 						closedUnionAssumption(definition, base),
 					}
-					if false then
-						Report.INEXHAUSTIVE_MATCH {
-							location = pStatement.location,
-							missingCases = unhandledVariants,
-							baseType = showType(base.type),
-						}
-					end
+
 					for _, variant in ipairs(unhandledVariants) do
 						local isBad = {
 							type = BOOLEAN_TYPE,

@@ -58,8 +58,14 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 	}
 
 	method get(key #K) core:Option[#V]
-	ensures (this.addition.getPair().getKey() == key).implies(return is some) when this is addition
-	ensures (this.addition.getPair().getKey() == key).implies(return.get() == this.addition.getPair().getValue()) when this is addition
+	// The key exists
+	ensures (this.addition.getPair().getKey() == key)
+		.implies(return is some)
+		when this is addition
+	// The key is the most recent put
+	ensures (this.addition.getPair().getKey() == key)
+		.implies(return.get() == this.addition.getPair().getValue())
+		when this is addition
 	{
 		match this {
 			case empty empty {
@@ -68,12 +74,23 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 			}
 			case add addition {
 				if add.getPair().getKey() == key {
-					return core:Option[#V].makeSome(add.getPair().getValue());
+					var out core:Option[#V] = core:Option[#V].makeSome(add.getPair().getValue());
+					assert out is some;
+					assert out.get() == this.addition.getPair().getValue();
+					//assert (this.addition.getPair().getKey() == key)
+					//	.implies(out.get() == this.addition.getPair().getValue());
+					//if this is addition {
+					//	assert (this.addition.getPair().getKey() == key)
+					//		.implies(out.get() == this.addition.getPair().getValue());
+					//}
+					return out;
 				}
+
 				return add.getRest().get(key);
 			}
 		}
 	}
+
 
 	method add(key #K, value #V) Map[#K, #V]
 	ensures return.get(key) is some

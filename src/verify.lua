@@ -119,10 +119,11 @@ REGISTER_TYPE("Assertion", choiceType(
 
 		-- (self, constantName string) => Assertion
 		instantiate = "function",
-
 	}
 ))
 
+-- RETURNS a string containing the contents of the source code within this
+-- Location
 local function excerpt(location)
 	assertis(location, "Location")
 
@@ -145,11 +146,10 @@ local function excerpt(location)
 		if line == ends.line then
 			high = ends.column
 		end
-		for i = low, high do
-			out = out .. source[line]:sub(i, i)
-		end
+		out = out ..source[line]:sub(low, high)
 	end
 	return out
+	--return "(" .. begins.line .. ":" .. begins.column .. "):(" .. ends.line .. ":" .. ends.column .. ") " .. out
 end
 
 -- RETURNS a string (as executable Smol code)
@@ -375,6 +375,11 @@ local function showStatement(statement, indent)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
 		local rhs = showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
 		return pre .. " " .. destinations.. " := " .. rhs
+	elseif statement.tag == "generic-method-call" then
+		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
+		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
+		local rhs = statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations.. " := " .. rhs
 	elseif statement.tag == "return" then
 		local out = {}
 		for _, s in ipairs(statement.sources) do
@@ -391,6 +396,22 @@ local function showStatement(statement, indent)
 		table.insert(x, "\n" .. indent .. "else\n")
 		table.insert(x, showStatement(statement.bodyElse, indent .. "\t"))
 		return table.concat(x, "")
+	elseif statement.tag == "this" then
+		return pre .. " " .. statement.destination.name
+	elseif statement.tag == "field" then
+		local rhs = statement.base.name .. "." .. statement.name
+		return pre .. " " .. statement.destination.name .. " := " .. rhs
+	elseif statement.tag == "variant" then
+		local rhs = statement.base.name .. "." .. statement.variant
+		return pre .. " " .. statement.destination.name .. " := " .. rhs
+	elseif statement.tag == "new-class" then
+		local rhs = {}
+		for k, v in pairs(statement.fields) do
+			table.insert(rhs, k .. " -> " .. v.name)
+		end
+		rhs = table.concat(rhs, ", ")
+		local t = showType(statement.type)
+		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
 	else
 		return pre .. " <?>"
 	end
@@ -655,7 +676,7 @@ local function mustModel(scope, target)
 		local explanation = {}
 		for assertion, truth in pairs(counter) do
 			local shown = assertionExprString(assertion)
-			--.. "\t" .. verifyTheory:canonKey(assertion)
+			.. "\n\t\t" .. verifyTheory:canonKey(assertion)
 			table.insert(explanation, {expression = shown, truth = truth})
 		end
 		return false, explanation
@@ -1160,8 +1181,8 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	--print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
-	--print(showStatement(func.body))
+	print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
+	print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {}, semantics)

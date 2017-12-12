@@ -942,8 +942,14 @@ local function parseSmol(tokens)
 		["case"] = parser.composite {
 			tag = "case",
 			{"_", K_CASE},
-			{"variable", T_IDENTIFIER, "expected a variable name"},
-			{"variant", T_IDENTIFIER, "expected a union tag name"},
+			{
+				"head",
+				parser.composite {
+					tag = "case-head",
+					{"variable", T_IDENTIFIER, "expected a variable name"},
+					{"variant", T_IDENTIFIER, "expected a union tag name"},
+				},
+			},
 			{"body", parser.named "block", "expected a block to follow case"},
 		},
 
@@ -1616,8 +1622,11 @@ union Option[#T | #T is Eq[#T]] {
 	}
 
 	method get() #T
-	requires this is some {
-		return this.some;
+	requires this is some
+	ensures return == this.some {
+		var out #T = this.some;
+		assert out == this.some;
+		return out;
 	}
 }
 
@@ -1635,12 +1644,15 @@ interface Eq[#T] {
 class WInt is Eq[WInt] {
 	var value Int;
 
-	method get() Int ensures return == this.value{
+	method get() Int ensures return == this.value {
 		return this.value;
 	}
 
 	static make(n Int) WInt ensures return.get() == n {
-		return new(value = n);
+		var out WInt = new(value = n);
+		assert out.value == n;
+		assert out.get() == n;
+		return out;
 	}
 
 	method eq(other WInt) Boolean {
