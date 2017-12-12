@@ -1,9 +1,13 @@
 # The Smol Compiler, `smolc`
 
-`smolc` is a highly-portable compiler for the toy programming language I call
+**`smolc`** is a highly-portable compiler for the toy programming language I call
 Smol that emits standard-conforming ISO C99.
-Smol is a pure, statically-typed, procedural programming language that includes
+**Smol** is a pure, statically-typed, procedural programming language that includes
 classes, interfaces, tagged unions, and generics.
+
+Smol also includes a **verification framework** that allows assertions to be
+checked *statically* with *zero runtime cost*. This analysis is mostly sound;
+programs written in Smol do not reach error states.
 
 ## Hello world!
 
@@ -119,14 +123,11 @@ I have been designing Smol since approximately Spring of 2017.
 My mission is to create a programming language that rigidly enforces the
 conventions that I have found to be helpful
 in designing maintainable software. These conventions include
-* Statically checked annotations (types)
+* Statically checked annotations
 * Explicitness
 * Immutability
 * Familiarity
 * Totally defined behavior
-
-Through the addition of preconditions and postconditions, I plan to entirely
-eliminate runtime errors from Smol.
 
 ## Author
 
