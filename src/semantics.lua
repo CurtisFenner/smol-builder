@@ -1823,7 +1823,9 @@ function compileExpression(pExpression, scope, environment)
 			}
 		end
 
-		return buildBlock {baseEvaluation, localSt(result), isA}, freeze {result}
+		local isUnion = buildProof(closedUnionAssumption(baseDefinition, base))
+
+		return buildBlock {baseEvaluation, isUnion, localSt(result), isA}, freeze {result}
 	elseif pExpression.tag == "forall-expr" then
 		-- TODO: check that this is in a ghost context
 

@@ -28,6 +28,8 @@ local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
 
 local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
 
+local typeOfAssertion = provided.typeOfAssertion
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -498,6 +500,27 @@ local function addMerge(scope, branches)
 	table.insert(scope, action)
 end
 
+-- RETURNS an Assertion
+-- MODIFIES scope
+local snapshotID = 0
+local function addSnapshot(scope, assertion, location)
+	assertis(scope, listType "Action")
+	assertis(assertion, "Assertion")
+	assertis(location, "Location")
+
+	snapshotID = snapshotID + 1
+	local name = "snapshot'" .. snapshotID
+	local variable = freeze {
+		type = typeOfAssertion(assertion),
+		name = name,
+		location = location,
+	}
+
+	assignRaw(scope, variable, assertion)
+
+	return variableAssertion(variable)
+end
+
 -- RETURNS a list of true Assertion predicates, inNow
 -- path: a string used to generate unique names
 local function getPredicateSet(scope, assignments, path, skip)
@@ -622,7 +645,7 @@ local function mustModel(scope, target)
 		local explanation = {}
 		for assertion, truth in pairs(counter) do
 			local shown = assertionExprString(assertion)
-			.. "\t" .. verifyTheory:canonKey(assertion)
+			--.. "\t" .. verifyTheory:canonKey(assertion)
 			table.insert(explanation, {expression = shown, truth = truth})
 		end
 		return false, explanation
@@ -943,6 +966,7 @@ local function verifyStatement(statement, scope, semantics)
 	
 		-- Check each case
 		assert(#statement.cases > 0)
+		local posts = {}
 		for _, case in ipairs(statement.cases) do
 			local subscope = scopeCopy(scope)
 
@@ -951,6 +975,10 @@ local function verifyStatement(statement, scope, semantics)
 				base = variableAssertion(statement.base),
 				variant = case.variant,
 			}
+
+			-- Remember whether or not the condition was true when we started
+			-- evaluating it
+			local snappedCondition = addSnapshot(scope, condition, statement.base.location)
 
 			-- Add variant predicate
 			addPredicate(subscope, condition)
@@ -961,6 +989,10 @@ local function verifyStatement(statement, scope, semantics)
 					scope = subscope,
 					condition = condition,
 				})
+			else
+				-- After the branch, we can assume the condition didn't hold
+				-- since those paths returned
+				table.insert(posts, notAssertion(snappedCondition))
 			end
 		end
 
@@ -972,9 +1004,20 @@ local function verifyStatement(statement, scope, semantics)
 
 		-- Learn the disjunction of the new statements
 		addMerge(scope, branches)
+
+		-- Learn things from cut branches
+		for _, post in ipairs(posts) do
+			addPredicate(scope, post)
+		end
+
 		return
 	elseif statement.tag == "if" then
 		local conditionAssertion = variableAssertion(statement.condition)
+
+		-- Capture the truth value of the condition at evaluation time
+		local snappedCondition = addSnapshot(scope, conditionAssertion, statement.condition.location)
+
+		local posts = {}
 
 		-- Evaluate the then body with condition given
 		local thenScope = scopeCopy(scope)
@@ -994,13 +1037,20 @@ local function verifyStatement(statement, scope, semantics)
 				scope = newThen,
 				condition = conditionAssertion
 			})
+		else
+			-- Learn the cut; may assume not(condition)
+			table.insert(posts, notAssertion(snappedCondition))
 		end
+
 		if statement.bodyElse.returns ~= "yes" then
 			local newElse = scopeAdditional(scope, elseScope)
 			table.insert(branches, {
 				scope = newElse,
 				condition = notAssertion(conditionAssertion)
 			})
+		else
+			-- Learn the cut; may assume condition
+			table.insert(posts, snappedCondition)
 		end
 
 		if #branches == 0 then
@@ -1009,7 +1059,14 @@ local function verifyStatement(statement, scope, semantics)
 			return
 		end
 
+		-- Learn the disjunction of the new statements
 		addMerge(scope, branches)
+
+		-- Learn things from cut branches
+		for _, post in ipairs(posts) do
+			addPredicate(scope, post)
+		end
+
 		return
 	elseif statement.tag == "isa" then
 		assertis(statement, "IsASt")

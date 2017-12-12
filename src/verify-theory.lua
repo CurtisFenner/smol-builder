@@ -22,6 +22,8 @@ local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
 local UNIT_TYPE = provided.UNIT_TYPE
 local NEVER_TYPE = provided.NEVER_TYPE
 
+local typeOfAssertion = provided.typeOfAssertion
+
 --------------------------------------------------------------------------------
 
 -- RETURNS an Assertion representing a.not()
@@ -211,39 +213,6 @@ local function boxConstant(constant)
 	error("Unknown constant type value")
 end
 
--- RETURNS a Type+
-local function typeOf(assertion)
-	assertis(assertion, "Assertion")
-
-	if assertion.tag == "int" then
-		return INT_TYPE
-	elseif assertion.tag == "string" then
-		return STRING_TYPE
-	elseif assertion.tag == "boolean" then
-		return BOOLEAN_TYPE
-	elseif assertion.tag == "this" then
-		return assertion.type
-	elseif assertion.tag == "unit" then
-		return UNIT_TYPE
-	elseif assertion.tag == "method" then
-		return assertion.signature.returnTypes[assertion.index]
-	elseif assertion.tag == "field" then
-		return assertion.definition.type
-	elseif assertion.tag == "static" then
-		return assertion.signature.returnTypes[assertion.index]
-	elseif assertion.tag == "variable" then
-		return assertion.variable.type
-	elseif assertion.tag == "isa" then
-		return BOOLEAN_TYPE
-	elseif assertion.tag == "variant" then
-		return assertion.definition.type
-	elseif assertion.tag == "forall" then
-		return BOOLEAN_TYPE
-	end
-
-	error("unhandled tag " .. assertion.tag)
-end
-
 local m_scan
 
 local function scanned(self, children)
@@ -392,7 +361,7 @@ function theory:additionalClauses(model, term, cnf)
 			for _, x in pairs(canon.relevant) do
 				assertis(x, "Assertion")
 
-				local tx = typeOf(x)
+				local tx = typeOfAssertion(x)
 				assertis(tx, "Type+")
 
 				if areTypesEqual(tx, term.quantified) then

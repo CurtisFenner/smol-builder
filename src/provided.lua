@@ -407,6 +407,41 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a Type+
+local function typeOfAssertion(assertion)
+	assertis(assertion, "Assertion")
+
+	if assertion.tag == "int" then
+		return INT_TYPE
+	elseif assertion.tag == "string" then
+		return STRING_TYPE
+	elseif assertion.tag == "boolean" then
+		return BOOLEAN_TYPE
+	elseif assertion.tag == "this" then
+		return assertion.type
+	elseif assertion.tag == "unit" then
+		return UNIT_TYPE
+	elseif assertion.tag == "method" then
+		return assertion.signature.returnTypes[assertion.index]
+	elseif assertion.tag == "field" then
+		return assertion.definition.type
+	elseif assertion.tag == "static" then
+		return assertion.signature.returnTypes[assertion.index]
+	elseif assertion.tag == "variable" then
+		return assertion.variable.type
+	elseif assertion.tag == "isa" then
+		return BOOLEAN_TYPE
+	elseif assertion.tag == "variant" then
+		return assertion.definition.type
+	elseif assertion.tag == "forall" then
+		return BOOLEAN_TYPE
+	end
+
+	error("unhandled tag " .. assertion.tag)
+end
+
+--------------------------------------------------------------------------------
+
 return freeze {
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
@@ -421,4 +456,6 @@ return freeze {
 	areInterfaceTypesEqual = areInterfaceTypesEqual,
 	showType = showType,
 	makeEqSignature = makeEqSignature,
+
+	typeOfAssertion = typeOfAssertion,
 }
