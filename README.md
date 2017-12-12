@@ -42,15 +42,8 @@ $ git clone https://github.com/CurtisFenner/smol-builder.git
 $ cd smol-builder
 ```
 
-Change the current directory to the repository (so that `setup.bat` is in the
-current directory). Run `setup.bat`, which generates `smolc.bat` and `smolc.sh`,
-two scripts that can be added to the path. Right now, `smolc.bat` requires
-`sh` be installed.
-
-TODO: add `setup.sh`
-
 The compiler does not need to be built or prepared in any way and it does not
-have any dependencies other than Lua.
+have any dependencies other than Lua 5.1.
 
 ## Using the Smol compiler
 
@@ -58,7 +51,7 @@ You can invoke the compiler directly by listing all .smol files that should be
 compiled and indicating the main class:
 
 ```
-$ lua compiler.lua --sources tests-positive/hello-world/test.smol --main test:Test
+$ lua src/compiler.lua --sources tests-positive/runtime/hello-world/test.smol --main test:Test
 ```
 
 This produces a C99 `output.c` file in the current directory that you can
@@ -73,18 +66,6 @@ Hello
 こんにちは世界
 $
 ```
-
-You can also use the `smolc.bat` or the `smolc.sh` helper script to
-automatically populate the list of smol files in a directory:
-
-```
-$ smolc tests-positive/hello-world test:Test
-```
-
-Add the smol-builder directory to your path so that you can use `smolc.sh` to
-compile your Smol projects.
-
-`smolc.bat` is another script that invokes `sh smolc.sh`.
 
 ## Running the Smol compiler tests
 
@@ -111,13 +92,15 @@ $ lua test.lua hello
 ```
 
 **NOTE**: This produces C code and then compiles and executes that C code.
-Compiler bugs are possible, exercise caution.
+Compiler bugs are inevitable, exercise caution!
 
 ## VSCode Plugin
 
-The VSCode extension can be found here: https://marketplace.visualstudio.com/items?itemName=curtisfenner.smolcomp.
+The VSCode extension can be found here:
+https://marketplace.visualstudio.com/items?itemName=curtisfenner.smolcomp.
 
 This extension provides syntax highlighting and red-underlining of errors.
+Configure it by pointing it to the `src/compiler.lua` file in the cloned folder.
 
 # The Smol Programming Language
 

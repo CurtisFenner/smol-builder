@@ -64,7 +64,7 @@ end
 
 local function ls(directory)
 	local contents = {}
-	-- TODO: make this more portable and robus
+	-- TODO: make this more portable and robust
 	for line in io.popen("ls " .. directory, "r"):lines() do
 		table.insert(contents, line)
 	end
@@ -176,18 +176,21 @@ end
 
 --------------------------------------------------------------------------------
 
-local function compiler(sources, main)
-	assert(type(sources) == "string")
+local function compiler(directory, main)
+	assert(type(directory) == "string")
 	assert(type(main) == "string")
 
-	local command = table.concat {
-		"lua src/compiler.lua",
-		" --sources ", sources,
-		" --main ", main,
-	}
+	local sources = {}
+	for _, file in ipairs(ls(directory)) do
+		if file:match "%.smol$" then
+			table.insert(sources, directory .. "/" .. file)
+		end
+	end
 
 	local command = table.concat {
-		"smolc.bat ", sources, " ", main
+		arg[-1] .. " src/compiler.lua",
+		" --sources ", table.concat(sources, "    "),
+		" --main ", main,
 	}
 
 	local status = os.execute(command)

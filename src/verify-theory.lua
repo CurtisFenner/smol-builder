@@ -614,12 +614,13 @@ function theory:isSatisfiable(modelInput)
 		assertis(a, "Assertion")
 		assertis(b, "Assertion")
 
+		profile.open "union(a, b)"
 		if not eq:query(a, b) then
 			local thoseThatReferenceA = thoseReferencingAny(eq:classOf(a))
 			local thoseThatReferenceB = thoseReferencingAny(eq:classOf(b))
-
+			
 			eq:union(a, b)
-
+			
 			-- Union all functions of equal arguments
 			profile.open("#recursive union")
 			for x in pairs(thoseThatReferenceA) do
@@ -633,18 +634,23 @@ function theory:isSatisfiable(modelInput)
 					end
 				end
 			end
-
+			
 			profile.close("#recursive union")
 		end
+		profile.close "union(a, b)"
 	end
 
 	-- Union find
 	profile.open "#union-find"
 	while #positiveEq > 0 do
+		profile.open "iteration"
 		for _, bin in ipairs(positiveEq) do
 			union(bin[1], bin[2])
 		end
+		profile.open "propagateConstants"
 		positiveEq = propagateConstants()
+		profile.close "propagateConstants"
+		profile.close "iteration"
 	end
 	profile.close "#union-find"
 

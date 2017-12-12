@@ -225,7 +225,7 @@ local function cnfSAT(theory, cnf, assignment)
 	--print("\n*\tcnfSAT:", "\n*\t" .. (showCNF(theory, cnf):gsub("\n", "\n*\t")))
 
 	-- Find an assignment that the theory accepts
-	if not theory:isSatisfiable(assignment) then
+	if (math.random() < 1e-3 or #cnf == 0) and not theory:isSatisfiable(assignment) then
 		return false
 	elseif #cnf == 0 then
 		return assignment

@@ -287,14 +287,13 @@ local function impliesAssertion(a, b)
 end
 
 -- RETURNS an Assertion
-local function assertionReplaced(expression, variable, with)
+local function assertionReplaced(expression, map)
 	assertis(expression, "Assertion")
-	assertis(variable, "string")
-	assertis(with, "Assertion")
+	assertis(map, mapType("string", recordType {value = "Assertion"}))
 
 	if expression.tag == "variable" then
-		if expression.variable.name == variable then
-			return with
+		if map[expression.variable.name] then
+			return map[expression.variable.name].value
 		end
 	end
 
@@ -308,11 +307,11 @@ local function assertionReplaced(expression, variable, with)
 			local pre = key:sub(1, -3)
 			local m = {}
 			for k, v in pairs(copy[pre]) do
-				m[k] = assertionReplaced(v, variable, with)
+				m[k] = assertionReplaced(v, map)
 			end
 			copy[pre] = m
 		else
-			copy[key] = assertionReplaced(copy[key], variable, with)
+			copy[key] = assertionReplaced(copy[key], map)
 		end
 	end
 	return freeze(copy)
@@ -538,26 +537,30 @@ local function getPredicateSet(scope, assignments, path, skip)
 	-- RETURNS an Assertion
 	local function inNow(a)
 		assertis(a, "Assertion")
-		for variable, replacement in pairs(assignments) do
-			assertis(replacement, recordType {
-				value = "Assertion",
-				definition = "VariableIR",
-			})
-			a = assertionReplaced(a, variable, replacement.value)
-		end
+		a = assertionReplaced(a, assignments)
 		return a
 	end
+
 	-- Translate assignments as a substitution in all subsequent predicates
 	for i, action in ipairs(scope) do
+		profile.open("action " .. action.tag)
 		if action.tag == "assignment" then
 			local t = action.destination.type
 
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
-				.. "'" .. verifyTheory:canonKey(action.value):gsub("[^a-zA-Z0-9]+", "_")
-			local newV = variableAssertion(table.with(action.destination, "name", newID))
+			--	.. "'" .. verifyTheory:canonKey(action.value):gsub("[^a-zA-Z0-9]+", "_")
+			local newVariable = freeze {
+				type = action.destination.type,
+				location = action.destination.location,
+				name = newID,
+			}
+			local newV = variableAssertion(newVariable)
 			
 			-- Record the value of this new assignment at this time
-			local p = eqAssertion(inNow(action.value), newV, t)
+			profile.open("inNow")
+			local current = inNow(action.value)
+			profile.close("inNow")
+			local p = eqAssertion(current, newV, t)
 
 			-- Update the mapping to point to the new variable
 			assignments[action.destination.name] = freeze {
@@ -565,13 +568,14 @@ local function getPredicateSet(scope, assignments, path, skip)
 				definition = action.destination,
 			}
 
-			assertis(p, "Assertion")
+			--assertis(p, "Assertion")
 			table.insert(predicates, p)
 		elseif action.tag == "predicate" then
 			table.insert(predicates, inNow(action.value))
 		elseif action.tag == "branch" then
 			-- Learn the facts of both, predicated by condition => ...
 			for bi, branch in ipairs(action.branches) do
+				profile.open("setup branch")
 				local condition = inNow(branch.condition)
 				local notCondition = notAssertion(condition)
 
@@ -579,12 +583,16 @@ local function getPredicateSet(scope, assignments, path, skip)
 				for key, value in pairs(assignments) do
 					branchAssignments[key] = value
 				end
+				profile.close("setup branch")
 
+				profile.open("recursive getPredicateSet")
 				local branchPredicates = getPredicateSet(branch.scope, branchAssignments, path .. "'" .. bi)
 				for _, p in ipairs(branchPredicates) do
 					table.insert(predicates, impliesAssertion(condition, p))
 				end
+				profile.close("recursive getPredicateSet")
 
+				profile.open("merge")
 				-- Capture modified variables into a select operation
 				for variable, newValue in pairs(branchAssignments) do
 					local oldValue = assignments[variable]
@@ -610,10 +618,12 @@ local function getPredicateSet(scope, assignments, path, skip)
 						table.insert(predicates, impliesAssertion(condition, isNew))
 					end
 				end
+				profile.close("merge")
 			end
 		else
 			error("unknown action tag `" .. action.tag .. "`")
 		end
+		profile.close("action " .. action.tag)
 
 		if i == skip then
 			-- Wipe out predicates learned before this point
