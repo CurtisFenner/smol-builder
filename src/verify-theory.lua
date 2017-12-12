@@ -5,6 +5,8 @@ local theory = {
 	satisfaction_t = "any",
 }
 
+local UnionFind = import "unionfind.lua"
+
 local showType = import("provided.lua").showType
 
 -- RETURNS a string
@@ -266,6 +268,11 @@ function m_scan(self, object)
 	return self.relevant[shown]
 end
 
+function theory:additionalClauses()
+	print("TODO: additional clauses")
+	return {}
+end
+
 function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
 
@@ -353,32 +360,9 @@ function theory:isSatisfiable(modelInput)
 	profile.close "#scan for equality"
 
 	-- 3) Use each positive == assertion to join representatives
-	local representative = {}
+	local eq = UnionFind.new()
 	for _, expression in pairs(canon.relevant) do
-		representative[expression] = expression
-	end
-	assertis(representative, mapType("Assertion", "Assertion"))
-
-	-- RETURNS an Assertion that is equal to canonicalized assertion `of`
-	local function rootRepresentative(of)
-		assertis(of, "Assertion")
-		
-		-- REQUIRES that identities have already been canonicalized
-		local parent = representative[of]
-		assert(parent ~= nil)
-		if parent == of then
-			return parent
-		end
-		local root = rootRepresentative(parent)
-		representative[of] = root
-		return root
-	end
-
-	-- RETURNS true when assertions x, y are equivalent in the UF data structure
-	local function areEqual(x, y)
-		assertis(x, "Assertion")
-		assertis(y, "Assertion")
-		return rootRepresentative(x) == rootRepresentative(y)
+		eq:init(expression)
 	end
 
 	-- RETURNS an unboxed constant that is equal to the given assertion
@@ -389,7 +373,7 @@ function theory:isSatisfiable(modelInput)
 
 		local out = {}
 		for _, other in pairs(canon.relevant) do
-			if areEqual(other, of) then
+			if eq:query(other, of) then
 				-- Only evaluate "terminal" constants
 				-- (Builds bottom up iteratively)
 				local constant = evaluateConstantAssertion(other, function() return nil end)
@@ -418,25 +402,15 @@ function theory:isSatisfiable(modelInput)
 				local boxed = canon:scan(boxConstant(constant))
 				
 				-- Insert representative, so that it can be used in UF
-				representative[boxed] = representative[boxed] or boxed
+				eq:tryinit(boxed)
 
-				if not areEqual(a, boxed) then
+				if not eq:query(a, boxed) then
 					table.insert(eqs, {a, boxed})
 				end
 			end
 		end
 
 		return eqs
-	end
-
-	-- RETURNS a map from root => [eq assertion set]
-	local function eqClasses()
-		local out = {}
-		for key, root in pairs(representative) do
-			out[root] = out[root] or {}
-			table.insert(out[root], key)
-		end
-		return out
 	end
 
 	local byStructure = {}
@@ -466,7 +440,7 @@ function theory:isSatisfiable(modelInput)
 	local function childrenSame(x, y)
 		assertis(x, "Assertion")
 		assertis(y, "Assertion")
-		assert(not areEqual(x, y))
+		assert(not eq:query(x, y))
 
 		if x.tag ~= y.tag then
 			-- Elements that are structurally different cannot be shown
@@ -479,12 +453,12 @@ function theory:isSatisfiable(modelInput)
 		elseif x.tag == "method" then
 			if x.methodName ~= y.methodName then
 				return false
-			elseif not areEqual(x.base, y.base) then
+			elseif not eq:query(x.base, y.base) then
 				return false
 			end
 			assert(#x.arguments == #y.arguments)
 			for i in ipairs(x.arguments) do
-				if not areEqual(x.arguments[i], y.arguments[i]) then
+				if not eq:query(x.arguments[i], y.arguments[i]) then
 					return false
 				end
 			end
@@ -495,7 +469,7 @@ function theory:isSatisfiable(modelInput)
 			end
 			assert(#x.arguments == #y.arguments)
 			for i in ipairs(x.arguments) do
-				if not areEqual(x.arguments[i], y.arguments[i]) then
+				if not eq:query(x.arguments[i], y.arguments[i]) then
 					return false
 				end
 			end
@@ -504,12 +478,12 @@ function theory:isSatisfiable(modelInput)
 			if x.fieldName ~= y.fieldName then
 				return false
 			end
-			return areEqual(x.base, y.base)
+			return eq:query(x.base, y.base)
 		elseif x.tag == "isa" then
 			if x.variant ~= y.variant then
 				return false
 			end
-			return areEqual(x.base, y.base)
+			return eq:query(x.base, y.base)
 		end
 		error("TODO childrenSame for tag `" .. x.tag .. "`")
 	end
@@ -535,36 +509,22 @@ function theory:isSatisfiable(modelInput)
 		assertis(a, "Assertion")
 		assertis(b, "Assertion")
 
-		local rootA = rootRepresentative(a)
-		local rootB = rootRepresentative(b)
-		if rootA ~= rootB then
-			local classes = eqClasses()
-			local thoseThatReferenceA = thoseReferencingAny(classes[rootA])
-			local thoseThatReferenceB = thoseReferencingAny(classes[rootB])
+		if not eq:query(a, b) then
+			local thoseThatReferenceA = thoseReferencingAny(eq:classOf(a))
+			local thoseThatReferenceB = thoseReferencingAny(eq:classOf(b))
 
-			if math.random(2) == 1 then
-				representative[rootA] = rootB
-			else
-				representative[rootB] = rootA
-			end
+			eq:union(a, b)
 
 			-- Union all functions of equal arguments
 			profile.open("#recursive union")
 			for x in pairs(thoseThatReferenceA) do
-				local rootX = rootRepresentative(x)
 				for y in pairs(thoseThatReferenceB) do
-					local rootY = rootRepresentative(y)
-					if rootX ~= rootY then
-						assert(not areEqual(x, y))
+					if not eq:query(x, y) then
 						if childrenSame(x, y) then
 							profile.open("#sub fun eq")
-							union(x, y)
+							eq:union(x, y)
 							profile.close("#sub fun eq")
 						end
-						
-						-- union() may modify the root representative of x,
-						-- making `rootX` stale
-						rootX = rootRepresentative(x)
 					end
 				end
 			end
@@ -576,8 +536,8 @@ function theory:isSatisfiable(modelInput)
 	-- Union find
 	profile.open "#union-find"
 	while #positiveEq > 0 do
-		for _, eq in ipairs(positiveEq) do
-			union(eq[1], eq[2])
+		for _, bin in ipairs(positiveEq) do
+			union(bin[1], bin[2])
 		end
 		positiveEq = propagateConstants()
 	end
@@ -585,49 +545,35 @@ function theory:isSatisfiable(modelInput)
 
 	profile.open "#negative =="
 	-- 4) Use each negative == assertion to separate groups
-	local negated = {}
-	for _, eq in ipairs(negativeEq) do
-		local a, b = eq[1], eq[2]
-		local rootA = rootRepresentative(a)
-		local rootB = rootRepresentative(b)
+	for _, bin in ipairs(negativeEq) do
+		local a, b = bin[1], bin[2]
 
-		if rootA == rootB then
+		if eq:query(a, b) then
 			-- This model is inconsistent
 			profile.close "#negative =="
 			return false
 		end
-		negated[rootA] = negated[rootA] or {}
-		negated[rootA][rootB] = true
-		negated[rootB] = negated[rootB] or {}
-		negated[rootB][rootA] = true
 	end
-	assertis(negated, mapType(
-		self.assertion_t,
-		mapType(self.assertion_t, constantType(true))
-	))
 	profile.close "#negative =="
 
 	-- RETURNS whether or not it is immediate that `assertion` has truth value
 	-- `truth` in the given model after applying UF for equality
 	local function immediately(assertion, truth)
 		assertis(truth, "boolean")
-		assert(rootRepresentative(assertion))
 
 		-- The boolean literals have known truth assignments
 		if truth then
-			if areEqual(assertion, trueAssertion) then
+			if eq:query(assertion, trueAssertion) then
 				return true
 			end
 		else
-			if areEqual(assertion, falseAssertion) then
+			if eq:query(assertion, falseAssertion) then
 				return true
 			end
 		end
 
 		for given, t in pairs(simple) do
-			assert(rootRepresentative(given))
-			local eq = areEqual(given, assertion)
-			if t == truth and eq then
+			if t == truth and eq:query(given, assertion) then
 				return true
 			end
 		end
@@ -644,15 +590,6 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	profile.close "#immediately?"
-
-	-- Show everything that's equal
-	--for key1 in pairs(representative) do
-	--	for key2 in pairs(representative) do
-	--		if areEqual(key1, key2) and key1 ~= key2 then
-	--			print("", showAssertion(key1) .. "    ====    " .. showAssertion(key2))
-	--		end
-	--	end
-	--end
 
 	return not constantConflict
 end
