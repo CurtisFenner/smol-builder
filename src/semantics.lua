@@ -3115,9 +3115,9 @@ local function semanticsSmol(sources, main)
 				end
 
 				local verification = buildBlock {}
+
 				-- Check for inexhaustivity
 				if #unhandledVariants ~= 0 then
-					print "INEXHAUSTIVE MATCH: TODO HANDLE THIS"
 					local seq = {
 						closedUnionAssumption(definition, base),
 					}
