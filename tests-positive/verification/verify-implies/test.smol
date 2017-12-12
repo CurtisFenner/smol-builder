@@ -1,0 +1,15 @@
+package test;
+
+class Test {
+	static opaque() Boolean {
+		return true;
+	}
+
+	static foo() Boolean
+	ensures Test.opaque().implies(return) {
+		return Test.opaque();
+	}
+
+	static main() Unit {
+	}
+}

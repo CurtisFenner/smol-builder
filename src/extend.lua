@@ -66,6 +66,23 @@ function table.weak()
 	return setmetatable({}, {__mode = "k"})
 end
 
+-- Protect immutable tables
+local realinsert = table.insert
+function table.insert(list, ...)
+	if isimmutable(list) then
+		error("cannot table.insert on immutable list")
+	end
+	return realinsert(list, ...)
+end
+
+local realremove = table.remove
+function table.remove(list, ...)
+	if isimmutable(list) then
+		error("cannot table.remove on immutable list")
+	end
+	return realremove(list, ...)
+end
+
 -- RETURNS the last element of a list
 function table.last(list)
 	return list[#list]
@@ -115,4 +132,9 @@ function table.indexof(list, element)
 			return i
 		end
 	end
+end
+
+-- RETURNS a function
+function table.bind(object, f)
+	return function(...) return f(object, ...) end
 end

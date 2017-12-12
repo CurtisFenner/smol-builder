@@ -1,0 +1,12 @@
+package test;
+import core;
+
+class Test {
+	static foo(x core:Option[core:WInt]) Unit
+	requires x is some
+	ensures x is some {
+	}
+
+	static main() Unit {
+	}
+}

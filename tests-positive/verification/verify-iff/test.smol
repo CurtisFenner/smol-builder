@@ -1,0 +1,13 @@
+package test;
+
+class Test {
+	static f(a Boolean, b Boolean, c Boolean, d Boolean) Unit
+	requires (a == b) == (c == d) {
+		if a.and(c) {
+			assert b == d;
+		}
+	}
+
+	static main() Unit {
+	}
+}

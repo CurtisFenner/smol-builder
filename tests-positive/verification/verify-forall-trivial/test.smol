@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+
+	static foo() Unit
+	ensures forall (x Int) x == x {
+
+	}
+
+	static main() Unit {
+	}
+}

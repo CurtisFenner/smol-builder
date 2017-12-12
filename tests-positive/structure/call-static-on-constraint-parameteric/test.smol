@@ -1,0 +1,27 @@
+package test;
+
+class Box[#T | #T is C] {
+	static nothing() Unit {
+	}
+}
+
+interface C {
+}
+
+class ImplC[#F | #F is K] is C {
+
+}
+
+interface K {
+
+}
+
+class ImplK is K {
+
+}
+
+class Test {
+	static main() Unit {
+		do Box[ImplC[ImplK]].nothing();
+	}
+}

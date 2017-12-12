@@ -1,0 +1,17 @@
+package test;
+
+class Test {
+	static f() Boolean {
+		return false;
+	}
+
+	static main() Unit {
+		var x Boolean = Test.f();
+		var y Boolean = Test.f();
+		assert x == y;
+		if x {
+			assert x == y;
+			assert y;
+		}
+	}
+}

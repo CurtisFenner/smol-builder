@@ -1,0 +1,29 @@
+package test;
+
+class Foo {
+	method a() Boolean {
+		return true;
+	}
+
+	static short(x Foo) Boolean
+	requires x.a()
+	ensures return.not() {
+		return false;
+	}
+
+	static skip!(x Foo) Unit
+	ensures Foo.short(x).not() when x.a() {
+
+	}
+
+	static make() Foo {
+		return new();
+	}
+}
+
+class Test {
+
+	static main!() Unit {
+		do Foo.skip!(Foo.make());
+	}
+}

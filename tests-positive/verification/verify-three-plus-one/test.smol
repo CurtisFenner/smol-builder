@@ -1,0 +1,9 @@
+package test;
+
+class Test {
+	static main!() Unit {
+		var x Int = 3;
+		x = x + 1;
+		assert x == 4;
+	}
+}

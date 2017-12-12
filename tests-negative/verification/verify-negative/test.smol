@@ -32,15 +32,12 @@ class Truck {
 	requires box.isSmall() {
 		return new(boxes = previous.boxes + 1);
 	}
-
 }
 
 class Test {
-
 	static main!() Unit {
 		var truck Truck = Truck.make();
-		truck = Truck.loaded(truck, Box.makeSmallBox());
+		truck = Truck.loaded(truck, Box.makeBigBox());
 		do core:Out.println!(core:ASCII.formatInt(truck.boxCount()));
 	}
 }
-

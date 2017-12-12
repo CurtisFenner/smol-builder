@@ -1,12 +1,74 @@
--- Test script for the Lua smol compiler
+-- Test script for the Lua smol compiler.
+-- To run all tests,
+--         lua test.lua
+
+-- usage:
+--         lua test.lua <query>
+-- if <query> is blank, all tests are run.
+-- if <query> begins with -, only negative tests are run.
+-- if <query> begins with +, only positive tests are run.
+-- if <query> contains text after an (optional) initial + or -, only tests whose
+--     names contain the query string are run.
+
+-- For example, to run all verification tests that the compiler should reject,
+--         lua test.lua -verify
+
+--------------------------------------------------------------------------------
+
+-- ENVIRONMENT REQUIREMENTS
+
+-- `ls` must be a utility available in the shell that lists file names in a
+-- directory, one per line.
+
+-- `gcc` must be a utility available in the shell that compiles C programs.
+-- The `-std=c99` flag is specified with `-pedantic`.
+
+--- `diff` must be a utility available in the shell that compares text files.
+
+-- Searches the current directory for folders named `tests-positive` and
+-- `tests-negative`.
+
+-- `tests-positive` should contain one or more folders; each is a test-category.
+-- Each test category should contain one or more folders; each is a test-case.
+-- Each positive test-case should contain:
+-- + `out.correct`, the text that the test case should generate on standard
+--   output
+-- + `test.smol`, a test file in the `test` package with main class `test:Test`.
+-- + any additional `.smol` files.
+-- Positive test-cases should compile and run successfully.
+
+-- `tests-negative` should contain one or more folders; each is a test-category.
+-- Each test category should contain one or more folders; each is a test-case.
+-- Each negative test-case should contain:
+-- + `test.smol`, a test file in the `test` package with main class `test:Test`.
+-- + any additional `.smol` files.
+-- Negative test-cases should be rejected by the compiler gracefully. They
+-- should not create any executable or output.
+
+--------------------------------------------------------------------------------
 
 local filter = arg[1] or ""
+local mode = filter:sub(1, 1)
+if mode == "+" or mode == "-" then
+	filter = filter:sub(2)
+else
+	mode = ""
+end
 
 --------------------------------------------------------------------------------
 
 local function shell(command)
 	local status = os.execute(command)
 	return status == 0, status
+end
+
+local function ls(directory)
+	local contents = {}
+	-- TODO: make this more portable and robus
+	for line in io.popen("ls " .. directory, "r"):lines() do
+		table.insert(contents, line)
+	end
+	return contents
 end
 
 --------------------------------------------------------------------------------
@@ -35,9 +97,20 @@ local function printHeader(text, symbol, align)
 	print("")
 end
 
+-- Converts tabs to 4 spaces in a string that doesn't contain newlines
 function string.spaces(s)
-	-- TODO: make tabs align to columns
-	return (s:gsub("\t", "    "))
+	assert(not s:find("\n"))
+	local out = ""
+	for i = 1, #s do
+		if s:sub(i, i) ~= "\t" then
+			out = out .. s:sub(i, i)
+		else
+			repeat
+				out = out .. " "
+			until #out % 4 == 0
+		end
+	end
+	return out
 end
 
 local function printBox(lines)
@@ -124,58 +197,76 @@ local function compiler(sources, main)
 	return status
 end
 
--- (1) Run all negative tests
-for test in io.popen("ls tests-negative", "r"):lines() do
-	if test:find(filter, 1, true) then
-		printHeader("TEST " .. test)
-		local status = compiler("tests-negative/" .. test, "test:Test")
-		if status ~= 45 then
-			FAIL {name = test, expected = 45, got = status}
-		else
-			PASS {name = test}
+local positiveTests = {}
+for _, category in ipairs(ls "tests-positive") do
+	for _, test in ipairs(ls("tests-positive/" .. category)) do
+		table.insert(positiveTests, category .. "/" .. test)
+	end
+end
+
+local negativeTests = {}
+for _, category in ipairs(ls "tests-negative") do
+	for _, test in ipairs(ls("tests-negative/" .. category)) do
+		table.insert(negativeTests, category .. "/" .. test)
+	end
+end
+
+if mode ~= "+" then
+	-- (1) Run all negative tests
+	for _, test in ipairs(negativeTests) do
+		if test:find(filter, 1, true) then
+			printHeader("TEST " .. test)
+			local status = compiler("tests-negative/" .. test, "test:Test")
+			if status ~= 45 then
+				FAIL {name = "- " .. test, expected = 45, got = status}
+			else
+				PASS {name = "- " .. test}
+			end
 		end
 	end
 end
 
--- (2) Run all positive tests
-for test in io.popen("ls tests-positive", "r"):lines() do
-	if test:find(filter, 1, true) then
-		printHeader("TEST " .. test)
-		local status = compiler("tests-positive/" .. test, "test:Test")
-		if status ~= 0 then
-			FAIL {name = test, expected = 0, got = status}
-		else
-			local bin = "tests-positive/" .. test .. "/bin"
-			local flags = {
-				"-g3",
-				"-pedantic",
-				"-std=c99",
-				"-Werror",
-				"-Wall",
-				"-Wextra",
-				"-Wconversion",
-				-- Disable unhelpful warnings
-				"-Wno-unused-parameter",
-				"-Wno-unused-but-set-variable",
-				"-Wno-unused-variable",
-			}
-			local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
-			if compiles then
-				local outFile = "tests-positive/" .. test .. "/out.last"
-				local runs = shell(bin .. " > " .. outFile)
-				if runs then
-					local correctFile = "tests-positive/" .. test .. "/out.correct"
-					local correct = shell("diff -w " .. correctFile .. " " .. outFile)
-					if correct then
-						PASS {name = test}
+if mode ~= "-" then
+	-- (2) Run all positive tests
+	for _, test in ipairs(positiveTests) do
+		if test:find(filter, 1, true) then
+			printHeader("TEST " .. test)
+			local status = compiler("tests-positive/" .. test, "test:Test")
+			if status ~= 0 then
+				FAIL {name = "+ " .. test, expected = 0, got = status}
+			else
+				local bin = "tests-positive/" .. test .. "/bin"
+				local flags = {
+					"-g3",
+					"-pedantic",
+					"-std=c99",
+					"-Werror",
+					"-Wall",
+					"-Wextra",
+					"-Wconversion",
+					-- Disable unhelpful warnings
+					"-Wno-unused-parameter",
+					"-Wno-unused-but-set-variable",
+					"-Wno-unused-variable",
+				}
+				local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
+				if compiles then
+					local outFile = "tests-positive/" .. test .. "/out.last"
+					local runs = shell(bin .. " > " .. outFile)
+					if runs then
+						local correctFile = "tests-positive/" .. test .. "/out.correct"
+						local correct = shell("diff -w " .. correctFile .. " " .. outFile)
+						if correct then
+							PASS {name = "+ " .. test}
+						else
+							FAIL {name = "+ " .. test, expected = 0, got = 1, reason = "wrong output"}
+						end
 					else
-						FAIL {name = test, expected = 0, got = 1, reason = "wrong output"}
+						FAIL {name = "+ " .. test, expected = 0, got = 1, reason = "bin failed"}
 					end
 				else
-					FAIL {name = test, expected = 0, got = 1, reason = "bin failed"}
+					FAIL {name = "+ " .. test, expected = 0, got = 1, reason = "gcc rejected"}
 				end
-			else
-				FAIL {name = test, expected = 0, got = 1, reason = "gcc rejected"}
 			end
 		end
 	end

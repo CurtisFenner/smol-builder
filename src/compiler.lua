@@ -9,12 +9,18 @@ INVOKATION = ARGV[0] .. " " .. table.concat(ARGV, " ")
 
 --------------------------------------------------------------------------------
 
+-- Cache imported files
+local _imported = {}
 function import(name)
+	if _imported[name] then
+		return _imported[name]
+	end
 	local directory = ARGV[0]:gsub("[^/\\]+$", "")
-	return dofile(directory .. name)
+	_imported[name] = dofile(directory .. name)
+	return _imported[name]
 end
 
---------------------------------------------------------------------------------
+local showLocation
 
 local ansi = import "ansi.lua"
 
@@ -22,25 +28,92 @@ local ansi = import "ansi.lua"
 -- and terminates the program.
 -- DOES NOT RETURN.
 function quit(first, ...)
+	local rest = {...}
+	for i = 1, #rest do
+		if type(rest[i]) == "number" then
+			rest[i] = tostring(rest[i])
+		elseif type(rest[i]) ~= "string" then
+			if not rest[i].ends then
+				print(...)
+			end
+			assertis(rest[i], "Location")
+			rest[i] = showLocation(rest[i])
+		end
+	end
+	rest = table.concat(rest)
+
 	if not first:match("^[A-Z]+:\n$") then
-		print(table.concat{ansi.red("ERROR"), ":\n", first, ...})
+		print(table.concat{ansi.red("ERROR"), ":\n", first, rest})
 		os.exit(45)
 	else
-		print(table.concat{ansi.cyan(first), ...})
+		print(table.concat{ansi.cyan(first), rest})
 		os.exit(40)
 	end
 end
 
---------------------------------------------------------------------------------
-
 import "extend.lua"
 import "types.lua"
+
+--------------------------------------------------------------------------------
+
+
+local LOCATION_MODE = "column"
+
+-- RETURNS a string representing the location, respecting the command line
+-- location mode
+function showLocation(location)
+	assertis(location, "Location")
+
+	local begins = location.begins
+	local ends = location.ends
+
+	if type(begins) == "string" or type(ends) == "string" then
+		return "at " .. begins
+	end
+
+	local source = begins.sourceLines
+
+	-- Compute human-readable description of location
+	local context = {}
+	for line = math.max(1, begins.line - 1), math.min(#source, ends.line + 1) do
+		local num = string.rep(" ", #tostring(#source) - #tostring(line)) .. tostring(line) .. " "
+		table.insert(context, "\t" .. num .. "| " .. source[line])
+		local pointy = ""
+		for i = 1, #source[line] do
+			local after = (line == begins.line and i >= begins.column) or line > begins.line
+			local before = (line == ends.line and i <= ends.column) or line < ends.line
+			if after and before and source[line]:sub(1, i):find "%S" then
+				pointy = pointy .. "^"
+			else
+				pointy = pointy .. " "
+			end
+		end
+		if pointy:find "%S" then
+			table.insert(context, "\t" .. string.rep(" ", #tostring(#source)) .. " | " .. ansi.red(pointy))
+		end
+	end
+	local sourceContext = table.concat(context, "\n")
+
+	local location = "at " .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
+		.. "\n" .. sourceContext .. "\n"
+
+	-- Include indexes for computer consumption of error messages
+	if LOCATION_MODE == "index" then
+		location = location .. "@" .. begins.filename .. ":" .. begins.line .. ":" .. begins.index .. "::" .. ends.line .. ":" .. ends.index
+	end
+	return location
+end
+
+--------------------------------------------------------------------------------
+
+local profile = import "profile.lua"
 
 local parser = import "parser.lua"
 local calculateSemantics = import "semantics.lua"
 local codegen = {
 	c = import "codegen/genc.lua",
 }
+local verify = import "verify.lua"
 
 --------------------------------------------------------------------------------
 
@@ -75,7 +148,6 @@ elseif not commandMap.sources or #commandMap.sources == 0 then
 	quitUsage()
 end
 
-local LOCATION_MODE = "column"
 if commandMap.location then
 	-- TODO: assert that it is correct
 	LOCATION_MODE = commandMap.location[1]
@@ -120,12 +192,21 @@ local function lexSmol(source, filename)
 		["static"] = true,
 		["union"] = true,
 		["var"] = true,
+
+		-- verification
+		["assert"] = true,
+		["ensures"] = true,
+		["forall"] = true,
+		["requires"] = true,
+		["when"] = true,
+
 		-- built-in types
 		["Boolean"] = true,
 		["Int"] = true,
 		["Never"] = true,
 		["String"] = true,
 		["Unit"] = true,
+
 		-- values
 		["this"] = true,
 		["true"] = true,
@@ -196,6 +277,13 @@ local function lexSmol(source, filename)
 	local sourceLines = {}
 	for line in (source .. "\n"):gmatch("(.-)\n") do
 		line = line:gsub("\r", "")
+		repeat
+			local index = line:find("\t")
+			if index then
+				local spaces = string.rep(" ", 4 - (index - 1) % 4)
+				line = line:sub(1, index - 1) .. spaces .. line:sub(index + 1)
+			end
+		until not index
 		line = line:gsub("\t", "    ") -- TODO: this should be aligned
 		table.insert(sourceLines, line)
 	end
@@ -205,42 +293,49 @@ local function lexSmol(source, filename)
 	-- Track the location into the source file each token is
 	local line = 1
 	local column = 1
-	if LOCATION_MODE == "index" then
-		column = 0
-	end
+	local index = 0
+
+	-- RETURNS a Location of the last non-whitespace character
 	local function advanceCursor(str)
 		assert(isstring(str))
+		local final = {line = line, column = column, index = index}
 		for c in str:gmatch(".") do
+			if c:match "%S" then
+				final = {line = line, column = column, index = index}
+			end
 			if c == "\r" then
 				-- Carriage returns do not affect reported cursor location
 			elseif c == "\n" then
 				column = 1
+				index = 0
 				line = line + 1
-				if LOCATION_MODE == "index" then
-					column = 0
-				end
-			elseif c == "\t" and LOCATION_MODE ~= "index" then
+			elseif c == "\t" then
 				-- XXX: This reports column (assuming tab = 4)
 				-- rather than character.
 				-- (VSCode default behavior when tabs are size 4)
 				-- (Atom default behavior counts characters)
 				column = math.ceil(column/4)*4 + 1
+				index = index + 1
 			else
 				column = column + 1
+				index = index + 1
 			end
 		end
+		final.filename = filename
+		final.sourceLines = sourceLines
+		return final
 	end
 
 	while #source > 0 do
-		-- Compute human-readable description of location
-		local sourceContext = "\t" .. line .. ":\t" .. sourceLines[line]
-			.. "\n\t\t" .. string.rep(" ", column-1) .. ansi.red("^")
-
-		local location = "at " .. filename .. ":" .. line .. ":" .. column
-			.. "\n" .. sourceContext .. "\n"
-		if LOCATION_MODE == "index" then
-			location = location .. "@" .. filename .. ":" .. line .. ":" .. column
-		end
+		local location = {
+			begins = freeze {
+				filename = filename,
+				sourceLines = sourceLines,
+				line = line,
+				column = column,
+				index = index,
+			},
+		}
 
 		-- Tokenize string literals
 		if source:sub(1, 1) == QUOTE then
@@ -257,14 +352,16 @@ local function lexSmol(source, filename)
 			for i = 2, #source do
 				local c = source:sub(i, i)
 				if c == "\n" then
-					quit("The compiler found an unfinished string literal",
-						" that begins ", location)
+					location.ends = advanceCursor(source:sub(1, i-1))
+					quit("The compiler found an unfinished string literal ",
+					location)
 				end
 				if escaped then
 					if not SPECIAL[c] then
+						location.ends = advanceCursor(source:sub(1, i))
 						quit("The compiler found an unknown escape sequence",
 							" `\\", c, "`",
-							" in a string literal that begins ", location)
+							" in a string literal ", location)
 					end
 					content = content .. SPECIAL[c]
 					escaped = not escaped
@@ -272,7 +369,7 @@ local function lexSmol(source, filename)
 					escaped = true
 				elseif c == QUOTE then
 					-- Update location
-					advanceCursor(source:sub(1, i))
+					location.ends = advanceCursor(source:sub(1, i))
 					local lexeme = source:sub(1, i)
 					-- String literal is complete
 					source = source:sub(i+1)
@@ -297,6 +394,8 @@ local function lexSmol(source, filename)
 					local token = tokenRule[2](match)
 					assert(type(token) == "table" or rawequal(token, false),
 						"token must be table `" .. tokenRule[1] .. "`")
+
+					location.ends = advanceCursor(match)
 					if token then
 						token.location = location
 						token.lexeme = match
@@ -304,7 +403,6 @@ local function lexSmol(source, filename)
 					end
 
 					-- Advance the cursor through the text file
-					advanceCursor(match)
 					source = source:sub(#match+1)
 
 					matched = true
@@ -314,18 +412,33 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				quit("The compiler could not recognize any token ", location)
+				quit("The compiler could not recognize any token ",
+					table.with(location, "ends", location.begins))
 			end
 		end
 	end
 
+	assertis(tokens, listType "Token")
 	return freeze(tokens)
 end
 
 -- Stream ----------------------------------------------------------------------
 
+REGISTER_TYPE("Spot", choiceType(constantType "???", constantType "builtin", recordType {
+	filename = "string",
+	sourceLines = listType "string",
+	line = "integer",
+	column = "integer",
+	index = "integer",
+}))
+
+REGISTER_TYPE("Location", recordType {
+	begins = "Spot",
+	ends = "Spot",
+})
+
 REGISTER_TYPE("Token", recordType {
-	location = "string",
+	location = "Location",
 	tag = "string",
 	lexeme = "string",
 })
@@ -351,11 +464,30 @@ local function Stream(list, offset)
 		end,
 		location = function(self)
 			if self:size() == 0 then
-				-- TODO: get file name
-				return "end-of-file"
+				local spot = {
+					filename = self._list[1].location.begins.filename,
+					sourceLines = self._list[1].location.begins.sourceLines,
+					column = 1,
+					index = 0,
+					line = #self._list[1].location.begins.sourceLines,
+				}
+				return {begins = spot, ends = spot}
 			else
 				return self:head().location
 			end
+		end,
+		priorLocation = function(self)
+			if self._offset == 0 then
+				local spot = {
+					filename = self._list[1].location.begins.filename,
+					sourceLines = self._list[1].location.begins.sourceLines,
+					column = 1,
+					index = 0,
+					line = 1,
+				}
+				return {begins = spot, ends = spot}
+			end
+			return self._list[self._offset].location
 		end,
 	}
 end
@@ -418,6 +550,12 @@ local function parseSmol(tokens)
 	local K_TRUE = LEXEME "true"
 	local K_UNION = LEXEME "union"
 	local K_VAR = LEXEME "var"
+
+	local K_ASSERT = LEXEME "assert"
+	local K_ENSURES = LEXEME "ensures"
+	local K_REQUIRES = LEXEME "requires"
+	local K_WHEN = LEXEME "when"
+	local K_FORALL = LEXEME "forall"
 
 	-- Built-in types
 	local K_STRING = LEXEME "String"
@@ -673,6 +811,35 @@ local function parseSmol(tokens)
 				parser.query "type,1+",
 				"a return type"
 			},
+			{"requires", parser.zeroOrMore(parser.named "requires")},
+			{"ensures", parser.zeroOrMore(parser.named "ensures")},
+		},
+
+		["requires"] = parser.composite {
+			tag = "requires",
+			{"_", K_REQUIRES},
+			{"condition", parser.named "expression", "an expression"},
+			{
+				"when",
+				parser.optional(parser.composite {
+					tag = "when",
+					{"_", K_WHEN},
+					{"#when", parser.named "expression", "an expression"},
+				}),
+			},
+		},
+		["ensures"] = parser.composite {
+			tag = "ensures",
+			{"_", K_ENSURES},
+			{"condition", parser.named "expression", "an expression"},
+			{
+				"when",
+				parser.optional(parser.composite {
+					tag = "when",
+					{"_", K_WHEN},
+					{"#when", parser.named "expression", "an expression"},
+				}),
+			},
 		},
 
 		["method-modifier"] = parser.choice {
@@ -682,12 +849,13 @@ local function parseSmol(tokens)
 
 		-- Represents a smol statement / control structure
 		["statement"] = parser.choice {
-			parser.named "return-statement",
-			parser.named "do-statement",
 			parser.named "var-statement",
-			parser.named "assign-statement",
+			parser.named "do-statement",
 			parser.named "if-statement",
 			parser.named "match-statement",
+			parser.named "assert-statement",
+			parser.named "return-statement",
+			parser.named "assign-statement",
 		},
 
 		["block"] = parser.composite {
@@ -708,6 +876,17 @@ local function parseSmol(tokens)
 			{"_", K_RETURN},
 			{"values", parser.query "expression,0+"},
 			{"_", K_SEMICOLON, "`;` to end return-statement"},
+		},
+
+		["assert-statement"] = parser.composite {
+			tag = "assert-statement",
+			{"_", K_ASSERT},
+			{
+				"expression",
+				parser.named "expression",
+				"an expression to assert the truth of after `assert`"
+			},
+			{"_", K_SEMICOLON, "`;` to end assert-statement"},
 		},
 
 		["do-statement"] = parser.composite {
@@ -781,22 +960,31 @@ local function parseSmol(tokens)
 			{"body", parser.named "block", "expected a block to follow `else`"},
 		},
 
+		["isa"] = parser.composite {
+			tag = "isa",
+			{"_", K_IS},
+			{"field", T_IDENTIFIER, "expected a variant identifier"},
+		},
+
 		-- Expressions!
 		["expression"] = parser.map(parser.composite {
 			tag = "***expression",
 			{"base", parser.named "atom"},
 			{"operations", parser.query "operation*"},
+			{"isa", parser.query "isa?"},
 		}, function(x)
 			-- XXX: no precedence yet; assume left-associative
 			local out = x.base
 			assertis(out.tag, "string")
+
+			local isa = x.isa
 
 			if #x.operations >= 2 then
 				quit("You must explicitly parenthesize the operators ", x.operations[2].location)
 			end
 
 			for _, operation in ipairs(x.operations) do
-				out = {
+				out = freeze {
 					tag = "binary",
 					left = out,
 					right = operation.operand,
@@ -804,6 +992,15 @@ local function parseSmol(tokens)
 				}
 				assert(isstring(out.operator))
 			end
+
+			if isa then
+				return freeze {
+					tag = "isa",
+					base = out,
+					variant = isa.field,
+				}
+			end
+
 			assert(out)
 			return out
 		end, true),
@@ -879,12 +1076,30 @@ local function parseSmol(tokens)
 			{"_", K_ROUND_CLOSE, "`)` to end static method call"},
 		},
 
+		["forall"] = parser.composite {
+			tag = "forall-expr",
+			{"_", K_FORALL},
+			{"_", K_ROUND_OPEN, "`(` after `forall`"},
+			{"variable", parser.named "variable", "variable after `forall (`"},
+			{"_", K_ROUND_CLOSE, "`)` after variable"},
+			{"predicate", parser.named "expression", "predicate expression"},
+			{
+				"when",
+				parser.optional(parser.composite {
+					tag = "forall-when",
+					{"_", K_WHEN},
+					{"#e", parser.named "expression", "expression"}
+				}),
+			}
+		},
+
 		["atom-base"] = parser.choice {
 			parser.named "new-expression",
 			K_THIS,
 			K_TRUE,
 			K_FALSE,
 			K_UNIT_VALUE,
+			parser.named "forall",
 			parser.map(T_STRING_LITERAL, function(v)
 				return {tag = "string-literal", value = v}
 			end, true),
@@ -901,6 +1116,7 @@ local function parseSmol(tokens)
 				{"#expression", parser.named "expression", "expression"},
 				{"_", K_ROUND_CLOSE, "`)`"},
 			},
+			K_RETURN,
 		},
 	}
 
@@ -947,7 +1163,7 @@ REGISTER_TYPE("UnionIR", recordType {
 	fields = listType "VariableIR",
 	generics = listType "TypeParameterIR",
 	implements = listType "InterfaceType+",
-	signatures = listType "Signature",	
+	signatures = listType "Signature",
 	constraints = mapType("string", "InterfaceType+"),
 })
 
@@ -965,6 +1181,7 @@ REGISTER_TYPE("TypeParameterIR", recordType {
 	constraints = listType(recordType {
 		interface = "InterfaceType+",
 	}),
+	location = "Location",
 })
 
 REGISTER_TYPE("FunctionIR", recordType {
@@ -985,6 +1202,21 @@ REGISTER_TYPE("Signature", recordType {
 	container = "string",
 	foreign = "boolean",
 	bang = "boolean",
+	requiresAST = listType "ASTExpression",
+	ensuresAST = listType "ASTExpression",
+	logic = choiceType(
+		constantType(false),
+		mapType(
+			"boolean",
+			listType(listType(choiceType("boolean", constantType "*")))
+		)
+	),
+	eval = choiceType(constantType(false), "function"),
+})
+
+REGISTER_TYPE("ASTExpression", recordType {
+	tag = "string",
+	-- TODO
 })
 
 REGISTER_TYPE("maybe", choiceType(
@@ -994,12 +1226,14 @@ REGISTER_TYPE("maybe", choiceType(
 ))
 
 REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
+	-- Execution
 	"AssignSt",
 	"BlockSt",
 	"BooleanLoadSt",
 	"FieldSt",
 	"GenericMethodCallSt",
 	"GenericStaticCallSt",
+	"IsASt",
 	"LocalSt",
 	"MatchSt",
 	"MethodCallSt",
@@ -1013,12 +1247,43 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"ThisSt",
 	"UnitSt",
 	"VariantSt",
+
+	-- Verification
+	"AssumeSt",
+	"VerifySt",
+	"ProofSt",
+	"ForallSt",
+
+	-- Nothing
 	"NothingSt"
 )))
 
 REGISTER_TYPE("AbstractStatementIR", recordType {
 	tag = "string",
 	returns = "maybe",
+})
+
+EXTEND_TYPE("AssumeSt", "AbstractStatementIR", recordType {
+	tag = constantType "assume",
+	body = "nil",
+	variable = "VariableIR",
+	location = "Location",
+})
+
+EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
+	tag = constantType "verify",
+	body = "nil",
+	variable = "VariableIR",
+	checkLocation = "Location",
+	conditionLocation = "Location",
+	reason = "string",
+})
+
+-- Represents proof-only code (a block, but without codegen)
+EXTEND_TYPE("ProofSt", "AbstractStatementIR", recordType {
+	tag = constantType "proof",
+	body = "StatementIR",
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {
@@ -1030,18 +1295,18 @@ EXTEND_TYPE("StringLoadSt", "AbstractStatementIR", recordType {
 	tag = constantType "string",
 	destination = "VariableIR",
 	string = "string",
-	returns = constantType "no",	
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("LocalSt", "AbstractStatementIR", recordType {
 	tag = constantType "local",
 	variable = "VariableIR",
-	returns = constantType "no",	
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("NothingSt", "AbstractStatementIR", recordType {
 	tag = constantType "nothing",
-	returns = constantType "no",	
+	returns = constantType "no",
 })
 
 EXTEND_TYPE("AssignSt", "AbstractStatementIR", recordType {
@@ -1078,6 +1343,7 @@ EXTEND_TYPE("NewClassSt", "AbstractStatementIR", recordType {
 	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",
+	memberDefinitions = mapType("string", "VariableIR"),
 })
 
 EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
@@ -1088,6 +1354,7 @@ EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
 	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",
+	variantDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
@@ -1097,7 +1364,8 @@ EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
-	name = "string",
+	staticName = "string",
+	signature = "Signature",
 })
 
 EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
@@ -1107,6 +1375,7 @@ EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
+	signature = "Signature",
 })
 
 EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
@@ -1117,6 +1386,7 @@ EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
+	signature = "Signature",
 })
 
 EXTEND_TYPE("GenericStaticCallSt", "AbstractStatementIR", recordType {
@@ -1126,6 +1396,7 @@ EXTEND_TYPE("GenericStaticCallSt", "AbstractStatementIR", recordType {
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
+	signature = "Signature",
 })
 
 EXTEND_TYPE("BooleanLoadSt", "AbstractStatementIR", recordType {
@@ -1141,6 +1412,7 @@ EXTEND_TYPE("FieldSt", "AbstractStatementIR", recordType {
 	base = "VariableIR",
 	destination = "VariableIR",
 	returns = constantType "no",
+	fieldDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("ThisSt", "AbstractStatementIR", recordType {
@@ -1161,6 +1433,7 @@ EXTEND_TYPE("VariantSt", "AbstractStatementIR", recordType {
 	base = "VariableIR",
 	variant = "string",
 	returns = constantType "no",
+	variantDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
@@ -1172,10 +1445,30 @@ EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
 	}),
 })
 
+EXTEND_TYPE("IsASt", "AbstractStatementIR", recordType {
+	tag = constantType "isa",
+	base = "VariableIR",
+	destination = "VariableIR",
+	returns = constantType "no",
+	variant = "string",
+})
+
+EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
+	tag = constantType "forall",
+	destination = "VariableIR",
+	quantified = "Type+",
+
+	-- VariableIR => StatementIR, VariableIR
+	instantiate = "function",
+	location = "Location",
+})
+
+--------------------------------------------------------------------------------
+
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "Type+",
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("ConstraintIR", choiceType(
@@ -1208,7 +1501,7 @@ REGISTER_TYPE("InterfaceType+", recordType {
 	tag = constantType "interface-type",
 	name = "string",
 	arguments = listType "Type+",
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("ConcreteType+", recordType {
@@ -1217,7 +1510,7 @@ REGISTER_TYPE("ConcreteType+", recordType {
 	name = "string",
 	arguments = listType "Type+",
 
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("KeywordType+", recordType {
@@ -1225,7 +1518,7 @@ REGISTER_TYPE("KeywordType+", recordType {
 
 	name = "string",
 
-	location = "string",
+	location = "Location",
 })
 
 REGISTER_TYPE("GenericType+", recordType {
@@ -1233,7 +1526,7 @@ REGISTER_TYPE("GenericType+", recordType {
 
 	name = "string", -- e.g., "Foo" for `#Foo`
 
-	location = "string",
+	location = "Location",
 })
 
 -- Main ------------------------------------------------------------------------
@@ -1262,7 +1555,7 @@ end
 table.insert(sourceFiles, {
 	path = "<compiler-core>",
 	short = "<compiler-core>",
-	contents = [[
+	contents = [==[
 package core;
 
 class Out {
@@ -1307,16 +1600,24 @@ interface Showable {
 	method show() String;
 }
 
-union Option[#T] {
+union Option[#T | #T is Eq[#T]] {
 	var some #T;
 	var none Unit;
 
-	static makeSome(value #T) Option[#T] {
+	static makeSome(value #T) Option[#T]
+	ensures return is some
+	ensures return.some == value {
 		return new(some = value);
 	}
 
-	static makeNone() Option[#T] {
+	static makeNone() Option[#T]
+	ensures return is none {
 		return new(none = unit);
+	}
+
+	method get() #T
+	requires this is some {
+		return this.some;
 	}
 }
 
@@ -1331,12 +1632,32 @@ interface Eq[#T] {
 	method eq(other #T) Boolean;
 }
 
-]]
+class WInt is Eq[WInt] {
+	var value Int;
+
+	method get() Int ensures return == this.value{
+		return this.value;
+	}
+
+	static make(n Int) WInt ensures return.get() == n {
+		return new(value = n);
+	}
+
+	method eq(other WInt) Boolean {
+		return this.value == other.value;
+	}
+}
+
+]==]
 })
+
+profile.open "parsing"
 
 -- Load and parse source files
 local sourceParses = {}
 for _, sourceFile in ipairs(sourceFiles) do
+	profile.open("parsing " .. sourceFile.path)
+	profile.open("reading")
 	local contents = sourceFile.contents
 	if not contents then
 		local file, err = io.open(sourceFile.path, "r")
@@ -1350,19 +1671,34 @@ for _, sourceFile in ipairs(sourceFiles) do
 		end
 	end
 	assert(contents)
+	profile.close("reading")
 
 	-- Lex contents
+	profile.open("lexing")
 	local tokens = lexSmol(contents, sourceFile.short)
+	profile.close("lexing")
 
 	-- Parse contents
+	profile.open("parsing")
 	table.insert(sourceParses, parseSmol(tokens))
+	profile.close("parsing")
+	profile.close("parsing " .. sourceFile.path)
 end
+
+profile.close "parsing"
 
 assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
-local semantics = calculateSemantics(sourceParses, mainFunction)
+profile.open "semantics"
+local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
+profile.close "semantics"
 
+profile.open "verify"
+verify(semantics)
+profile.close "verify"
+
+profile.open "codegen"
 if semantics.main then
 	-- TODO: read target
 	local arguments = {out = "output.c"}
@@ -1371,3 +1707,4 @@ if semantics.main then
 else
 	print("Successfully compiled " .. #sourceFiles .. " file(s)")
 end
+profile.close "codegen"

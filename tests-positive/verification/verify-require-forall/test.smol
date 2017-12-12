@@ -1,0 +1,16 @@
+package test;
+
+class Test {
+
+	static good(x Int) Boolean {
+		return x < 0;
+	}
+
+	static foo(arg Int) Unit
+	requires forall (x Int) Test.good(x) {
+		assert Test.good(arg);
+	}
+
+	static main() Unit {
+	}
+}

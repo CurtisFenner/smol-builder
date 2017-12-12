@@ -1,9 +1,13 @@
 package test;
 
 class Test {
-	method foo() Test {
-		return new();
+
+	static f() Unit
+	ensures false when false {
+	
 	}
+
 	static main() Unit {
+		
 	}
 }

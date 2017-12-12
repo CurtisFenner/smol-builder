@@ -1,0 +1,16 @@
+package test;
+import core;
+
+class Test {
+	static get(option core:Option[core:WInt]) core:WInt {
+		match option {
+			case some some {
+				return some;
+			}
+		}
+	}
+
+	static main() Unit {
+
+	}
+}

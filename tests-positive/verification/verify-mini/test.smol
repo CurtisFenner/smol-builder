@@ -1,0 +1,16 @@
+package test;
+
+class Test {
+	static yes() Boolean
+	ensures return {
+		return true;
+	}
+
+	static check(arg Boolean) Unit
+	requires arg {
+	}
+
+	static main!() Unit {
+		do Test.check(Test.yes());
+	}
+}

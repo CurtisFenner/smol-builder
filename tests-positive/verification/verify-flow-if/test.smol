@@ -1,0 +1,19 @@
+package test;
+
+
+class Test {
+	static foo() Boolean {
+		return false;
+	}
+
+	static main() Unit {
+		if Test.foo() {
+			assert Test.foo();
+		} else {
+			assert Test.foo().not();
+			return;
+		}
+		assert Test.foo();
+	}
+}
+

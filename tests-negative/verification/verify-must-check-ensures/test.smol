@@ -1,0 +1,25 @@
+package test;
+
+import core;
+
+class Thing {
+	static makeBad() Thing {
+		return new();
+	}
+
+	method isGood() Boolean {
+		return false;
+	}
+}
+
+class Test {
+
+	static foo() Unit
+	ensures Thing.makeBad().isGood() {
+		return unit;
+	}
+
+	static main!() Unit {
+		do core:Out.println!("1");
+	}
+}

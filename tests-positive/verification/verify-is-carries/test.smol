@@ -1,0 +1,18 @@
+package test;
+
+union U {
+	var a Unit;
+	var b Unit;
+
+	method foo() Unit requires this is a {}
+}
+
+class Test {
+	static foo(u U) Unit
+	requires u is a
+	ensures u is a {
+		do u.foo();
+	}
+	static main() Unit {
+	}
+}

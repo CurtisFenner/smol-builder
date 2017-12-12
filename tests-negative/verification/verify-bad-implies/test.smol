@@ -1,0 +1,25 @@
+package test;
+
+class Foo {
+	method a() Boolean {
+		return true;
+	}
+
+	static short(x Foo) Boolean
+	requires x.a()
+	ensures return.not() {
+		return false;
+	}
+
+	static skip!(x Foo) Unit
+	ensures x.a().implies(Foo.short(x).not()) {
+
+	}
+}
+
+class Test {
+
+	static main() Unit {
+
+	}
+}

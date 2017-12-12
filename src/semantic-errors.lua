@@ -9,21 +9,21 @@ function Report.TYPE_DEFINED_TWICE(first, second)
 
 	quit("The type `", name, "` was already defined ",
 		first.location,
-		".\nHowever, you are attempting to redefine it ",
+		"\nHowever, you are attempting to redefine it ",
 		second.location)
 end
 
 function Report.GENERIC_DEFINED_TWICE(p)
 	quit("The generic variable `#", p.name, "` was already defined ",
 		p.firstLocation,
-		".\nHowever, you are attempting to redefine it ",
+		"\nHowever, you are attempting to redefine it ",
 		p.secondLocation)
 end
 
 function Report.MEMBER_DEFINED_TWICE(p)
 	quit("The member `" .. p.name .. "` was already defined ",
 		p.firstLocation,
-		".\nHowever, you are attempting to redefine it ",
+		"\nHowever, you are attempting to redefine it ",
 		p.secondLocation)
 end
 
@@ -65,14 +65,17 @@ function Report.INTERFACE_REQUIRES_MEMBER(p)
 	quit("The class/union `", p.class, "` claims to implement interface",
 		" `", p.interface, "` ", p.implementsLocation,
 		"\nHowever, `" .. p.class .. "` does not implement the required",
-		" member `" .. p.memberName .. "` which is defined ",
+		" member `" .. p.memberName .. "` which is required by the interface `",
+		p.interface, "` ",
 		p.memberLocation)
 end
 
 function Report.WRONG_ARITY(p)
+	assertis(p.definitionLocation, "Location")
+
 	quit("The type `", p.name, "` was defined ", p.definitionLocation,
 		"to take exactly ", p.expectedArity, " type arguments.",
-		"\nHowever, it is provided with ", p.givenArity, " ",
+		"\nHowever, you provide ", p.givenArity, " ",
 		p.location)
 end
 
@@ -139,7 +142,7 @@ function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 	quit("The type `", p.container, "` requires its ",
 		string.ordinal(p.nth), " type-parameter to implement ", p.constraint,
 		" ", p.cause,
-		"\nHowever, the type `", p.type, "` does not implement `",
+		"\nHowever, the type `", p.type, "` does not implement the interface `",
 		p.constraint, "` ", p.location)
 end
 
@@ -168,10 +171,20 @@ end
 function Report.TYPES_DONT_MATCH(p)
 	assertis(p.expectedType, "string")
 	assertis(p.givenType, "string")
-	assertis(p.location, "string")
+	assertis(p.location, "Location")
+	assertis(p.purpose, "string")
 	quit("The ", p.purpose, " expects `", p.expectedType, "` as defined ",
 		p.expectedLocation,
-		"\nHowever, `", p.givenType, "` was provided at ", p.location)
+		"\nHowever, you pass a `", p.givenType, "` ", p.location)
+end
+
+function Report.EXPECTED_DIFFERENT_TYPE(p)
+	assertis(p.expectedType, "string")
+	assertis(p.givenType, "string")
+	assertis(p.location, "Location")
+	assertis(p.purpose, "string")
+	quit("The ", p.purpose, " expects `", p.expectedType, "` but was given `",
+		p.givenType, "` ", p.location)
 end
 
 function Report.EQ_TYPE_MISMATCH(p)
@@ -189,16 +202,11 @@ end
 function Report.NO_SUCH_VARIANT(p)
 	quit("The type `", p.container, "` does not have a variant called `",
 		p.name, "`",
-		"\nHowever, you try to access `", p.name, "` ", p.location)
+		"\nHowever, you try to access variant `", p.name, "` ", p.location)
 end
 
 function Report.NO_SUCH_VARIABLE(p)
 	quit("There is no variable named `", p.name, "` in scope ", p.location)
-end
-
-function Report.NEW_USED_OUTSIDE_STATIC(p)
-	quit("You can only use `new` expressions in static methods.",
-		"\nHowever, you try to invoke `new` ", p.location)
 end
 
 function Report.NO_SUCH_METHOD(p)
@@ -216,13 +224,15 @@ function Report.CONFLICTING_INTERFACES(p)
 end
 
 function Report.TYPE_MUST_BE_CLASS(p)
+	assertis(p.purpose, "string")
+
 	quit("The ", p.purpose, " must be a class instance. However, it is a ",
 		p.givenType, " ", p.location)
 end
 
 function Report.TYPE_MUST_BE_UNION(p)
-	quit("The ", p.purpose, " must be a union instance. However, it is a ",
-		p.givenType, " ", p.location)
+	quit("The ", p.purpose, " must be a union instance. However, you try to use a ",
+		"`", p.givenType, "` ", p.location)
 end
 
 function Report.MISSING_VALUE(p)
@@ -277,18 +287,28 @@ function Report.UNKNOWN_OPERATOR_USED(p)
 end
 
 function Report.THIS_USED_OUTSIDE_METHOD(p)
-	quit("You try to use `this` in a non-static function ", p.location)
+	quit("You try to use `this` in a non-method function ", p.location)
 end
 
 function Report.VARIANT_USED_TWICE(p)
-	quit("You use the variant `", p.variant, "` twice in a single match;",
-		"\nYou use `", p.variant, "` first ", p.firstLocation,
-		"\nYou use `", p.variant, "` a second time ", p.secondLocation)
+	quit("You use the variant `case ", p.variant, "` twice in a single match;",
+		"\nYou use `case ", p.variant, "` first ", p.firstLocation,
+		"\nYou use `case ", p.variant, "` a second time ", p.secondLocation)
 end
 
 function Report.INEXHAUSTIVE_MATCH(p)
-	quit("In a match statement on a `", p.baseType, "` you are missing cases for",
-		"\n\t`", table.concat(p.missingCases, "`\n\t"), "`\n", p.location)
+	local clauses = {}
+	for _, missing in ipairs(p.missingCases) do
+		table.insert(clauses, "\t`case " .. missing .. "`")
+	end
+	quit("In a match statement on a `", p.baseType, "` you are missing case clauses:\n",
+		table.concat(clauses, "`\n"), "\n", p.location)
+end
+
+function Report.RETURN_USED_IN_IMPLEMENTATION(p)
+	quit("The `return` keyword can only be used as an expression in",
+		" `ensures` clauses.",
+		"\nHowever, you use `return` ", p.location)
 end
 
 return Report

@@ -39,7 +39,7 @@ end
 -- RETURNS nothing
 -- MODIFIES out by appending strings to it
 local function showAdd(object, indent, out)
-	if indent > 10 then
+	if indent > 6 then
 		table.insert(out, "...")
 	elseif isstring(object) then
 		-- Turn into a string literal
@@ -49,13 +49,28 @@ local function showAdd(object, indent, out)
 		end
 		table.insert(out, [["]])
 	elseif isobject(object) then
+		local internal = {}
 		table.insert(out, "{")
 		for key, value in pairs(object) do
-			table.insert(out, "\n" .. string.rep("\t", indent) .. "\t[")
-			showAdd(key, indent + 1, out)
-			table.insert(out, "] = ")
-			showAdd(value, indent + 1, out)
-			table.insert(out, ",")
+			local line = {}
+			table.insert(line, "\n" .. string.rep("\t", indent) .. "\t[")
+			showAdd(key, indent + 1, line)
+			table.insert(line, "] = ")
+			showAdd(value, indent + 1, line)
+			table.insert(line, ",")
+			table.insert(internal, table.concat(line))
+		end
+		table.sort(internal)
+		for i = 1, #internal do
+			if #internal > 1000 and i > 3 and i <= #internal - 3 then
+				local el = "\n" .. string.rep("\t", indent) .. "...;"
+				if out[#out] ~= el then
+					table.insert(out, el)
+				end
+			else
+				local line = internal[i]
+				table.insert(out, line)
+			end
 		end
 		table.insert(out, "\n" .. string.rep("\t", indent) .. "}")
 	else
@@ -133,7 +148,7 @@ end
 local IMMUTABLE_OBJECTS = table.weak()
 
 -- RETURNS (conservatively) whether or not `x` is immutable
-local function isimmutable(x)
+function isimmutable(x)
 	-- Not-a-number does not count as immutable
 	if x ~= x then
 		return false
@@ -163,7 +178,8 @@ function memoized(count, f)
 
 	local memoizedF = function(...)
 		local arguments = {...}
-		assert(arguments[count+1] == nil)
+		assert(arguments[count+1] == nil,
+			"memoized function given too many arguments!")
 
 		-- Check that the arguments are immutable
 		for i = 1, count do
@@ -200,16 +216,22 @@ end
 
 --------------------------------------------------------------------------------
 
+local traces = {}
 -- RETURNS an immutable copy of `object` that errors when a non-existent key
 -- is read.
 -- REQUIRES all components are immutable, including functions
 function freeze(object)
 	if not isobject(object) then
 		return object
+	elseif isimmutable(object) then
+		return object
 	end
 
 	local out = newproxy(true)
+	traces[out] = "debug.traceback(2)"
+
 	local metatable = getmetatable(out)
+	local mem = {}
 	metatable.__index = function(_, key)
 		if object[key] == nil then
 			local available = {}
@@ -227,16 +249,30 @@ function freeze(object)
 			end
 			error("frozen object has no field `"
 				.. tostring(key) .. "`: available `"
-				.. show(object) .. "`", 2)
+				.. show(object) .. "`\nFrozen at " .. traces[_], 2)
 		end
-		return object[key]
+
+		-- Recursively freeze and cache
+		if mem[key] == nil then
+			mem[key] = freeze(object[key])
+			--print("freeze subkey", key, "on", object, "freezing", object[key], "into", mem[key])
+		end
+		return mem[key]
 	end
 	metatable.__newindex = function(_, key)
 		error("cannot write to field `"
 			.. tostring(key) .. "` on frozen object", 2)
 	end
 	metatable.__pairs = function()
-		return pairs(object)
+		return function(o, ...)
+			assert(rawequal(o, nil))
+			local key = next(object, ...)
+			if key == nil then
+				return nil, nil
+			end
+			local value = out[key]
+			return key, value
+		end
 	end
 	metatable.__len = function()
 		return #object
@@ -307,8 +343,27 @@ local function TYPE_DESCRIPTION(t)
 end
 TYPE_DESCRIPTION = memoized(1, TYPE_DESCRIPTION)
 
--- ASSERTS that `value` is of the specified type `t`
-function assertis(value, t)
+local immC = 0
+local mutC = 0
+local hits = {}
+local function _assertis(value, t)
+	if not rawequal(value, nil) then
+		if isimmutable(value) then
+			immC = immC + 1
+		else
+			mutC = mutC + 1
+		end
+		if (immC + mutC) % 1000 == 0 then
+			--print("immutable:", immC)
+			--print("mutable:  ", mutC)
+		end
+		hits[value] = (hits[value] or 0) + 1
+		if hits[value] > 2000 then
+			--print(show(value))
+			--error("^^ excessive")
+		end
+	end
+
 	local predicate = TYPE_PREDICATE(t)
 	local okay, reason = predicate(value)
 	if not okay then
@@ -320,7 +375,23 @@ function assertis(value, t)
 		error("value must be a `" .. TYPE_DESCRIPTION(t) .. "`."
 			.. "\nHowever it is not: " .. reason .. "\n" .. show(value), 2)
 	end
+
+	return true
 end
+_assertis = memoized(2, _assertis)
+
+local normalizedT = {}
+-- ASSERTS that `value` is of the specified type `t`
+function assertis(value, t)
+	--do return true end
+	-- TYPE_DESCRIPTION must be injective
+	-- Normalize types so that memoization works
+	local x = TYPE_DESCRIPTION(t)
+	normalizedT[x] = normalizedT[x] or t
+
+	return _assertis(value, normalizedT[x])
+end
+assertis = memoized(2, assertis)
 
 --------------------------------------------------------------------------------
 
@@ -336,11 +407,23 @@ end
 constantType = memoized(1, constantType)
 
 -- RETURNS a type-predicate
+local recordMemoize = {}
 function recordType(record)
-	assert(isobject(record))
+	assert(isobject(record), "record type must be given a table")
 
+	local keys = {}
 	for key, value in pairs(record) do
+		table.insert(keys, {key = key, value = value})
 		assert(isstring(key), "record key must be string")
+	end
+	table.sort(keys, function(a, b) return a.key < b.key end)
+	local recordID = ""
+	-- XXX: show() isn't necessary injective!!!
+	for _, kv in ipairs(keys) do
+		recordID = recordID .. show(kv.key) .. " => " .. show(kv.value) .. "; "
+	end
+	if recordMemoize[recordID] then
+		return recordMemoize[recordID]
 	end
 
 	local function predicate(object)
@@ -366,6 +449,7 @@ function recordType(record)
 
 		return true
 	end
+	predicate = memoized(1, predicate)
 
 	local function describe(object)
 		local kv = {}
@@ -377,7 +461,9 @@ function recordType(record)
 		return "{" .. table.concat(kv, ", ") .. "}"
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	local out = freeze {predicate = predicate, describe = describe}
+	recordMemoize[recordID] = out
+	return out
 end
 recordType = memoized(1, recordType)
 
@@ -409,6 +495,7 @@ function listType(elementType)
 
 		return true
 	end
+	predicate = memoized(1, predicate)
 
 	local function describe()
 		return "[" .. TYPE_DESCRIPTION(elementType) .. "]"
@@ -445,6 +532,7 @@ function mapType(from, to)
 
 		return true
 	end
+	predicate = memoized(1, predicate)
 
 	local function describe()
 		local map = TYPE_DESCRIPTION(from) .. " => " .. TYPE_DESCRIPTION(to)
@@ -472,6 +560,7 @@ function choiceType(...)
 		end
 		return false, "(" .. table.concat(reasons, ") or (") .. ")"
 	end
+	predicate = memoized(1, predicate)
 
 	local function describe()
 		local c = {}
@@ -500,6 +589,7 @@ function intersectType(...)
 		end
 		return true
 	end
+	predicate = memoized(1, predicate)
 
 	local function describe()
 		local c = {}
@@ -591,6 +681,8 @@ REGISTER_TYPE("integer", predicateType(isinteger))
 REGISTER_TYPE("string", predicateType(isstring))
 REGISTER_TYPE("function", predicateType(isfunction))
 REGISTER_TYPE("boolean", predicateType(isboolean))
+REGISTER_TYPE("false", constantType(false))
+REGISTER_TYPE("true", constantType(true))
 REGISTER_TYPE("nil", constantType(nil))
 REGISTER_TYPE("any", predicateType(function() return true end))
 

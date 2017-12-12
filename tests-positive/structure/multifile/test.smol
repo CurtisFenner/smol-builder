@@ -3,7 +3,7 @@ package test;
 import core;
 
 class Test {
-	static main!() Unit{
+	static main!() Unit {
 		do core:Out.println!(test:Value.answer());
 	}
 }
