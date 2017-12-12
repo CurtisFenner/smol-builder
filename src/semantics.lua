@@ -2,6 +2,10 @@
 
 local Report = import "semantic-errors.lua"
 local profile = import "profile.lua"
+local provided = import "provided.lua"
+local showType = provided.showType
+local areTypesEqual = provided.areTypesEqual
+local areInterfaceTypesEqual = provided.areInterfaceTypesEqual
 
 -- RETURNS the clearest possible combination of a, and b.
 local function unclear(a, b)
@@ -13,7 +17,6 @@ local function unclear(a, b)
 	return "maybe"
 end
 
-local showType = import("provided.lua").showType
 
 -- RETURNS a string of smol representing the given interface type
 local function showInterfaceType(t)
@@ -81,57 +84,6 @@ local function localSt(variable)
 		variable = variable,
 		returns = "no",
 	}
-end
-
--- RETURNS whether or not a and b are the same type
--- REQUIRES that type names cannot be shadowed and
--- that a and b come from the same (type) scope
-local function areTypesEqual(a, b)
-	assertis(a, "Type+")
-	assertis(b, "Type+")
-
-	if a.tag ~= b.tag then
-		return false
-	elseif a.tag == "concrete-type+" then
-		if a.name ~= b.name then
-			return false
-		elseif #a.arguments ~= #b.arguments then
-			-- XXX: should this be fixed before here?
-			return false
-		end
-		for k in ipairs(a.arguments) do
-			if not areTypesEqual(a.arguments[k], b.arguments[k]) then
-				return false
-			end
-		end
-		return true
-	elseif a.tag == "keyword-type+" then
-		return a.name == b.name
-	elseif a.tag == "generic+" then
-		return a.name == b.name
-	end
-	error("unknown type tag `" .. a.tag .. "`")
-end
-
--- RETURNS whether or not a and b are the same interface
--- REQUIRES that type names cannot be shadowed and
--- that a and b come from the same (type) scope
-local function areInterfaceTypesEqual(a, b)
-	assertis(a, "InterfaceType+")
-	assertis(b, "InterfaceType+")
-
-	if a.name ~= b.name then
-		return false
-	end
-	assert(#a.arguments == #b.arguments)
-
-	for k in ipairs(a.arguments) do
-		if not areTypesEqual(a.arguments[k], b.arguments[k]) then
-			return false
-		end
-	end
-
-	return true
 end
 
 -- assignments: map string -> Type+
@@ -349,7 +301,6 @@ end
 
 --------------------------------------------------------------------------------
 
-local provided = import "provided.lua"
 
 local STRING_TYPE = provided.STRING_TYPE
 local INT_TYPE = provided.INT_TYPE

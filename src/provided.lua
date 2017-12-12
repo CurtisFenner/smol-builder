@@ -1,3 +1,59 @@
+-- provided.lua contains functions in common to many files (semantics, codegen,
+-- verification)
+
+-- RETURNS whether or not a and b are the same type
+-- REQUIRES that type names cannot be shadowed and
+-- that a and b come from the same (type) scope
+local function areTypesEqual(a, b)
+	assertis(a, "Type+")
+	assertis(b, "Type+")
+
+	if a.tag ~= b.tag then
+		return false
+	elseif a.tag == "concrete-type+" then
+		if a.name ~= b.name then
+			return false
+		elseif #a.arguments ~= #b.arguments then
+			-- XXX: should this be fixed before here?
+			return false
+		end
+		for k in ipairs(a.arguments) do
+			if not areTypesEqual(a.arguments[k], b.arguments[k]) then
+				return false
+			end
+		end
+		return true
+	elseif a.tag == "keyword-type+" then
+		return a.name == b.name
+	elseif a.tag == "generic+" then
+		return a.name == b.name
+	end
+	error("unknown type tag `" .. a.tag .. "`")
+end
+
+-- RETURNS whether or not a and b are the same interface
+-- REQUIRES that type names cannot be shadowed and
+-- that a and b come from the same (type) scope
+local function areInterfaceTypesEqual(a, b)
+	assertis(a, "InterfaceType+")
+	assertis(b, "InterfaceType+")
+
+	if a.name ~= b.name then
+		return false
+	end
+	assert(#a.arguments == #b.arguments)
+
+	for k in ipairs(a.arguments) do
+		if not areTypesEqual(a.arguments[k], b.arguments[k]) then
+			return false
+		end
+	end
+
+	return true
+end
+
+--------------------------------------------------------------------------------
+
 local STRING_TYPE = freeze {
 	tag = "keyword-type+",
 	name = "String",
@@ -42,9 +98,97 @@ local OPERATOR_ALIAS = {
 
 --------------------------------------------------------------------------------
 
-local BUILTIN_LOC = {
+local BUILTIN_LOC = freeze {
 	begins = "builtin",
 	ends = "builtin",
+}
+
+local BOOLEAN_DEF = freeze {
+	type = BOOLEAN_TYPE,
+	name = "Boolean",
+	tag = "builtin",
+	signatures = {
+		{
+			name = "eq",
+			parameters = {{location = BUILTIN_LOC, name = "other", type = BOOLEAN_TYPE}},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{true, true}, {false, false}},
+				[false] = {{true, false}, {false, true}},
+			},
+			eval = function(a, b) return a == b end,
+		},
+		{
+			name = "and",
+			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{true, true}},
+				[false] = {{false, false}, {false, true}, {true, false}},
+			},
+			eval = function(a, b) return a and b end,
+		},
+		{
+			name = "or",
+			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{true, "*"}, {false, true}},
+				[false] = {{false, false}},
+			},
+			eval = function(a, b) return a or b end,
+		},
+		{
+			name = "implies",
+			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{false, "*"}, {true, true}},
+				[false] = {{true, false}},
+			},
+			eval = function(a, b) return not a or b end,
+		},
+		{
+			name = "not",
+			parameters = {},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Boolean",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = {
+				[true] = {{false}},
+				[false] = {{true}},
+			},
+			eval = function(a) return not a end,
+		},
+	},
 }
 
 local BUILTIN_DEFINITIONS = freeze {
@@ -192,93 +336,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			}
 		},
 	},
-	{
-		type = BOOLEAN_TYPE,
-		name = "Boolean",
-		tag = "builtin",
-		signatures = {
-			{
-				name = "eq",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{true, true}, {false, false}},
-					[false] = {{true, false}, {false, true}},
-				},
-				eval = function(a, b) return a == b end,
-			},
-			{
-				name = "and",
-				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{true, true}},
-					[false] = {{false, false}, {false, true}, {true, false}},
-				},
-				eval = function(a, b) return a and b end,
-			},
-			{
-				name = "or",
-				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{true, "*"}, {false, true}},
-					[false] = {{false, false}},
-				},
-				eval = function(a, b) return a or b end,
-			},
-			{
-				name = "implies",
-				parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{false, "*"}, {true, true}},
-					[false] = {{true, false}},
-				},
-				eval = function(a, b) return not a or b end,
-			},
-			{
-				name = "not",
-				parameters = {},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Boolean",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = {
-					[true] = {{false}},
-					[false] = {{true}},
-				},
-				eval = function(a) return not a end,
-			},
-		},
-	},
+	BOOLEAN_DEF,
 	{
 		type = UNIT_TYPE,
 		name = "Unit",
@@ -315,6 +373,40 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a Signature for t.eq(t)
+local function makeEqSignature(t)
+	assertis(t, "Type+")
+
+	if t.name == "Boolean" then
+		return table.findwith(BOOLEAN_DEF.signatures, "name", "eq")
+	end
+
+	local unknown = freeze {begins = "???", ends = "???"}
+
+	local eqSignature = freeze {
+		name = "eq",
+		parameters = {
+			freeze {name = "left", type = t, location = unknown},
+			freeze {name = "right", type = t, location = unknown}
+		},
+		returnTypes = {BOOLEAN_TYPE},
+		modifier = "method",
+		container = showType(t),
+		bang = false,
+		foreign = true,
+		ensuresAST = {},
+		requiresAST = {},
+		logic = false,
+		eval = false,
+	}
+
+	assertis(eqSignature, "Signature")
+
+	return eqSignature
+end
+
+--------------------------------------------------------------------------------
+
 return freeze {
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
@@ -323,5 +415,10 @@ return freeze {
 	NEVER_TYPE = NEVER_TYPE,
 	BUILTIN_DEFINITIONS = BUILTIN_DEFINITIONS,
 	OPERATOR_ALIAS = OPERATOR_ALIAS,
+
+	-- Helpers
+	areTypesEqual = areTypesEqual,
+	areInterfaceTypesEqual = areInterfaceTypesEqual,
 	showType = showType,
+	makeEqSignature = makeEqSignature,
 }

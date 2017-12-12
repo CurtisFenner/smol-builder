@@ -6,6 +6,8 @@ local smt = import "smt.lua"
 
 local verifyTheory = (import "verify-theory.lua").theory
 local notAssertion = (import "verify-theory.lua").notAssertion
+local eqAssertion = (import "verify-theory.lua").eqAssertion
+local variableAssertion = (import "verify-theory.lua").variableAssertion
 
 local Report = import "verify-errors.lua"
 
@@ -53,6 +55,7 @@ REGISTER_TYPE("MethodAssertion", recordType {
 	arguments = listType "Assertion",
 	methodName = "string",
 	signature = choiceType("Signature", "Signature"),
+	index = "integer",
 })
 
 REGISTER_TYPE("FieldAssertion", recordType {
@@ -90,6 +93,7 @@ REGISTER_TYPE("Assertion", choiceType(
 		arguments = listType "Assertion",
 		staticName = "string",
 		signature = "Signature",
+		index = "integer",
 	},
 	recordType {
 		tag = constantType "variable",
@@ -236,38 +240,6 @@ local assertionRecursionMap = freeze {
 	["forall"] = {},
 }
 
--- RETURNS a Signature for t.eq(t)
-local function makeEqSignature(t)
-	assertis(t, "Type+")
-
-	if t.name == "Boolean" then
-		return table.findwith(BOOLEAN_DEF.signatures, "name", "eq")
-	end
-
-	local unknown = freeze {begins = "???", ends = "???"}
-
-	local eqSignature = freeze {
-		name = "eq",
-		parameters = {
-			freeze {name = "left", type = t, location = unknown},
-			freeze {name = "right", type = t, location = unknown}
-		},
-		returnTypes = {BOOLEAN_TYPE},
-		modifier = "method",
-		container = showType(t),
-		bang = false,
-		foreign = true,
-		ensuresAST = {},
-		requiresAST = {},
-		logic = false,
-		eval = false,
-	}
-
-	assertis(eqSignature, "Signature")
-
-	return eqSignature
-end
-
 -- RETURNS an Assertion representing a && b
 local function andAssertion(a, b)
 	assertis(a, "Assertion")
@@ -283,7 +255,8 @@ local function andAssertion(a, b)
 		methodName = "and",
 		base = a,
 		arguments = {b},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "and")
+		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "and"),
+		index = 1,
 	}
 	assertis(p, "MethodAssertion")
 	return p
@@ -304,7 +277,8 @@ local function impliesAssertion(a, b)
 		methodName = "implies",
 		base = a,
 		arguments = {b},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "implies")
+		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "implies"),
+		index = 1,
 	}
 	assertis(p, "MethodAssertion")
 	return p
@@ -465,16 +439,6 @@ local function valueBoolean(bool)
 	return falseBoolean
 end
 
--- RETURNS an Assertion
-local function variableAssertion(variable)
-	assertis(variable, "VariableIR")
-
-	return freeze {
-		tag = "variable",
-		variable = variable,
-	}
-end
-
 local uniqueNameID = 1000
 local function uniqueVariable(type)
 	assertis(type, "Type+")
@@ -532,23 +496,6 @@ local function addMerge(scope, branches)
 	}
 	assertis(action, "Action")
 	table.insert(scope, action)
-end
-
-local function eqAssertion(a, b, t)
-	assertis(a, "Assertion")
-	assertis(b, "Assertion")
-	assertis(t, "Type+")
-
-	local p = freeze {
-		tag = "method",
-		methodName = "eq",
-		base = a,
-		arguments = {b},
-		signature = makeEqSignature(t),
-		index = 1,
-	}
-	assertis(p, "MethodAssertion")
-	return p
 end
 
 -- RETURNS a list of true Assertion predicates, inNow
@@ -718,6 +665,7 @@ local function resultAssertion(statement, index)
 			arguments = table.map(variableAssertion, statement.arguments),
 
 			signature = statement.signature,
+			index = index,
 		}
 	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
 		assertis(index, "integer")
@@ -734,6 +682,7 @@ local function resultAssertion(statement, index)
 			staticName = statement.staticName,
 			arguments = table.map(variableAssertion, statement.arguments),
 			signature = statement.signature,
+			index = index,
 		}
 	end
 	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
@@ -1077,7 +1026,7 @@ local function verifyStatement(statement, scope, semantics)
 
 		local subscopePrime = scopeCopy(scope)
 		
-		-- RETURNS background assertions, result value
+		-- RETURNS background assertions, result value, VariableIR made from name
 		local function instantiate(self, name)
 			assertis(name, "string")
 			
@@ -1096,20 +1045,20 @@ local function verifyStatement(statement, scope, semantics)
 			-- Discover the newly learned facts in this hypothetical
 			local learnedPredicates, inNow = getPredicateSet(subscope, {}, "", #subscopePrime)
 
-			print()
-			print(string.rep("+ ", 40))
-			print("instantiate with name", name)
+			--print()
+			--print(string.rep("+ ", 40))
+			--print("instantiate with name", name)
 
-			print()
-			print("facts are")
+			--print()
+			--print("facts are")
 			local post = {}
 			for _, p in ipairs(learnedPredicates) do
-				print("", verifyTheory:canonKey(p))
+				--print("", verifyTheory:canonKey(p))
 				table.insert(post, p)
 			end
 
-			print(string.rep("+ ", 40))
-			print()
+			--print(string.rep("+ ", 40))
+			--print()
 
 			-- Return the conjunction
 			if #post == 0 then
@@ -1121,7 +1070,7 @@ local function verifyStatement(statement, scope, semantics)
 			end
 
 			assertis(inOut, "VariableIR")
-			return u, inNow(variableAssertion(inOut))
+			return u, inNow(variableAssertion(inOut)), arbitrary
 		end
 
 		-- Create a forall expression

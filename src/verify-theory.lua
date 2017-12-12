@@ -12,10 +12,19 @@ local showType = import("provided.lua").showType
 local provided = import "provided.lua"
 local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
 local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
+local makeEqSignature = provided.makeEqSignature
+
+local areTypesEqual = provided.areTypesEqual
+
+local STRING_TYPE = provided.STRING_TYPE
+local INT_TYPE = provided.INT_TYPE
+local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
+local UNIT_TYPE = provided.UNIT_TYPE
+local NEVER_TYPE = provided.NEVER_TYPE
 
 --------------------------------------------------------------------------------
 
--- RETURNS an Assertion representing the negation of a
+-- RETURNS an Assertion representing a.not()
 local function notAssertion(a)
 	assertis(a, "Assertion")
 
@@ -26,6 +35,35 @@ local function notAssertion(a)
 		arguments = {},
 
 		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "not"),
+		index = 1,
+	}
+end
+
+-- RETURNS an Assertion representing a == b
+local function eqAssertion(a, b, t)
+	assertis(a, "Assertion")
+	assertis(b, "Assertion")
+	assertis(t, "Type+")
+
+	local p = freeze {
+		tag = "method",
+		methodName = "eq",
+		base = a,
+		arguments = {b},
+		signature = makeEqSignature(t),
+		index = 1,
+	}
+	assertis(p, "MethodAssertion")
+	return p
+end
+
+-- RETURNS an Assertion
+local function variableAssertion(variable)
+	assertis(variable, "VariableIR")
+
+	return freeze {
+		tag = "variable",
+		variable = variable,
 	}
 end
 
@@ -175,8 +213,10 @@ end
 
 -- RETURNS a Type+
 local function typeOf(assertion)
+	assertis(assertion, "Assertion")
+
 	if assertion.tag == "int" then
-		return INTEGER_TYPE
+		return INT_TYPE
 	elseif assertion.tag == "string" then
 		return STRING_TYPE
 	elseif assertion.tag == "boolean" then
@@ -197,7 +237,11 @@ local function typeOf(assertion)
 		return BOOLEAN_TYPE
 	elseif assertion.tag == "variant" then
 		return assertion.definition.type
+	elseif assertion.tag == "forall" then
+		return BOOLEAN_TYPE
 	end
+
+	error("unhandled tag " .. assertion.tag)
 end
 
 local m_scan
@@ -237,6 +281,7 @@ function m_scan(self, object)
 			staticName = object.staticName,
 			arguments = scanned(self, object.arguments),
 			signature = object.signature,
+			index = object.index,
 		}
 		self.relevant[shown] = canon
 		for _, argument in ipairs(canon.arguments) do
@@ -249,6 +294,7 @@ function m_scan(self, object)
 			methodName = object.methodName,
 			arguments = scanned(self, object.arguments),
 			signature = object.signature,
+			index = object.index,
 		}
 		self.relevant[shown] = canon
 		ref(canon.base)
@@ -296,6 +342,18 @@ local function newConst()
 	return "const." .. cID
 end
 
+local TRUE_ASSERTION = freeze {tag = "boolean", value = true}
+local FALSE_ASSERTION = freeze {tag = "boolean", value = false}
+
+local INT_ASSERTIONS = freeze {
+	[10] = {tag = "int", value = 10},
+	[3] = {tag = "int", value = 3},
+	[2] = {tag = "int", value = 2},
+	[1] = {tag = "int", value = 1},
+	[0] = {tag = "int", value = 0},
+	[-1] = {tag = "int", value = -1},
+}
+
 -- Learn additional clauses from the inclusion of `term` in `model`
 -- (Added to support quantifiers)
 -- model: the model so far
@@ -308,7 +366,54 @@ function theory:additionalClauses(model, term, cnf)
 		assertis(model[term], "boolean")
 		if model[term] then
 			-- Find all terms of the specified sort
-			error("TODO: additional clauses")
+			-- Instantiate for all interesting terms
+
+			local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
+
+			-- Scan important constants
+			canon:scan(TRUE_ASSERTION)
+			canon:scan(FALSE_ASSERTION)
+			for _, v in pairs(INT_ASSERTIONS) do
+				canon:scan(v)
+			end
+
+			for v in pairs(model) do
+				canon:scan(v)
+			end
+			for _, clause in ipairs(cnf) do
+				for _, vt in ipairs(clause) do
+					canon:scan(vt[1])
+				end
+			end
+
+			-- TODO: PERFORMANCE: filter by triggers, see
+			-- https://doi.org/10.1007/978-3-540-73595-3_12
+			local opportunities = {}
+			for _, x in pairs(canon.relevant) do
+				assertis(x, "Assertion")
+
+				local tx = typeOf(x)
+				assertis(tx, "Type+")
+
+				if areTypesEqual(tx, term.quantified) then
+					table.insert(opportunities, x)
+				end
+			end
+
+			local out = {}
+			for _, x in ipairs(opportunities) do
+				-- Instantiate an example of a forall instance
+				local constantName = newConst()
+				local newTerm, res, var = term:instantiate(constantName)
+
+				-- x is the same as constant
+				table.insert(out, eqAssertion(x, variableAssertion(var), term.quantified))
+
+				-- The predicate holds for `x`
+				table.insert(out, newTerm)
+				table.insert(out, res)
+			end
+			return out
 		else
 			-- Instantiate with an arbitrary new constant
 			-- (There exists not P(c))
@@ -339,9 +444,8 @@ function theory:isSatisfiable(modelInput)
 	-- 1) Generate a list of relevant subexpressions
 	profile.open "#canonicalization"
 	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
-
-	local trueAssertion = canon:scan(freeze {tag = "boolean", value = true})
-	local falseAssertion = canon:scan(freeze {tag = "boolean", value = false})
+	local trueAssertion = canon:scan(TRUE_ASSERTION)
+	local falseAssertion = canon:scan(FALSE_ASSERTION)
 
 	local simple = {}
 	for key, value in pairs(unquantifiedModel) do
@@ -679,4 +783,6 @@ assertis(theory, "Theory")
 return {
 	theory = theory,
 	notAssertion = notAssertion,
+	eqAssertion = eqAssertion,
+	variableAssertion = variableAssertion,
 }
