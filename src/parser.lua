@@ -151,7 +151,11 @@ function parser.composite(components)
 
 		assert(#extracts <= 1)
 		if #extracts == 1 then
+			local fullLocation = object.location
 			object = object[extracts[1]]
+			if isobject(object) then
+				object = table.with(object, "location", fullLocation)
+			end
 		end
 
 

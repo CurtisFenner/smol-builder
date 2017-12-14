@@ -390,7 +390,7 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 				assert(environment.thisVariable)
 				constraintIR = {
 					tag = "this-constraint",
-					instance = environment.thisVariable,
+					instance = table.with(environment.thisVariable, "location", location),
 					name = "#" .. pi .. "_" .. ci,
 					interface = constraint.interface,
 				}
@@ -452,7 +452,7 @@ end
 
 -- generics: the generics IN SCOPE, not the generics of interface/implementer.
 -- RETURNS a ConstraintIR
-local function constraintFromStruct(interface, implementer, generics, containingSignature, environment)
+local function constraintFromStruct(interface, implementer, generics, containingSignature, environment, location)
 	assertis(interface, "InterfaceType+")
 	assertis(implementer, "Type+")
 	assertis(generics, listType "TypeParameterIR")
@@ -461,6 +461,7 @@ local function constraintFromStruct(interface, implementer, generics, containing
 		allDefinitions = listType "object",
 		thisVariable = choiceType(constantType(false), "VariableIR"),
 	})
+	assertis(location, "Location")
 
 	if implementer.tag == "concrete-type+" then
 		local definition = definitionFromType(implementer, environment.allDefinitions)
@@ -481,7 +482,8 @@ local function constraintFromStruct(interface, implementer, generics, containing
 
 				local constraint = constraintFromStruct(
 					interface, implementer,
-					generics, containingSignature, environment
+					generics, containingSignature, environment,
+					location
 				)
 				assertis(constraint, "ConstraintIR")
 
@@ -517,7 +519,7 @@ local function constraintFromStruct(interface, implementer, generics, containing
 			assert(environment.thisVariable)
 			return freeze {
 				tag = "this-constraint",
-				instance = environment.thisVariable,
+				instance = table.with(environment.thisVariable, "location", location),
 				interface = interface,
 				name = name,
 			}
@@ -892,6 +894,7 @@ function compileExpression(pExpression, scope, environment)
 			returns = "no",
 			constraints = {},
 			destination = out,
+			location = pExpression.location,
 		}
 		
 		if containingDefinition.tag == "union" then
@@ -1192,7 +1195,8 @@ function compileExpression(pExpression, scope, environment)
 					t.arguments[gi],
 					containingDefinition.generics,
 					containingSignature,
-					environment
+					environment,
+					constraint.location
 				)
 			end
 		end

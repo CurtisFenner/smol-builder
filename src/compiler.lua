@@ -1039,7 +1039,12 @@ local function parseSmol(tokens)
 		}, function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
+				local loc = freeze {
+					begins = out.location.begins,
+					ends = access.location.ends,
+				}
 				out = table.with(access, "base", out)
+				out = table.with(out, "location", loc)
 			end
 			return out
 		end, true),
@@ -1350,6 +1355,7 @@ EXTEND_TYPE("NewClassSt", "AbstractStatementIR", recordType {
 	destination = "VariableIR",
 	returns = constantType "no",
 	memberDefinitions = mapType("string", "VariableIR"),
+	location = "Location",
 })
 
 EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {

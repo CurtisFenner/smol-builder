@@ -76,13 +76,7 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 				if add.getPair().getKey() == key {
 					var out core:Option[#V] = core:Option[#V].makeSome(add.getPair().getValue());
 					assert out is some;
-					assert out.get() == this.addition.getPair().getValue();
-					//assert (this.addition.getPair().getKey() == key)
-					//	.implies(out.get() == this.addition.getPair().getValue());
-					//if this is addition {
-					//	assert (this.addition.getPair().getKey() == key)
-					//		.implies(out.get() == this.addition.getPair().getValue());
-					//}
+					assert out.get() == this.addition.getPair().getValue(); 
 					return out;
 				}
 

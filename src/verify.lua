@@ -462,15 +462,14 @@ local function valueBoolean(bool)
 end
 
 local uniqueNameID = 1000
-local function uniqueVariable(type)
+local function uniqueVariable(type, location)
 	assertis(type, "Type+")
+	assertis(location, "Location")
+
 	uniqueNameID = uniqueNameID + 1
 
 	return freeze {
-		location = freeze {
-			begins = "???",
-			ends = "???",
-		},
+		location = location,
 		type = type,
 		name = "__unique" .. uniqueNameID,
 	}
@@ -950,7 +949,7 @@ local function verifyStatement(statement, scope, semantics)
 
 		assertis(statement.type, "ConcreteType+")
 
-		local instance = variableAssertion(uniqueVariable(statement.type))
+		local instance = variableAssertion(uniqueVariable(statement.type, statement.location))
 		assignRaw(scope, statement.destination, instance)
 
 		for fieldName, value in pairs(statement.fields) do
