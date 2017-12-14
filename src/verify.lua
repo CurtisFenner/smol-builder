@@ -1181,8 +1181,8 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
-	print(showStatement(func.body))
+	--print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
+	--print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {}, semantics)
