@@ -290,16 +290,14 @@ local function cnfSAT(theory, cnf, assignment, odds)
 		return out
 	end
 
+	-- Then it can only be satisfied with no
+	-- Add this to the set to prune more cases
 	profile.open("decide no")
 	local with = copywith(assignment, t1, not smallestClause[1][2])
 	local simplified = simplifyCNF(cnf, with)
 	local out = simplified and cnfSAT(theory, simplified, with, 1)
 	profile.close("decide no")
-	if out then
-		return out
-	end
-
-	return false
+	return out
 end
 
 -- RETURNS false | satisfaction

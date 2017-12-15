@@ -34,7 +34,7 @@ function profile.close(message)
 		if top.skipped ~= 0 then
 			print("|" .. string.rep("    ", #stack) .. "(( x" .. top.skipped .. " skipped )) ")
 		end
-		print("|" .. string.rep("    ", #stack - 1) .. ")) " .. top.message .. " " .. string.format("%.2f", elapsed))
+		print("|" .. string.rep("    ", #stack - 1) .. ")) " .. top.message .. " " .. string.format("%.3f", elapsed))
 	else
 		parent.skipped = parent.skipped + 1
 	end
@@ -67,7 +67,7 @@ function profile.summarize()
 	end
 	table.sort(list, function(a, b) return a.sum > b.sum end)
 	local function f(n)
-		return string.format("%.2f", n)
+		return string.format("%.3f", n)
 	end
 	for _, item in ipairs(list) do
 		local mean = item.sum / item.count

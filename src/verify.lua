@@ -227,21 +227,6 @@ local function assertionExprString(a, grouped)
 	error("unhandled `" .. a.tag .. "`")
 end
 
-local assertionRecursionMap = freeze {
-	["static"] = {"arguments{}"},
-	["method"] = {"base", "arguments{}"},
-	["field"] = {"base"},
-	["unit"] = {},
-	["this"] = {},
-	["boolean"] = {},
-	["string"] = {},
-	["int"] = {},
-	["variable"] = {},
-	["isa"] = {"base"},
-	["variant"] = {"base"},
-	["forall"] = {},
-}
-
 -- RETURNS an Assertion representing a && b
 local function andAssertion(a, b)
 	assertis(a, "Assertion")
@@ -288,33 +273,54 @@ end
 
 -- RETURNS an Assertion
 local function assertionReplaced(expression, map)
-	assertis(expression, "Assertion")
-	assertis(map, mapType("string", recordType {value = "Assertion"}))
+	--assertis(expression, "Assertion")
+	--assertis(map, mapType("string", recordType {value = "Assertion"}))
 
-	if expression.tag == "variable" then
+	local tag = expression.tag
+	if tag == "variable" then
 		if map[expression.variable.name] then
 			return map[expression.variable.name].value
 		end
+		return expression
 	end
 
-	assert(assertionRecursionMap[expression.tag])
-	local copy = {}
-	for key, value in pairs(expression) do
-		copy[key] = value
-	end
-	for _, key in ipairs(assertionRecursionMap[expression.tag]) do
-		if key:sub(-2) == "{}" then
-			local pre = key:sub(1, -3)
-			local m = {}
-			for k, v in pairs(copy[pre]) do
-				m[k] = assertionReplaced(v, map)
-			end
-			copy[pre] = m
-		else
-			copy[key] = assertionReplaced(copy[key], map)
+	if tag == "unit" or tag == "this" then
+		return expression
+	elseif tag == "forall" then
+		return expression
+	elseif tag == "boolean" or tag == "int" or tag == "string" then
+		return expression
+	elseif tag == "field" or tag == "isa" or tag == "variant" then
+		local subBase = assertionReplaced(expression.base, map)
+		if subBase == expression.base then
+			return expression
 		end
+		return table.with(expression, "base", subBase)
+	elseif tag == "method" then
+		-- base + arguments
+		local newBase = assertionReplaced(expression.base, map)
+		if expression.base ~= newBase then
+			expression = table.with(expression, "base", newBase)
+		end
+
+		-- Do not return! Fall through for common handling of method/static
 	end
-	return freeze(copy)
+
+	assert(tag == "method" or tag == "static")
+
+	local anyDifferent = false
+	local newArguments = {}
+	for _, a in ipairs(expression.arguments) do
+		local newArgument = assertionReplaced(a, map)
+		if newArgument ~= a then
+			anyDifferent = true
+		end
+		table.insert(newArguments, newArgument)
+	end
+	if not anyDifferent then
+		return expression
+	end
+	return table.with(expression, "arguments", newArguments)
 end
 
 --------------------------------------------------------------------------------

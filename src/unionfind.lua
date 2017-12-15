@@ -59,34 +59,16 @@ function UnionFind:query(a, b)
 	return ra == rb
 end
 
--- RETURNS [[element]]
+-- RETURNS {element => []element}
 function UnionFind:classes()
+	local out = {}
 	local map = {}
 	for key, root in pairs(self.representatives) do
 		map[root] = map[root] or {}
 		table.insert(map[root], key)
-	end
-	local out = {}
-	for _, class in pairs(map) do
-		table.insert(out, class)
+		out[key] = map[root]
 	end
 	return out
-end
-
--- RETURNS [element] all equal to query
-function UnionFind:classOf(query)
-	assert(self.representatives[query] ~= nil)
-
-	local classes = self:classes()
-	for _, class in ipairs(classes) do
-		for _, element in ipairs(class) do
-			if element == query then
-				return class
-			end
-		end
-	end
-
-	error("unreachable")
 end
 
 return UnionFind
