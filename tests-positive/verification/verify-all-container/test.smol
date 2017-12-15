@@ -18,6 +18,10 @@ class KVPair[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 	method getValue() #V ensures return == this.value {
 		return this.value;
 	}
+
+	method eq(other KVPair[#K, #V]) Boolean {
+		return (this.key == other.key).and(this.value == other.value);
+	}
 }
 
 class KVAdd[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
@@ -34,6 +38,44 @@ class KVAdd[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 
 	method getPair() KVPair[#K, #V] {
 		return this.pair;
+	}
+
+	method eq(other KVAdd[#K, #V]) Boolean {
+		return (this.pair == other.pair).and(this.rest == other.rest);
+	}
+}
+
+union List[#T | #T is core:Eq[#T]] is core:Eq[List[#T]] {
+	var empty Unit;
+	var concatenation core:Pair[#T, List[#T]];
+
+	static make() List[#T] {
+		return new(empty = unit);
+	}
+	
+	method head() #T
+	requires this is concatenation {
+		return this.concatenation.getLeft();
+	}
+
+	method isEmpty() Boolean
+	ensures return == (this is empty) {
+		return this is empty;
+	}
+
+	method rest() List[#T]
+	requires this is concatenation
+	ensures return == this.concatenation.getRight() {
+		return this.concatenation.getRight();
+	}
+
+	method eq(other List[#T]) Boolean {
+		if this is empty {
+			return other is empty;
+		} elseif other is empty {
+			return false;
+		}
+		return this.concatenation == other.concatenation;
 	}
 }
 
@@ -76,7 +118,8 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 				if add.getPair().getKey() == key {
 					var out core:Option[#V] = core:Option[#V].makeSome(add.getPair().getValue());
 					assert out is some;
-					assert out.get() == this.addition.getPair().getValue(); 
+					assert this.addition == add;
+					assert out.get() == this.addition.getPair().getValue();
 					return out;
 				}
 
@@ -85,12 +128,16 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 		}
 	}
 
-
 	method add(key #K, value #V) Map[#K, #V]
 	ensures return.get(key) is some
 	ensures return.get(key).get() == value {
 		var next KVAdd[#K, #V] = KVAdd[#K, #V].make(KVPair[#K, #V].make(key, value), this);
 		return new(addition = next);
+	}
+
+	method eq(other Map[#K, #V]) Boolean {
+		// Returns the same thing for all gets
+		return true;
 	}
 }
 

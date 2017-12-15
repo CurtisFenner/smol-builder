@@ -1636,6 +1636,31 @@ union Option[#T | #T is Eq[#T]] {
 	}
 }
 
+class Pair[#A, #B | #A is Eq[#A], #B is Eq[#B]] is Eq[Pair[#A, #B]] {
+	var left #A;
+	var right #B;
+
+	method getLeft() #A
+	ensures return == this.left {
+		return this.left;
+	}
+
+	method getRight() #B
+	ensures return == this.right {
+		return this.right;
+	}
+
+	static make(left #A, right #B) Pair[#A, #B]
+	ensures return.getLeft() == left
+	ensures return.getRight() == right {
+		return new(left = left, right = right);
+	}
+
+	method eq(other Pair[#A, #B]) Boolean {
+		return (this.left == other.left).and(this.right == other.right);
+	}
+}
+
 interface Orderable[#T] {
 	// RETURNS true when this is smaller than other in this ordering.
 	method lessThan(other #T) Boolean;

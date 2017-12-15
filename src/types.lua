@@ -383,7 +383,7 @@ _assertis = memoized(2, _assertis)
 local normalizedT = {}
 -- ASSERTS that `value` is of the specified type `t`
 function assertis(value, t)
-	do return true end
+	--do return true end
 	-- TYPE_DESCRIPTION must be injective
 	-- Normalize types so that memoization works
 	local x = TYPE_DESCRIPTION(t)

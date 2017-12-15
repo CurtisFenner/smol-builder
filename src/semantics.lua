@@ -1904,7 +1904,7 @@ function compileExpression(pExpression, scope, environment)
 				-- The result is true when the guard is false (vacuously)
 				local vacuous = freeze {
 					tag = "boolean",
-					value = true,
+					boolean = true,
 					destination = instantiatedResult,
 					returns = "no",
 				}
@@ -2599,7 +2599,7 @@ local function semanticsSmol(sources, main)
 
 			-- Verify each implements
 			for _, implements in ipairs(definition.implements) do
-				verifyTypeValid(implements, definition.generics, allDefinitions)
+				verifyInterfaceValid(implements, definition.generics, allDefinitions)
 			end
 
 			-- Verify each signature
@@ -2637,6 +2637,7 @@ local function semanticsSmol(sources, main)
 
 	-- (4.5) Verify the type of all ensures/requires
 	for _, definition in ipairs(allDefinitions) do
+		profile.open("check ensures of " .. definition.name)
 		if definition.tag == "class" or definition.tag == "union" then
 			for _, signature in ipairs(definition.signatures) do
 				-- Verify the type of the signature's ensures and requires
@@ -2697,6 +2698,7 @@ local function semanticsSmol(sources, main)
 				end
 			end
 		end
+		profile.close("check ensures of " .. definition.name)
 	end
 
 	profile.close "check ensures"
