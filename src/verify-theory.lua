@@ -72,8 +72,17 @@ end
 --------------------------------------------------------------------------------
 
 -- RETURNS a string
+local showSkip = {}
+local shows = 0
 local function showAssertion(assertion)
+	if showSkip[assertion] then
+		return showSkip[assertion]
+	end
+
+	--shows = shows + 1
+	--print(shows, "Shows")
 	assertis(assertion, "Assertion")
+	assert(isimmutable(assertion))
 
 	if assertion.tag == "unit" then
 		return "(unit)"
@@ -212,6 +221,7 @@ local function boxConstant(constant)
 	end
 	error("Unknown constant type value")
 end
+boxConstant = memoized(1, boxConstant)
 
 local m_scan
 
@@ -302,6 +312,7 @@ function m_scan(self, object)
 	end
 
 	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
+	showSkip[self.relevant[shown]] = shown
 	return self.relevant[shown]
 end
 
@@ -395,6 +406,24 @@ function theory:additionalClauses(model, term, cnf)
 	end
 	return {}
 end
+
+
+-- RETURNS a string such that for x, y
+-- if approximateStructure(x) ~= approximateStructure(y)
+-- then x, y have different structure and thus childrenSame(x, y) is false
+local function approximateStructure(x)
+	assertis(x, "Assertion")
+	if x.tag == "method" then
+		return "method-" .. x.methodName
+	elseif x.tag == "static" then
+		return "static-" .. x.staticName
+	elseif x.tag == "field" then
+		return "field-" .. x.fieldName
+	else
+		return x.tag
+	end
+end
+approximateStructure = memoized(1, approximateStructure)
 
 function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
@@ -519,21 +548,7 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	local byStructure = {}
-	-- RETURNS a string such that for x, y
-	-- if approximateStructure(x) ~= approximateStructure(y)
-	-- then x, y have different structure and thus childrenSame(x, y) is false
-	local function approximateStructure(x)
-		assertis(x, "Assertion")
-		if x.tag == "method" then
-			return "method-" .. x.methodName
-		elseif x.tag == "static" then
-			return "static-" .. x.staticName
-		elseif x.tag == "field" then
-			return "field-" .. x.fieldName
-		else
-			return x.tag
-		end
-	end
+
 	for _, x in pairs(canon.relevant) do
 		local s = approximateStructure(x)
 		byStructure[s] = byStructure[s] or {}

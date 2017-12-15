@@ -1,5 +1,7 @@
 -- A SMT Solver
 
+local profile = import "profile.lua"
+
 REGISTER_TYPE("Theory", recordType {
 	-- argument: (self, simpleModel)
 	-- RETURNS true when simple assertion_t assertion may be inhabited
@@ -22,6 +24,7 @@ REGISTER_TYPE("Theory", recordType {
 	additionalClauses = "function",
 })
 
+-- RETURNS a shallow copy of t such that return[k] is v
 local function copywith(t, k, v)
 	local r = {}
 	for key, value in pairs(t) do
@@ -31,6 +34,7 @@ local function copywith(t, k, v)
 	return r
 end
 
+-- RETURNS a string representation of a CNF clause (for debugging)
 local function showClause(theory, c)
 	local terms = {}
 	for i = 1, #c do
@@ -42,6 +46,7 @@ local function showClause(theory, c)
 	return "[" .. table.concat(terms, " || ") .. "]"
 end
 
+-- RETURNS a string representation of a CNF formula (for debugging)
 local function showCNF(theory, n)
 	local clauses = {}
 	for i = 1, #n do
@@ -173,15 +178,16 @@ end
 -- all terms with assignments do not appear in the theory
 -- RETURNS false if the given cnf is unsatisfiable given the assignment
 local function simplifyCNF(cnf, assignment)
+	profile.open "simplifyCNF"
 	assert(type(assignment) == "table")
-
+	
 	local cs = {}
 	for _, clause in ipairs(cnf) do
 		-- Simplify a clause
 		local c = {}
 		local contradiction = false
 		local satisfied = false
-
+		
 		-- Search the clause of terms with known truth assignments
 		for _, term in ipairs(clause) do
 			local e, truth = term[1], term[2]
@@ -198,18 +204,20 @@ local function simplifyCNF(cnf, assignment)
 				table.insert(c, term)
 			end
 		end
-
+		
 		if not satisfied then
 			-- Do not add empty clauses;
 			-- empty clauses may represent True or False.
 			if #c == 0 then
 				assert(contradiction)
+				profile.close "simplifyCNF"
 				return false
 			else
 				table.insert(cs, c)
 			end
 		end
 	end
+	profile.close "simplifyCNF"
 	return cs
 end
 
@@ -219,17 +227,20 @@ end
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no satisfaction is possible
 -- Does NOT modify assignment
-local function cnfSAT(theory, cnf, assignment)
+local function cnfSAT(theory, cnf, assignment, odds)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
-	--print("\n*\tcnfSAT:", "\n*\t" .. (showCNF(theory, cnf):gsub("\n", "\n*\t")))
 
 	-- Find an assignment that the theory accepts
-	if (math.random() < 1e-3 or #cnf == 0) and not theory:isSatisfiable(assignment) then
+	profile.open("theory:isSatisfiable(? assignments)")
+	if (math.random() < odds or #cnf == 0) and not theory:isSatisfiable(assignment) then
+		profile.close("theory:isSatisfiable(? assignments)")
 		return false
 	elseif #cnf == 0 then
+		profile.close("theory:isSatisfiable(? assignments)")
 		return assignment
 	end
+	profile.close("theory:isSatisfiable(? assignments)")
 
 	-- Find the smallest clause
 	local smallestClauseIndex = 1
@@ -242,6 +253,7 @@ local function cnfSAT(theory, cnf, assignment)
 	local smallestClause = cnf[smallestClauseIndex]
 	assert(#smallestClause >= 1)
 	if #smallestClause == 1 then
+		profile.open "unit clause"
 		-- Unit clauses have exactly one way to assign
 		local term, truth = smallestClause[1][1], smallestClause[1][2]
 		assert(assignment[term] == nil)
@@ -249,41 +261,44 @@ local function cnfSAT(theory, cnf, assignment)
 		local simplified = simplifyCNF(cnf, with)
 
 		-- Ask the theory for additional clauses
+		profile.open "theory:additionalClauses"
 		local additional = theory:additionalClauses(with, term, simplified)
-		--if #additional >= 1 then
-		--	print("SMT:")
-		--	print("\tbecause ", theory:canonKey(term), "=>", truth, "in model")
-		--end
+		profile.close "theory:additionalClauses"
 		for _, add in ipairs(additional) do
-			--print("\t\tlearned ", theory:canonKey(add))
 			local addCNF = toCNF(theory, add, true, {})
 			simplified = andCNF(simplified, addCNF)
 		end
 
-		return simplified and cnfSAT(theory, simplified, with)
+		if not simplified then
+			profile.close "unit clause"
+			return false
+		end
+
+		local out = cnfSAT(theory, simplified, with, 0)
+		profile.close "unit clause"
+		return out
 	end
 
 	-- Try each truth assignment of the first term in the first clause
+	profile.open("decide yes")
 	local t1 = smallestClause[1][1]
 	local with = copywith(assignment, t1, smallestClause[1][2])
 	local simplified = simplifyCNF(cnf, with)
-	--print("\ttry left")
-	local out = simplified and cnfSAT(theory, simplified, with)
+	local out = simplified and cnfSAT(theory, simplified, with, 1)
+	profile.close("decide yes")
 	if out then
-		--print("\t<- is sat from left")
 		return out
 	end
 
+	profile.open("decide no")
 	local with = copywith(assignment, t1, not smallestClause[1][2])
 	local simplified = simplifyCNF(cnf, with)
-	--print("\ttry right")
-	local out = simplified and cnfSAT(theory, simplified, with)
+	local out = simplified and cnfSAT(theory, simplified, with, 1)
+	profile.close("decide no")
 	if out then
-		--print("\t<- is sat from right")
 		return out
 	end
 
-	--print("\t<- is not sat from neither")
 	return false
 end
 
@@ -293,7 +308,7 @@ local function isSatisfiable(theory, expression)
 	assert(expression)
 
 	local cnf = toCNF(theory, expression, true, {})
-	local sat = cnfSAT(theory, cnf, {})
+	local sat = cnfSAT(theory, cnf, {}, 0)
 	return sat
 end
 
@@ -301,6 +316,7 @@ end
 
 -- RETURNS false, counterexample | true
 local function implies(theory, givens, expression)
+	profile.open("smt.implies setup")
 	-- Is the case where givens are true but expression false satisfiable?
 	local args = {}
 	local truths = {}
@@ -315,13 +331,16 @@ local function implies(theory, givens, expression)
 	--print("implies()?")
 	
 	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
+	profile.close("smt.implies setup")
 
 	--print("~~~~")
 	--print(showCNF(theory, cnf))
 	--print("~~~~")
 
-	local sat = cnfSAT(theory, cnf, {})
+	profile.open("smt.implies sat")
+	local sat = cnfSAT(theory, cnf, {}, 0)
 	--print("(&givens) &!expression got sat", sat)
+	profile.close("smt.implies sat")
 	if sat then
 		return false, sat
 	end

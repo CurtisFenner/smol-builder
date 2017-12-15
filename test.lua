@@ -55,11 +55,17 @@ else
 	mode = ""
 end
 
+local SEP = arg[2] or "/"
+
 --------------------------------------------------------------------------------
 
 local function shell(command)
 	local status = os.execute(command)
 	return status == 0, status
+end
+
+local function path(elements)
+	return table.concat(elements, SEP)
 end
 
 local function ls(directory)
@@ -183,12 +189,12 @@ local function compiler(directory, main)
 	local sources = {}
 	for _, file in ipairs(ls(directory)) do
 		if file:match "%.smol$" then
-			table.insert(sources, directory .. "/" .. file)
+			table.insert(sources, path {directory, file})
 		end
 	end
 
 	local command = table.concat {
-		arg[-1] .. " src/compiler.lua",
+		arg[-1] .. " " .. path {"src", "compiler.lua"},
 		" --sources ", table.concat(sources, "    "),
 		" --main ", main,
 	}
@@ -203,14 +209,14 @@ end
 local positiveTests = {}
 for _, category in ipairs(ls "tests-positive") do
 	for _, test in ipairs(ls("tests-positive/" .. category)) do
-		table.insert(positiveTests, category .. "/" .. test)
+		table.insert(positiveTests, path {category, test})
 	end
 end
 
 local negativeTests = {}
 for _, category in ipairs(ls "tests-negative") do
 	for _, test in ipairs(ls("tests-negative/" .. category)) do
-		table.insert(negativeTests, category .. "/" .. test)
+		table.insert(negativeTests, path {category, test})
 	end
 end
 
@@ -234,11 +240,13 @@ if mode ~= "-" then
 	for _, test in ipairs(positiveTests) do
 		if test:find(filter, 1, true) then
 			printHeader("TEST " .. test)
+			local before = os.time()
 			local status = compiler("tests-positive/" .. test, "test:Test")
+			print("ELAPSED:", os.time() - before)
 			if status ~= 0 then
 				FAIL {name = "+ " .. test, expected = 0, got = status}
 			else
-				local bin = "tests-positive/" .. test .. "/bin"
+				local bin = "tests-positive" .. SEP .. test .. SEP .. "bin"
 				local flags = {
 					"-g3",
 					"-pedantic",
@@ -254,10 +262,10 @@ if mode ~= "-" then
 				}
 				local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
 				if compiles then
-					local outFile = "tests-positive/" .. test .. "/out.last"
+					local outFile = path {"tests-positive", test, "out.last"}
 					local runs = shell(bin .. " > " .. outFile)
 					if runs then
-						local correctFile = "tests-positive/" .. test .. "/out.correct"
+						local correctFile = path {"tests-positive", test, "out.correct"}
 						local correct = shell("diff -w " .. correctFile .. " " .. outFile)
 						if correct then
 							PASS {name = "+ " .. test}

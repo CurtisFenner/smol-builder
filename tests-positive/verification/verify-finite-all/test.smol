@@ -11,7 +11,10 @@ class Li {
 	}
 
 	method get(index Int) Int
-	requires this.validIndex(index) {
+	requires this.validIndex(index)
+	ensures return == this.a when index == 0
+	ensures return == this.b when index == 1
+	ensures return == this.c when index == 2 {
 		if index == 0 {
 			return this.a;
 		} elseif index == 1 {

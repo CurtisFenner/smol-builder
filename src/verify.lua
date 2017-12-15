@@ -871,6 +871,7 @@ local function verifyStatement(statement, scope, semantics)
 		end
 		return
 	elseif statement.tag == "verify" then
+		profile.open("verifyStatement verify " .. statement.reason)
 		-- Check that this variable is true in the current scope
 		local models, counter = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
@@ -885,6 +886,7 @@ local function verifyStatement(statement, scope, semantics)
 			}
 		end
 
+		profile.close("verifyStatement verify " .. statement.reason)
 		return
 	elseif statement.tag == "assume" then
 		-- Make this expression become true in the current scope
@@ -1107,7 +1109,9 @@ local function verifyStatement(statement, scope, semantics)
 		})
 		return
 	elseif statement.tag == "proof" then
+		profile.open "verifyStatement proof"
 		verifyStatement(statement.body, scope, semantics)
+		profile.close "verifyStatement proof"
 		return
 	elseif statement.tag == "forall" then
 
