@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+	static two!(a Unit, b Unit) Unit {}
+
+	static one!() Unit {}
+
+	static main!() Unit {
+		do Test.two!(Test.one!(), Test.one!());
+	}
+
+}

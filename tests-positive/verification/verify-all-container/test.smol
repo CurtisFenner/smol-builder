@@ -119,6 +119,7 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
 					var out core:Option[#V] = core:Option[#V].makeSome(add.getPair().getValue());
 					assert out is some;
 					assert this.addition == add;
+					//assert out.get() == add.getPair().getValue();
 					assert out.get() == this.addition.getPair().getValue();
 					return out;
 				}

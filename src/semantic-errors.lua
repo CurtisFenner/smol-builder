@@ -311,4 +311,8 @@ function Report.RETURN_USED_IN_IMPLEMENTATION(p)
 		"\nHowever, you use `return` ", p.location)
 end
 
+function Report.EVALUATION_ORDER(p)
+	quit("The evaluation order of an expression is not defined ", p.location)
+end
+
 return Report

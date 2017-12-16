@@ -553,6 +553,55 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS whether or not the given parsed expression is pure (syntactically)
+local function isExprPure(expr)
+	local leaf = {
+		["string-literal"] = true,
+		["int-literal"] = true,
+		["identifier"] = true,
+		["keyword"] = true,
+	}
+	if leaf[expr.tag] then
+		return true
+	end
+
+	if expr.tag == "new-expression" then
+		for _, argument in ipairs(expr.arguments) do
+			if not isExprPure(argument.value) then
+				return false
+			end
+		end
+		return true
+	elseif expr.tag == "static-call" then
+		for _, argument in ipairs(expr.arguments) do
+			if not isExprPure(argument) then
+				return false
+			end
+		end
+		return not expr.bang
+	elseif expr.tag == "method-call" then
+		if not isExprPure(expr.base) then
+			return false
+		end
+		for _, argument in ipairs(expr.arguments) do
+			if not isExprPure(argument) then
+				return false
+			end
+		end
+		return not expr.bang
+	elseif expr.tag == "field" then
+		return isExprPure(expr.base)
+	elseif expr.tag == "binary" then
+		return isExprPure(expr.left) and isExprPure(expr.right)
+	elseif expr.tag == "isa" then
+		return isExprPure(expr.base)
+	elseif expr.tag == "forall-expr" then
+		-- XXX: forall is always pure, but argument must be checked
+		return true
+	end
+	error("unknown tag `" .. expr.tag .. "`")
+end
+
 local compileExpression
 
 -- RETURNS a StatementIR
@@ -921,6 +970,8 @@ function compileExpression(pExpression, scope, environment)
 
 		local memberDefinitions = {}
 
+		local impure = 0
+
 		-- Evaluate all arguments to new
 		for _, argument in ipairs(pExpression.arguments) do
 			local subEvaluation, subOut = compileExpression(argument.value, scope, environment)
@@ -957,6 +1008,17 @@ function compileExpression(pExpression, scope, environment)
 			end
 
 			map[argument.name] = subOut[1]
+
+			if not isExprPure(argument.value) then
+				impure = impure + 1
+			end
+		end
+
+		-- Check evaluation order
+		if impure > 1 then
+			Report.EVALUATION_ORDER {
+				location = pExpression.location,
+			}
 		end
 
 		-- Record the map as fields
@@ -1009,26 +1071,40 @@ function compileExpression(pExpression, scope, environment)
 	elseif pExpression.tag == "static-call" then
 		local t = resolveType(pExpression.baseType)
 
+		-- Check evaluation order
+		local impure = 0
+
 		-- Evaluate the arguments
 		local evaluation = {}
 		local argumentSources = {}
-		for _, argument in ipairs(pExpression.arguments) do
+		for _, pArgument in ipairs(pExpression.arguments) do
 			local subEvaluation, outs = compileExpression(
-				argument, scope, environment
+				pArgument, scope, environment
 			)
 
-			-- Verify each argument has exactly one value
+			-- Verify each pArgument has exactly one value
 			if #outs ~= 1 then
 				Report.WRONG_VALUE_COUNT {
 					purpose = "static argument",
 					expectedCount = 1,
 					givenCount = #outs,
-					location = argument.location,
+					location = pArgument.location,
 				}
 			end
 
 			table.insert(argumentSources, outs[1])
 			table.insert(evaluation, subEvaluation)
+
+			if not isExprPure(pArgument) then
+				impure = impure + 1
+			end
+		end
+
+		-- Check evaluation order
+		if impure > 1 then
+			Report.EVALUATION_ORDER {
+				location = pExpression.location,
+			}
 		end
 
 		if t.tag == "generic+" then
@@ -1286,6 +1362,12 @@ function compileExpression(pExpression, scope, environment)
 		local evaluation = {baseEvaluation}
 		local baseInstance = baseInstanceValues[1]
 
+		-- Check evaluation order
+		local impure = 0
+		if not isExprPure(pExpression.base) then
+			impure = 1
+		end
+
 		-- Evaluate the arguments
 		local arguments = {}
 		for i, pArgument in ipairs(pExpression.arguments) do
@@ -1303,9 +1385,20 @@ function compileExpression(pExpression, scope, environment)
 
 			table.insert(arguments, table.with(outs[1], "location", pArgument.location))
 			table.insert(evaluation, subEvaluation)
+
+			if not isExprPure(pArgument) then
+				impure = impure + 1
+			end
 		end
 		assertis(evaluation, listType "StatementIR")
 		assertis(arguments, listType "VariableIR")
+
+		-- Check evaluation order
+		if impure > 1 then
+			Report.EVALUATION_ORDER {
+				location = pExpression.location,
+			}
+		end
 
 		if baseInstance.type.tag == "generic+" then
 			-- Generic instance
@@ -1740,6 +1833,12 @@ function compileExpression(pExpression, scope, environment)
 		local rightEvaluation, rightOut = compileExpression(pExpression.right, scope, environment)
 		profile.close("compileExpression binary recursive")
 
+		if not isExprPure(pExpression.left) and not isExprPure(pExpression.right) then
+			Report.EVALUATION_ORDER {
+				location = pExpression.location,
+			}
+		end
+
 		-- Verify there is one value on each side
 		if #leftOut ~= 1 then
 			Report.WRONG_VALUE_COUNT {
@@ -1952,6 +2051,13 @@ function compileExpression(pExpression, scope, environment)
 			returns = "no",
 		}
 		assertis(forall, "ForallSt")
+
+		if not isExprPure(pExpression.predicate) then
+			Report.BANG_NOT_ALLOWED {
+				context = "forall predicate",
+				location = pExpression.location,
+			}
+		end
 
 		local out = buildBlock {
 			localSt(variable1),
