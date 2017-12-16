@@ -2057,6 +2057,11 @@ function compileExpression(pExpression, scope, environment)
 				context = "forall predicate",
 				location = pExpression.location,
 			}
+		elseif pExpression.when and not isExprPure(pExpression.when) then
+			Report.BANG_NOT_ALLOWED {
+				context = "forall when",
+				location = pExpression.location,
+			}
 		end
 
 		local out = buildBlock {
@@ -2792,6 +2797,18 @@ local function semanticsSmol(sources, main)
 					checkBoolean(requires.condition, "requires condition")
 					if requires.when then
 						checkBoolean(requires.when, "requires when condition")
+						if not isExprPure(requires.when) then
+							Report.BANG_NOT_ALLOWED {
+								context = "requires-when",
+								location = requires.when.location,
+							}
+						end
+					end
+					if not isExprPure(requires.condition) then
+						Report.BANG_NOT_ALLOWED {
+							context = "requires",
+							location = requires.condition.location,
+						}
 					end
 				end
 
@@ -2800,6 +2817,18 @@ local function semanticsSmol(sources, main)
 					checkBoolean(ensures.condition, "ensures condition")
 					if ensures.when then
 						checkBoolean(ensures.when, "ensures when condition")
+						if not isExprPure(ensures.when) then
+							Report.BANG_NOT_ALLOWED {
+								context = "ensures-when",
+								location = ensures.when.location,
+							}
+						end
+					end
+					if not isExprPure(ensures.condition) then
+						Report.BANG_NOT_ALLOWED {
+							context = "ensures",
+							location = ensures.condition.location,
+						}
 					end
 				end
 			end
@@ -3378,6 +3407,13 @@ local function semanticsSmol(sources, main)
 						expectedType = "Boolean",
 						expectedLocation = pStatement.expression.location,
 						givenType = showType(valueOut[1].type),
+					}
+				end
+
+				if not isExprPure(pStatement.expression) then
+					Report.BANG_NOT_ALLOWED {
+						context = "assert",
+						location = pStatement.location,
 					}
 				end
 

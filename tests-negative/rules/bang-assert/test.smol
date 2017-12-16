@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+	static one!() Boolean ensures return {
+		return true;
+	}
+
+	static main!() Unit {
+		assert Test.one!();
+	}
+
+}

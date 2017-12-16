@@ -819,9 +819,9 @@ struct _smol_Int {
 			table.sort(requirements, function(a, b) return a.name < b.name end)
 			local parameters = {}
 			local parameterTypes = {}
-			for _, p in ipairs(requirements) do
+			for j, p in ipairs(requirements) do
 				local t = interfaceStructName(p.constraint.name) .. "*"
-				table.insert(parameters, t .. " p" .. i)
+				table.insert(parameters, t .. " p" .. i .. "_" .. j)
 				table.insert(parameterTypes, t)
 			end
 
@@ -918,8 +918,8 @@ struct _smol_Int {
 			table.insert(code, outValueType .. "* " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
 			local tuple = demandTuple(parameterTypes)
 			table.insert(code, "\t" .. tuple .. "* closed = ALLOCATE(" .. tuple .. ");")
-			for i = 1, #parameters do
-				table.insert(code, "\tclosed->_" .. i .. " = p" .. i .. ";")
+			for j = 1, #parameters do
+				table.insert(code, "\tclosed->_" .. i .. " = p" .. i .. "_" .. j .. ";")
 			end
 
 			table.insert(code, "\t" .. outValueType .. "* out = ALLOCATE(" .. outValueType .. ");")
