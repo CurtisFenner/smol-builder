@@ -3270,7 +3270,7 @@ local function semanticsSmol(sources, main)
 					end
 				end
 
-				local verification = buildBlock {}
+				local verification
 
 				-- Check for inexhaustivity
 				if #unhandledVariants ~= 0 then
@@ -3318,6 +3318,8 @@ local function semanticsSmol(sources, main)
 						})
 					end
 					verification = buildProof(buildBlock(seq))
+				else
+					verification = buildProof(closedUnionAssumption(definition, base))
 				end
 
 				-- Determine if this match returns or not
