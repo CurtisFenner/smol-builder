@@ -122,7 +122,9 @@ local BOOLEAN_DEF = freeze {
 				[true] = {{true, true}, {false, false}},
 				[false] = {{true, false}, {false, true}},
 			},
-			eval = function(a, b) return a == b end,
+			eval = function(a, b)
+				return a == b
+			end,
 		},
 		{
 			name = "and",
@@ -138,7 +140,9 @@ local BOOLEAN_DEF = freeze {
 				[true] = {{true, true}},
 				[false] = {{false, false}, {false, true}, {true, false}},
 			},
-			eval = function(a, b) return a and b end,
+			eval = function(a, b)
+				return a and b
+			end,
 		},
 		{
 			name = "or",
@@ -154,7 +158,9 @@ local BOOLEAN_DEF = freeze {
 				[true] = {{true, "*"}, {false, true}},
 				[false] = {{false, false}},
 			},
-			eval = function(a, b) return a or b end,
+			eval = function(a, b)
+				return a or b
+			end,
 		},
 		{
 			name = "implies",
@@ -170,7 +176,9 @@ local BOOLEAN_DEF = freeze {
 				[true] = {{false, "*"}, {true, true}},
 				[false] = {{true, false}},
 			},
-			eval = function(a, b) return not a or b end,
+			eval = function(a, b)
+				return not a or b
+			end,
 		},
 		{
 			name = "not",
@@ -186,7 +194,9 @@ local BOOLEAN_DEF = freeze {
 				[true] = {{false}},
 				[false] = {{true}},
 			},
-			eval = function(a) return not a end,
+			eval = function(a)
+				return not a
+			end,
 		},
 	},
 }
@@ -208,7 +218,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(n) return n > 0 end,
+				eval = function(n)
+					return n > 0
+				end,
 			},
 			{
 				name = "negate",
@@ -221,7 +233,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(n) return -n end,
+				eval = function(n)
+					return -n
+				end,
 			},
 			{
 				name = "lessThan",
@@ -234,7 +248,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a < b end,
+				eval = function(a, b)
+					return a < b
+				end,
 			},
 			{
 				name = "eq",
@@ -247,7 +263,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a == b end,
+				eval = function(a, b)
+					return a == b
+				end,
 			},
 			{
 				name = "quotient",
@@ -260,7 +278,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return math.floor(a / b) end,
+				eval = function(a, b)
+					return math.floor(a / b)
+				end,
 			},
 			{
 				name = "product",
@@ -273,7 +293,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a * b end,
+				eval = function(a, b)
+					return a * b
+				end,
 			},
 			{
 				name = "sum",
@@ -286,7 +308,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a + b end,
+				eval = function(a, b)
+					return a + b
+				end,
 			},
 			{
 				name = "difference",
@@ -299,7 +323,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a - b end,
+				eval = function(a, b)
+					return a - b
+				end,
 			},
 		},
 	},
@@ -319,7 +345,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a .. b end,
+				eval = function(a, b)
+					return a .. b
+				end,
 			},
 			{
 				name = "eq",
@@ -332,7 +360,9 @@ local BUILTIN_DEFINITIONS = freeze {
 				ensuresAST = {},
 				requiresAST = {},
 				logic = false,
-				eval = function(a, b) return a == b end,
+				eval = function(a, b)
+					return a == b
+				end,
 			}
 		},
 	},

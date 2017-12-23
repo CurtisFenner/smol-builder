@@ -21,7 +21,10 @@ function profile.close(message)
 	local top = stack[#stack]
 	local parent = stack[#stack - 1]
 	assert(top, "top")
-	assert(top.message == message, "top.message is `" .. top.message .. "` but you gave `" .. message .. "`")
+	assert(
+		top.message == message,
+		"top.message is `" .. top.message .. "` but you gave `" .. message .. "`"
+	)
 	local elapsed = os.clock() - top.time
 
 	if elapsed >= PRINT_SECONDS then
@@ -34,7 +37,8 @@ function profile.close(message)
 		if top.skipped ~= 0 then
 			print("|" .. string.rep("    ", #stack) .. "(( x" .. top.skipped .. " skipped )) ")
 		end
-		print("|" .. string.rep("    ", #stack - 1) .. ")) " .. top.message .. " " .. string.format("%.3f", elapsed))
+		local alignment = "|" .. string.rep("    ", #stack - 1)
+		print(alignment .. ")) " .. top.message .. " " .. string.format("%.3f", elapsed))
 	else
 		parent.skipped = parent.skipped + 1
 	end
@@ -65,7 +69,9 @@ function profile.summarize()
 		longest = math.max(longest, #key)
 		table.insert(list, value)
 	end
-	table.sort(list, function(a, b) return a.sum > b.sum end)
+	table.sort(list, function(a, b)
+		return a.sum > b.sum
+	end)
 	local function f(n)
 		return string.format("%.3f", n)
 	end

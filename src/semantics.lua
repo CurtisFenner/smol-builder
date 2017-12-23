@@ -20,7 +20,6 @@ local function unclear(a, b)
 	return "maybe"
 end
 
-
 -- RETURNS a string of smol representing the given interface type
 local function showInterfaceType(t)
 	assertis(t, "InterfaceType+")
@@ -33,10 +32,12 @@ local function showInterfaceType(t)
 end
 
 local idCount = 0
+
 -- RETURNS a unique (to this struct) local variable name
 local function generateLocalID(hint)
 	idCount = idCount + 1
-	local indicator = string.char(string.byte "A" + (idCount-1) % 26)
+	local indicator = string.char(string.byte "A" + (idCount - 1) % 26)
+
 	--indicator = ""
 	return "_local" .. indicator .. tostring(idCount) .. "_" .. tostring(hint)
 end
@@ -106,7 +107,8 @@ local function genericSubstituter(assignments)
 				location = t.location,
 			}
 		elseif t.tag == "concrete-type+" then
-			return {tag = "concrete-type+",
+			return {
+				tag = "concrete-type+",
 				name = t.name,
 				arguments = table.map(subs, t.arguments),
 				location = t.location,
@@ -234,20 +236,30 @@ local function verifyTypeValid(type, typeScope, allDefinitions)
 				local instantiatedConstraint = substitute(generalConstraint.interface)
 
 				-- TODO: better explain context
-				verifyTypeSatisfiesConstraint(argument, instantiatedConstraint, typeScope, {
-					container = definition,
-					constraint = generalConstraint.interface,
-					nth = i,
-				}, allDefinitions)
+				verifyTypeSatisfiesConstraint(
+					argument,
+					instantiatedConstraint,
+					typeScope,
+					{
+						container = definition,
+						constraint = generalConstraint.interface,
+						nth = i,
+					},
+					allDefinitions
+				)
 			end
 
 			-- Verify recursively
 			verifyTypeValid(argument, typeScope, allDefinitions)
 		end
 	elseif type.tag == "keyword-type+" then
-		return -- All keyword types are valid
+		return
+
+		-- All keyword types are valid
 	elseif type.tag == "generic+" then
-		return -- All generic literals are valid
+		return
+
+		-- All generic literals are valid
 	else
 		error("unknown Type+ tag `" .. type.tag .. "`")
 	end
@@ -275,11 +287,17 @@ local function verifyInterfaceValid(constraint, typeScope, allDefinitions)
 			local instantiatedConstraint = substitute(generalConstraint.interface)
 
 			-- TODO: provide a clearer context for error messages
-			verifyTypeSatisfiesConstraint(argument, instantiatedConstraint, typeScope, {
-				container = definition,
-				constraint = generalConstraint.interface,
-				nth = i,
-			}, allDefinitions)
+			verifyTypeSatisfiesConstraint(
+				argument,
+				instantiatedConstraint,
+				typeScope,
+				{
+					container = definition,
+					constraint = generalConstraint.interface,
+					nth = i,
+				},
+				allDefinitions
+			)
 		end
 
 		-- Verify each argument in a recursive fashion
@@ -304,7 +322,6 @@ end
 
 --------------------------------------------------------------------------------
 
-
 local STRING_TYPE = provided.STRING_TYPE
 local INT_TYPE = provided.INT_TYPE
 local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
@@ -315,7 +332,6 @@ local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
 local OPERATOR_ALIAS = provided.OPERATOR_ALIAS
 
 --------------------------------------------------------------------------------
-
 
 -- RETURNS a Definition
 local function interfaceDefinitionFromConstraint(t, allDefinitions)
@@ -363,7 +379,7 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 		containingSignature = "Signature",
 		thisVariable = choiceType(constantType(false), "VariableIR"),
 	})
-	
+
 	local allDefinitions = environment.allDefinitions
 	local containingSignature = environment.containingSignature
 	assertis(allDefinitions, listType "Definition")
@@ -481,8 +497,11 @@ local function constraintFromStruct(interface, implementer, generics, containing
 				assertis(implementer, "Type+")
 
 				local constraint = constraintFromStruct(
-					interface, implementer,
-					generics, containingSignature, environment,
+					interface,
+					implementer,
+					generics,
+					containingSignature,
+					environment,
 					location
 				)
 				assertis(constraint, "ConstraintIR")
@@ -879,9 +898,8 @@ end
 
 -- RETURNS StatementIR, [Variable]
 function compileExpression(pExpression, scope, environment)
-	assertis(pExpression, recordType {
-		tag = "string"
-	})
+	assertis(pExpression, recordType {tag = "string"})
+
 	--assertis(scope, listType(mapType("string", "VariableIR")))
 	assertis(environment, recordType {
 		resolveType = "function",
@@ -937,7 +955,7 @@ function compileExpression(pExpression, scope, environment)
 			location = pExpression.location
 		}
 		assertis(out.type, "ConcreteType+")
-		
+
 		local newSt = {
 			type = containerType,
 			returns = "no",
@@ -945,7 +963,7 @@ function compileExpression(pExpression, scope, environment)
 			destination = out,
 			location = pExpression.location,
 		}
-		
+
 		if containingDefinition.tag == "union" then
 			newSt.tag = "new-union"
 		elseif containingDefinition.tag == "class" then
@@ -1051,9 +1069,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 		end
 
-		local block = buildBlock(table.concatted(
-			evaluation, {localSt(out), newSt}
-		))
+		local block = buildBlock(table.concatted(evaluation, {localSt(out), newSt}))
 		return block, freeze {out}
 	elseif pExpression.tag == "identifier" then
 		local block = buildBlock({})
@@ -1078,9 +1094,7 @@ function compileExpression(pExpression, scope, environment)
 		local evaluation = {}
 		local argumentSources = {}
 		for _, pArgument in ipairs(pExpression.arguments) do
-			local subEvaluation, outs = compileExpression(
-				pArgument, scope, environment
-			)
+			local subEvaluation, outs = compileExpression(pArgument, scope, environment)
 
 			-- Verify each pArgument has exactly one value
 			if #outs ~= 1 then
@@ -1109,11 +1123,18 @@ function compileExpression(pExpression, scope, environment)
 
 		if t.tag == "generic+" then
 			-- Generic static function
-			local static = findConstraintByMember(t, "static", pExpression.funcName, t.location, containingDefinition.generics, {
-				allDefinitions = allDefinitions,
-				containingSignature = containingSignature,
-				thisVariable = environment.thisVariable,
-			})
+			local static = findConstraintByMember(
+				t,
+				"static",
+				pExpression.funcName,
+				t.location,
+				containingDefinition.generics,
+				{
+					allDefinitions = allDefinitions,
+					containingSignature = containingSignature,
+					thisVariable = environment.thisVariable,
+				}
+			)
 			assert(static and static.signature.modifier == "static")
 			assertis(static.constraint, "InterfaceType+")
 
@@ -1222,10 +1243,14 @@ function compileExpression(pExpression, scope, environment)
 		-- Map type variables to the type-values used for this instantiation
 		local substituter = getSubstituterFromConcreteType(t, allDefinitions)
 
-		local method = table.findwith(baseDefinition.signatures,
-			"name", pExpression.funcName)
+		local method = table.findwith(baseDefinition.signatures, "name", pExpression.funcName)
 
-		local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
+		local alternatives = table.map(
+			function(x)
+				return x.name
+			end,
+			baseDefinition.signatures
+		)
 		if not method or method.modifier ~= "static" then
 			Report.NO_SUCH_METHOD {
 				modifier = "static",
@@ -1349,7 +1374,9 @@ function compileExpression(pExpression, scope, environment)
 	elseif pExpression.tag == "method-call" then
 		-- Compile the base instance
 		local baseEvaluation, baseInstanceValues = compileExpression(
-			pExpression.base, scope, environment
+			pExpression.base,
+			scope,
+			environment
 		)
 		if #baseInstanceValues ~= 1 then
 			Report.WRONG_VALUE_COUNT {
@@ -1437,7 +1464,7 @@ function compileExpression(pExpression, scope, environment)
 				if not areTypesEqual(argument.type, expectedType) then
 					Report.TYPES_DONT_MATCH {
 						purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
-						expectedType =	showType(expectedType),
+						expectedType = showType(expectedType),
 						expectedLocation = method.signature.parameters[i].location,
 						givenType = showType(argument.type),
 						location = argument.location,
@@ -1520,7 +1547,12 @@ function compileExpression(pExpression, scope, environment)
 
 		-- Find the definition of the method being invoked
 		local method = table.findwith(baseDefinition.signatures, "name", pExpression.methodName)
-		local alternatives = table.map(function(x) return x.name end, baseDefinition.signatures)
+		local alternatives = table.map(
+			function(x)
+				return x.name
+			end,
+			baseDefinition.signatures
+		)
 		if not method then
 			Report.NO_SUCH_METHOD {
 				type = showType(baseInstance.type),
@@ -1559,7 +1591,7 @@ function compileExpression(pExpression, scope, environment)
 			if not areTypesEqual(argument.type, substituter(method.parameters[i].type)) then
 				Report.TYPES_DONT_MATCH {
 					purpose = string.ordinal(i) .. " argument to `" .. methodFullName .. "`",
-					expectedType =	showType(method.parameters[i].type),
+					expectedType = showType(method.parameters[i].type),
 					expectedLocation = method.parameters[i].location,
 					givenType = showType(argument.type),
 					location = argument.location,
@@ -1664,8 +1696,7 @@ function compileExpression(pExpression, scope, environment)
 			end
 
 			-- Annotated the variable with the current location
-			local thisV = table.with(environment.thisVariable,
-				"location", pExpression.location)
+			local thisV = table.with(environment.thisVariable, "location", pExpression.location)
 
 			return buildBlock {}, {thisV}
 		elseif pExpression.keyword == "unit" then
@@ -1694,9 +1725,7 @@ function compileExpression(pExpression, scope, environment)
 					location = pExpression.location,
 				}
 			elseif not environment.returnOuts then
-				Report.RETURN_USED_IN_IMPLEMENTATION {
-					location = pExpression.location
-				}
+				Report.RETURN_USED_IN_IMPLEMENTATION {location = pExpression.location}
 			end
 			assert(#returns == #environment.returnOuts)
 
@@ -1967,8 +1996,12 @@ function compileExpression(pExpression, scope, environment)
 		-- what the result was)
 		local function instantiate(target)
 			table.insert(scopeCopy, {[pExpression.variable.name] = target})
-			local code, predicates = compileExpression(pExpression.predicate, scopeCopy, environment)
-			
+			local code, predicates = compileExpression(
+				pExpression.predicate,
+				scopeCopy,
+				environment
+			)
+
 			local instantiatedResult = freeze {
 				type = BOOLEAN_TYPE,
 				name = generateLocalID("forall_result_" .. pExpression.variable.name),
@@ -1988,10 +2021,14 @@ function compileExpression(pExpression, scope, environment)
 			code = buildBlock {code, move}
 
 			if pExpression.when then
-				local whenEval, whenVars = compileExpression(pExpression.when, scopeCopy, environment)
-	
+				local whenEval, whenVars = compileExpression(
+					pExpression.when,
+					scopeCopy,
+					environment
+				)
+
 				checkSingleBoolean(whenVars, "forall when")
-	
+
 				-- Assume the when is true inside the if guard
 				local assumePredicate = freeze {
 					tag = "assume",
@@ -2007,7 +2044,7 @@ function compileExpression(pExpression, scope, environment)
 					destination = instantiatedResult,
 					returns = "no",
 				}
-	
+
 				-- Guard the execution in an if
 				local ifSt = freeze {
 					tag = "if",
@@ -2090,13 +2127,16 @@ local function typeFromDefinition(definition)
 	return freeze {
 		tag = "concrete-type+",
 		name = definition.name,
-		arguments = table.map(function(p)
-			return freeze {
-				tag = "generic+",
-				name = p.name,
-				location = definition.location,
-			}
-		end, definition.generics),
+		arguments = table.map(
+			function(p)
+				return freeze {
+					tag = "generic+",
+					name = p.name,
+					location = definition.location,
+				}
+			end,
+			definition.generics
+		),
 		location = definition.location,
 	}
 end
@@ -2354,13 +2394,16 @@ local function semanticsSmol(sources, main)
 				modifier = signature.modifier.keyword,
 				name = signature.name,
 				returnTypes = freeze(table.map(resolveType, signature.returnTypes, scope)),
-				parameters = freeze(table.map(function(p)
-					return freeze {
-						name = p.name,
-						type = resolveType(p.type, scope),
-						location = p.location,
-					}
-				end, signature.parameters)),
+				parameters = freeze(table.map(
+					function(p)
+						return freeze {
+							name = p.name,
+							type = resolveType(p.type, scope),
+							location = p.location,
+						}
+					end,
+					signature.parameters
+				)),
 				location = signature.location,
 				bang = signature.bang,
 				ensuresAST = signature.ensures,
@@ -2400,8 +2443,11 @@ local function semanticsSmol(sources, main)
 
 			-- Create a type-scope
 			local typeScope = table.map(
-				function(x) return {name = x} end,
-				generics.parameters)
+				function(x)
+					return {name = x}
+				end,
+				generics.parameters
+			)
 
 			-- Associate each constraint with a generic parameter
 			for _, constraintAST in ipairs(generics.constraints) do
@@ -2509,10 +2555,13 @@ local function semanticsSmol(sources, main)
 			-- Create the generics
 			local generics = compiledGenerics(definition.generics)
 
-			local signatures = table.map(function(raw)
+			local signatures = table.map(
+				function(raw)
 					local compiled = compiledSignature(raw, generics, false)
 					return table.with(compiled, "container", name)
-				end, definition.signatures)
+				end,
+				definition.signatures
+			)
 
 			return freeze {
 				tag = "interface",
@@ -2570,8 +2619,7 @@ local function semanticsSmol(sources, main)
 			-- Check that each signature matches
 			for _, iSignature in ipairs(interface.signatures) do
 				-- Search for a method/static with the same name, if any
-				local cSignature = table.findwith(
-					class.signatures, "name", iSignature.name)
+				local cSignature = table.findwith(class.signatures, "name", iSignature.name)
 				if not cSignature then
 					Report.INTERFACE_REQUIRES_MEMBER {
 						class = class.name,
@@ -2856,7 +2904,11 @@ local function semanticsSmol(sources, main)
 				location = UNKNOWN_LOCATION,
 			}
 		end
-		local resolveType = makeTypeResolver(containingSignature, definition.generics, allDefinitions)
+		local resolveType = makeTypeResolver(
+			containingSignature,
+			definition.generics,
+			allDefinitions
+		)
 
 		-- RETURNS a (verified) InterfaceType+
 		local function resolveInterface(parsedInterface)
@@ -2989,9 +3041,7 @@ local function semanticsSmol(sources, main)
 				assertis(moves, listType "StatementIR")
 
 				-- Combine the three steps into a single sequence statement
-				local sequence = table.concatted(
-					declarations, {evaluation}, moves
-				)
+				local sequence = table.concatted(declarations, {evaluation}, moves)
 				return buildBlock(sequence)
 			elseif pStatement.tag == "return-statement" then
 				local sources = {}
@@ -2999,7 +3049,9 @@ local function semanticsSmol(sources, main)
 				if #pStatement.values == 1 then
 					-- A single value must have exactly the target multiplicity
 					local subEvaluation, subsources = compileExpression(
-						pStatement.values[1], scope, environment
+						pStatement.values[1],
+						scope,
+						environment
 					)
 
 					if #subsources ~= #containingSignature.returnTypes then
@@ -3032,7 +3084,11 @@ local function semanticsSmol(sources, main)
 				else
 					-- If multiple values are given, each must be a 1-tuple
 					for _, value in ipairs(pStatement.values) do
-						local subevaluation, subsources = compileExpression(value, scope, environment)
+						local subevaluation, subsources = compileExpression(
+							value,
+							scope,
+							environment
+						)
 						if #subsources ~= 1 then
 							Report.WRONG_VALUE_COUNT {
 								purpose = "expression in multiple-value return statement",
@@ -3076,11 +3132,7 @@ local function semanticsSmol(sources, main)
 
 				return buildBlock(evaluation)
 			elseif pStatement.tag == "do-statement" then
-				local evaluation, out = compileExpression(
-					pStatement.expression,
-					scope,
-					environment
-				)
+				local evaluation, out = compileExpression(pStatement.expression, scope, environment)
 				assert(#out ~= 0)
 				if #out > 1 then
 					Report.WRONG_VALUE_COUNT {
@@ -3100,9 +3152,17 @@ local function semanticsSmol(sources, main)
 
 				return evaluation
 			elseif pStatement.tag == "if-statement" then
-				local conditionEvaluation, conditionOut = compileExpression(pStatement.condition, scope, environment)
+				local conditionEvaluation, conditionOut = compileExpression(
+					pStatement.condition,
+					scope,
+					environment
+				)
 				assert(#conditionOut ~= 0)
-				checkSingleBoolean(conditionOut, "if-statement condition", pStatement.condition.location)
+				checkSingleBoolean(
+					conditionOut,
+					"if-statement condition",
+					pStatement.condition.location
+				)
 
 				-- Builds the else-if-chain IR instructions.
 				-- The index is the index of the first else-if clause to include.
@@ -3117,7 +3177,11 @@ local function semanticsSmol(sources, main)
 							return buildBlock({})
 						end
 					end
-					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(pStatement.elseifs[i].condition, scope, environment)
+					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(
+						pStatement.elseifs[i].condition,
+						scope,
+						environment
+					)
 					assert(#elseIfConditionOut ~= 0)
 					checkSingleBoolean(elseIfConditionOut, "else-if-statement condition")
 
@@ -3151,7 +3215,11 @@ local function semanticsSmol(sources, main)
 				return buildBlock({conditionEvaluation, ifSt})
 			elseif pStatement.tag == "match-statement" then
 				-- Evaluate the base expression
-				local baseEvaluation, baseOuts = compileExpression(pStatement.base, scope, environment)
+				local baseEvaluation, baseOuts = compileExpression(
+					pStatement.base,
+					scope,
+					environment
+				)
 				if #baseOuts ~= 1 then
 					Report.WRONG_VALUE_COUNT {
 						purpose = "match-statement expression",
@@ -3222,7 +3290,6 @@ local function semanticsSmol(sources, main)
 					local variable = {
 						name = case.head.variable,
 						type = unionSubstituter(field.type),
-						-- 
 						location = case.head.location,
 					}
 
@@ -3355,7 +3422,11 @@ local function semanticsSmol(sources, main)
 				local out = {}
 
 				-- Evaluate the right-hand-side
-				local valueEvaluation, valueOut = compileExpression(pStatement.value, scope, environment)
+				local valueEvaluation, valueOut = compileExpression(
+					pStatement.value,
+					scope,
+					environment
+				)
 				if #valueOut ~= #pStatement.variables then
 					Report.WRONG_VALUE_COUNT {
 						purpose = "assignment statement",
@@ -3395,7 +3466,11 @@ local function semanticsSmol(sources, main)
 			elseif pStatement.tag == "assert-statement" then
 				-- Evaluate the right-hand-side
 				-- TODO: environment must be annotated to allow `forall`
-				local valueEvaluation, valueOut = compileExpression(pStatement.expression, scope, environment)
+				local valueEvaluation, valueOut = compileExpression(
+					pStatement.expression,
+					scope,
+					environment
+				)
 				if #valueOut ~= 1 then
 					Report.WRONG_VALUE_COUNT {
 						purpose = "assert statement",
@@ -3460,7 +3535,7 @@ local function semanticsSmol(sources, main)
 				-- always returns
 				if returned == "yes" then
 					Report.UNREACHABLE_STATEMENT {
-						cause = statements[i-1].location,
+						cause = statements[i - 1].location,
 						reason = "always returns",
 						unreachable = pStatement.location,
 					}
@@ -3569,7 +3644,11 @@ local function semanticsSmol(sources, main)
 				body = buildBlock {
 					body,
 					localSt(unitVariable),
-					verifyForEnsures(functionScope, {unitVariable}, containingSignature.body.location),
+					verifyForEnsures(
+						functionScope,
+						{unitVariable},
+						containingSignature.body.location
+					),
 					returnSt
 				}
 			end

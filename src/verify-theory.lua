@@ -203,7 +203,7 @@ local function boxConstant(constant)
 	if type(constant) == "number" then
 		-- Assert that constant is finite and an integer
 		assert(constant % 1 == 0)
-		
+
 		return freeze {
 			tag = "int",
 			value = constant,
@@ -407,7 +407,6 @@ function theory:additionalClauses(model, term, cnf)
 	return {}
 end
 
-
 -- RETURNS a string such that for x, y
 -- if approximateStructure(x) ~= approximateStructure(y)
 -- then x, y have different structure and thus childrenSame(x, y) is false
@@ -450,7 +449,7 @@ function theory:isSatisfiable(modelInput)
 		assertis(key, "Assertion")
 
 		local object = canon:scan(key)
-		
+
 		-- After canonicalizing, two expressions with different truth
 		-- assignments could be in the map
 		if simple[object] ~= nil and simple[object] ~= value then
@@ -467,7 +466,7 @@ function theory:isSatisfiable(modelInput)
 	profile.close "#canonicalization"
 
 	profile.open "#scan for equality"
-	
+
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
 	for assertion, truth in pairs(simple) do
@@ -510,7 +509,9 @@ function theory:isSatisfiable(modelInput)
 			if eq:query(other, of) then
 				-- Only evaluate "terminal" constants
 				-- (Builds bottom up iteratively)
-				local constant = evaluateConstantAssertion(other, function() return nil end)
+				local constant = evaluateConstantAssertion(other, function()
+					return nil
+				end)
 				if constant ~= nil then
 					table.insert(out, constant)
 				end
@@ -534,7 +535,7 @@ function theory:isSatisfiable(modelInput)
 			local constant = evaluateConstantAssertion(a, equivalentConstant)
 			if constant ~= nil then
 				local boxed = canon:scan(boxConstant(constant))
-				
+
 				-- Insert representative, so that it can be used in UF
 				eq:tryinit(boxed)
 
@@ -554,7 +555,7 @@ function theory:isSatisfiable(modelInput)
 		byStructure[s] = byStructure[s] or {}
 		table.insert(byStructure[s], x)
 	end
-	
+
 	-- RETURNS true when assertions x, y are equivalent due to being
 	-- equal functions of equal arguments 
 	local function childrenSame(x, y)
@@ -640,7 +641,7 @@ function theory:isSatisfiable(modelInput)
 			local thoseThatReferenceA = thoseReferencingAny(eqClasses[a])
 			local thoseThatReferenceB = thoseReferencingAny(eqClasses[b])
 			eq:union(a, b)
-			
+
 			-- Union all functions of equal arguments
 			profile.open("#recursive union")
 			for x in pairs(thoseThatReferenceA) do
@@ -675,6 +676,7 @@ function theory:isSatisfiable(modelInput)
 	profile.close "#union-find"
 
 	profile.open "#negative =="
+
 	-- 4) Use each negative == assertion to separate groups
 	for _, bin in ipairs(negativeEq) do
 		local a, b = bin[1], bin[2]
@@ -712,6 +714,7 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	profile.open("#immediately?")
+
 	-- 5) Check if the assertion is true
 	-- It may be equal to any true statement
 
@@ -769,7 +772,6 @@ end
 --------------------------------------------------------------------------------
 
 -- Tests
-
 
 theory.evaluateConstantAssertion = evaluateConstantAssertion
 

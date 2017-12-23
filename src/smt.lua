@@ -95,6 +95,7 @@ local function disjunctionOfClause(theory, a, b)
 	for _, y in ipairs(b) do
 		table.insert(clause, y)
 	end
+
 	-- TODO: simplification
 	return clause
 end
@@ -123,6 +124,7 @@ local function toCNFFromBreakup(theory, terms, assignments, normalization)
 	assertis(terms, listType(theory.assertion_t))
 	assertis(assignments, listType(listType(choiceType("boolean", constantType "*"))))
 	assert(#assignments >= 1)
+
 	--assertis(normalization, "object")
 
 	local options = {}
@@ -180,14 +182,14 @@ end
 local function simplifyCNF(cnf, assignment)
 	profile.open "simplifyCNF"
 	assert(type(assignment) == "table")
-	
+
 	local cs = {}
 	for _, clause in ipairs(cnf) do
 		-- Simplify a clause
 		local c = {}
 		local contradiction = false
 		local satisfied = false
-		
+
 		-- Search the clause of terms with known truth assignments
 		for _, term in ipairs(clause) do
 			local e, truth = term[1], term[2]
@@ -204,7 +206,7 @@ local function simplifyCNF(cnf, assignment)
 				table.insert(c, term)
 			end
 		end
-		
+
 		if not satisfied then
 			-- Do not add empty clauses;
 			-- empty clauses may represent True or False.
@@ -254,6 +256,7 @@ local function cnfSAT(theory, cnf, assignment, odds)
 	assert(#smallestClause >= 1)
 	if #smallestClause == 1 then
 		profile.open "unit clause"
+
 		-- Unit clauses have exactly one way to assign
 		local term, truth = smallestClause[1][1], smallestClause[1][2]
 		assert(assignment[term] == nil)
@@ -315,6 +318,7 @@ end
 -- RETURNS false, counterexample | true
 local function implies(theory, givens, expression)
 	profile.open("smt.implies setup")
+
 	-- Is the case where givens are true but expression false satisfiable?
 	local args = {}
 	local truths = {}
@@ -327,7 +331,7 @@ local function implies(theory, givens, expression)
 	table.insert(truths, false)
 
 	--print("implies()?")
-	
+
 	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
 	profile.close("smt.implies setup")
 
@@ -337,6 +341,7 @@ local function implies(theory, givens, expression)
 
 	profile.open("smt.implies sat")
 	local sat = cnfSAT(theory, cnf, {}, 0)
+
 	--print("(&givens) &!expression got sat", sat)
 	profile.close("smt.implies sat")
 	if sat then
@@ -355,7 +360,6 @@ function plaintheory:isSatisfiable(model)
 	for x = 1, 2 do
 		for y = 1, 2 do
 			local good = true
-			--print("\t\t(" .. x .. ", " .. y .. "):")
 			for k, v in pairs(model) do
 				assert(type(v) == "boolean")
 				if type(k) == "table" and k[1] == "f" then
@@ -370,14 +374,9 @@ function plaintheory:isSatisfiable(model)
 					end
 				end
 			end
-			--print("\t\t", good)
 			anyGood = anyGood or good
 		end
 	end
-	--print("\ttheory says ", anyGood and "sat" or "unsat", "for model")
-	--for k, v in pairs(model) do
-	--	print("\t", plaintheory:canonKey(k), "is", v)
-	--end
 	return anyGood
 end
 
@@ -472,10 +471,14 @@ local m5 = {
 }
 assert(not not isSatisfiable(plaintheory, m5))
 
-assert(not implies(plaintheory, {
-	{"f", "x == y"},
-	{"or", {"f", "x == 1"}, {"f", "x == 2"}},
-}, {"f", "y == 2"}))
+assert(not implies(
+	plaintheory,
+	{
+		{"f", "x == y"},
+		{"or", {"f", "x == 1"}, {"f", "x == 2"}},
+	},
+	{"f", "y == 2"}
+))
 
 --------------------------------------------------------------------------------
 

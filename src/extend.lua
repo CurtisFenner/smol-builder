@@ -5,17 +5,18 @@
 function string.ordinal(n)
 	assert(type(n) == "number", "n must be an integer")
 	assert(n % 1 == 0, "n must be an integer")
+
 	-- 1st, 2nd, 3rd, 4th, 5th, 6th, 7th, 8th, 9th, 10th
 	-- ...
 	-- 21st, 22nd, 23rd, 24th, ... 29th
 	-- ...
-	if 10 <= n%100 and n%100 <= 20 then
+	if 10 <= n % 100 and n % 100 <= 20 then
 		return n .. "th"
-	elseif n%10 == 1 then
+	elseif n % 10 == 1 then
 		return n .. "st"
-	elseif n%10 == 2 then
+	elseif n % 10 == 2 then
 		return n .. "nd"
-	elseif n%10 == 3 then
+	elseif n % 10 == 3 then
 		return n .. "rd"
 	end
 	return n .. "th"
@@ -35,7 +36,7 @@ end
 -- RETURNS a list formed by the concatenation of the arguments
 function table.concatted(...)
 	local out = {}
-	for _, list in ipairs{...} do
+	for _, list in ipairs {...} do
 		for _, element in ipairs(list) do
 			table.insert(out, element)
 		end
@@ -90,7 +91,9 @@ end
 
 -- RETURNS a function that accesses `property`
 function table.getter(property)
-	return function(object) return object[property] end
+	return function(object)
+		return object[property]
+	end
 end
 
 -- RETURNS a frozen version of `object` such that accesses to key `key`
@@ -107,8 +110,7 @@ end
 
 -- RETURNS a list produced by mapping each element of `list` through `f`
 function table.map(f, list, ...)
-	assert(type(f) == "function",
-		"the first argument to table.map must be a function")
+	assert(type(f) == "function", "the first argument to table.map must be a function")
 	local out = {}
 	for k, v in ipairs(list) do
 		out[k] = f(v, ...)
@@ -136,5 +138,7 @@ end
 
 -- RETURNS a function
 function table.bind(object, f)
-	return function(...) return f(object, ...) end
+	return function(...)
+		return f(object, ...)
+	end
 end

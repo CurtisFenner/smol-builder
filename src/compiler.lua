@@ -3,9 +3,14 @@
 
 local ARGV = arg
 
-INVOKATION = ARGV[0] .. " " .. table.concat(ARGV, " ")
-	.. "\non " .. os.date("!%c")
-	.. "\nsmol version 0??"
+INVOKATION = table.concat {
+	ARGV[0],
+	" ",
+	table.concat(ARGV, " "),
+	"\non ",
+	os.date("!%c"),
+	"\nsmol version 0??"
+}
 
 --------------------------------------------------------------------------------
 
@@ -43,10 +48,10 @@ function quit(first, ...)
 	rest = table.concat(rest)
 
 	if not first:match("^[A-Z]+:\n$") then
-		print(table.concat{ansi.red("ERROR"), ":\n", first, rest})
+		print(table.concat {ansi.red("ERROR"), ":\n", first, rest})
 		os.exit(45)
 	else
-		print(table.concat{ansi.cyan(first), rest})
+		print(table.concat {ansi.cyan(first), rest})
 		os.exit(40)
 	end
 end
@@ -55,7 +60,6 @@ import "extend.lua"
 import "types.lua"
 
 --------------------------------------------------------------------------------
-
 
 local LOCATION_MODE = "column"
 
@@ -89,13 +93,13 @@ function showLocation(location)
 			end
 		end
 		if pointy:find "%S" then
-			table.insert(context, "\t" .. string.rep(" ", #tostring(#source)) .. " | " .. ansi.red(pointy))
+			local align = string.rep(" ", #tostring(#source))
+			table.insert(context, "\t" .. align .. " | " .. ansi.red(pointy))
 		end
 	end
 	local sourceContext = table.concat(context, "\n")
-
-	local location = "at " .. begins.filename .. ":" .. begins.line .. ":" .. begins.column
-		.. "\n" .. sourceContext .. "\n"
+	local cite = begins.filename .. ":" .. begins.line .. ":" .. begins.column
+	local location = "at " .. cite .. "\n" .. sourceContext .. "\n"
 
 	-- Include indexes for computer consumption of error messages
 	if LOCATION_MODE == "index" then
@@ -118,10 +122,13 @@ local verify = import "verify.lua"
 --------------------------------------------------------------------------------
 
 local function quitUsage()
-	quit("USAGE:\n", "\tlua compiler.lua"
-		.. " --sources <sequence of one-or-more .smol files>"
-		.. " --main <mainpackage:Mainclass>"
-		.. "\n\n\tFor example, `lua compiler.lua --sources foo.smol --main main:Main`")
+	quit(
+		"USAGE:\n",
+		"\tlua compiler.lua",
+		" --sources <sequence of one-or-more .smol files>",
+		" --main <mainpackage:Mainclass>",
+		"\n\n\tFor example, `lua compiler.lua --sources foo.smol --main main:Main`"
+	)
 end
 
 local commandMap = {}
@@ -216,7 +223,8 @@ local function lexSmol(source, filename)
 
 	-- Define token parsing rules
 	local TOKENS = {
-		{ -- type keywords, type names
+		{
+			-- type keywords, type names
 			"[A-Z][A-Za-z0-9]*",
 			function(x)
 				if IS_KEYWORD[x] then
@@ -225,7 +233,8 @@ local function lexSmol(source, filename)
 				return {tag = "typename", name = x}
 			end
 		},
-		{ -- keywords, local identifiers
+		{
+			-- keywords, local identifiers
 			"[a-z][A-Za-z0-9]*",
 			function(x)
 				if IS_KEYWORD[x] then
@@ -234,23 +243,35 @@ local function lexSmol(source, filename)
 				return {tag = "identifier", name = x}
 			end
 		},
-		{ -- generic type parameters
+		{
+			-- generic type parameters
 			"#[A-Z][A-Za-z0-9]*",
 			function(x)
 				return {tag = "generic", name = x:sub(2)}
 			end
 		},
-		{ -- whitespace
+		{
+			-- whitespace
 			"%s+",
-			function(x) return false end
+			function(x)
+				return false
+			end
 		},
-		{ -- comments
-			"//[^\n]*", -- (greedy)
-			function(x) return false end
+		{
+			-- comments
+			"//[^\n]*",
+
+			-- (greedy)
+			function(x)
+				return false
+			end
 		},
-		{ -- punctuation (braces, commas, etc)
+		{
+			-- punctuation (braces, commas, etc)
 			"[.,:;!|()%[%]{}]",
-			function(x) return {tag = "punctuation"} end
+			function(x)
+				return {tag = "punctuation"}
+			end
 		},
 		{
 			-- operators and assignment
@@ -262,7 +283,8 @@ local function lexSmol(source, filename)
 				return {tag = "operator"}
 			end
 		},
-		{ -- integer literals
+		{
+			-- integer literals
 			"[0-9]+",
 			function(x)
 				return {tag = "integer-literal", value = tonumber(x)}
@@ -284,7 +306,9 @@ local function lexSmol(source, filename)
 				line = line:sub(1, index - 1) .. spaces .. line:sub(index + 1)
 			end
 		until not index
-		line = line:gsub("\t", "    ") -- TODO: this should be aligned
+		line = line:gsub("\t", "    ")
+
+		-- TODO: this should be aligned
 		table.insert(sourceLines, line)
 	end
 
@@ -314,7 +338,7 @@ local function lexSmol(source, filename)
 				-- rather than character.
 				-- (VSCode default behavior when tabs are size 4)
 				-- (Atom default behavior counts characters)
-				column = math.ceil(column/4)*4 + 1
+				column = math.ceil(column / 4) * 4 + 1
 				index = index + 1
 			else
 				column = column + 1
@@ -352,16 +376,20 @@ local function lexSmol(source, filename)
 			for i = 2, #source do
 				local c = source:sub(i, i)
 				if c == "\n" then
-					location.ends = advanceCursor(source:sub(1, i-1))
-					quit("The compiler found an unfinished string literal ",
-					location)
+					location.ends = advanceCursor(source:sub(1, i - 1))
+					quit("The compiler found an unfinished string literal ", location)
 				end
 				if escaped then
 					if not SPECIAL[c] then
 						location.ends = advanceCursor(source:sub(1, i))
-						quit("The compiler found an unknown escape sequence",
-							" `\\", c, "`",
-							" in a string literal ", location)
+						quit(
+							"The compiler found an unknown escape sequence",
+							" `\\",
+							c,
+							"`",
+							" in a string literal ",
+							location
+						)
 					end
 					content = content .. SPECIAL[c]
 					escaped = not escaped
@@ -371,8 +399,9 @@ local function lexSmol(source, filename)
 					-- Update location
 					location.ends = advanceCursor(source:sub(1, i))
 					local lexeme = source:sub(1, i)
+
 					-- String literal is complete
-					source = source:sub(i+1)
+					source = source:sub(i + 1)
 					table.insert(tokens, freeze {
 						tag = "string-literal",
 						value = content,
@@ -392,8 +421,10 @@ local function lexSmol(source, filename)
 				if match then
 					-- Consume token and add to token stream
 					local token = tokenRule[2](match)
-					assert(type(token) == "table" or rawequal(token, false),
-						"token must be table `" .. tokenRule[1] .. "`")
+					assert(
+						type(token) == "table" or rawequal(token, false),
+						"token must be table `" .. tokenRule[1] .. "`"
+					)
 
 					location.ends = advanceCursor(match)
 					if token then
@@ -403,7 +434,7 @@ local function lexSmol(source, filename)
 					end
 
 					-- Advance the cursor through the text file
-					source = source:sub(#match+1)
+					source = source:sub(#match + 1)
 
 					matched = true
 					break
@@ -412,8 +443,10 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				quit("The compiler could not recognize any token ",
-					table.with(location, "ends", location.begins))
+				quit(
+					"The compiler could not recognize any token ",
+					table.with(location, "ends", location.begins)
+				)
 			end
 		end
 	end
@@ -589,7 +622,9 @@ local function parseSmol(tokens)
 
 	local function parserOtherwise(p, value)
 		assert(type(p) == "function")
-		return parser.map(p, function(x) return x or value end)
+		return parser.map(p, function(x)
+			return x or value
+		end)
 	end
 
 	-- DEFINES the grammar for the language
@@ -615,7 +650,9 @@ local function parseSmol(tokens)
 			{"_", K_IMPORT},
 			{"package", T_IDENTIFIER, "an imported package name"},
 			{
-				"class", -- string | false
+				"class",
+
+				-- string | false
 				parser.optional(parser.composite {
 					tag = "***type name",
 					{"_", K_SCOPE},
@@ -638,10 +675,13 @@ local function parseSmol(tokens)
 			{"foreign", parser.query "`foreign`?"},
 			{"_", K_CLASS},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(parser.query "generics?", {
-				parameters = {},
-				constraints = {},
-			})},
+			{
+				"generics",
+				parserOtherwise(parser.query "generics?", {
+					parameters = {},
+					constraints = {},
+				})
+			},
 			{"implements", parserOtherwise(parser.query "implements?", {})},
 			{"_", K_CURLY_OPEN, "`{` to begin class body"},
 			{"fields", parser.query "field-definition*"},
@@ -663,10 +703,13 @@ local function parseSmol(tokens)
 			tag = "union-definition",
 			{"_", K_UNION},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(parser.query "generics?", {
-				parameters = {},
-				constraints = {},
-			})},
+			{
+				"generics",
+				parserOtherwise(parser.query "generics?", {
+					parameters = {},
+					constraints = {},
+				})
+			},
 			{"implements", parserOtherwise(parser.query "implements?", {})},
 			{"_", K_CURLY_OPEN, "`{` to begin union body"},
 			{"fields", parser.query "field-definition*"},
@@ -679,10 +722,13 @@ local function parseSmol(tokens)
 			tag = "interface-definition",
 			{"_", K_INTERFACE},
 			{"name", T_TYPENAME, "a type name"},
-			{"generics", parserOtherwise(parser.query "generics?", {
-				parameters = {},
-				constraints = {},
-			})},
+			{
+				"generics",
+				parserOtherwise(parser.query "generics?", {
+					parameters = {},
+					constraints = {},
+				})
+			},
 			{"_", K_CURLY_OPEN, "`{` to begin interface body"},
 			{"signatures", parser.query "interface-signature*"},
 			{"_", K_CURLY_CLOSE, "`}` to end interface body"},
@@ -697,21 +743,14 @@ local function parseSmol(tokens)
 				parser.delimited(T_GENERIC, "1+", ",", "generic parameter"),
 				"generic parameter variables"
 			},
-			{
-				"constraints",
-				parserOtherwise(parser.query "generic-constraints?", {})
-			},
+			{"constraints", parserOtherwise(parser.query "generic-constraints?", {})},
 			{"_", K_SQUARE_CLOSE, "`]` to end list of generics"},
 		},
 
 		["generic-constraints"] = parser.composite {
 			tag = "generic constraints",
 			{"_", K_PIPE},
-			{
-				"#constraints",
-				parser.query "generic-constraint,1+",
-				"generic constraints"
-			},
+			{"#constraints", parser.query "generic-constraint,1+", "generic constraints"},
 		},
 
 		["generic-constraint"] = parser.composite {
@@ -729,24 +768,32 @@ local function parseSmol(tokens)
 			K_BOOLEAN,
 			K_UNIT_TYPE,
 			K_NEVER,
+
 			-- User defined types
-			parser.map(T_GENERIC, function(x)
-				return {tag = "generic", name = x}
-			end, true),
+			parser.map(
+				T_GENERIC,
+				function(x)
+					return {tag = "generic", name = x}
+				end,
+				true
+			),
 			parser.named "concrete-type",
 		},
 
 		["concrete-type"] = parser.composite {
 			tag = "concrete-type",
 			{
-				"package", --: string | false
+				"package",
+
+				--: string | false
 				parser.query "package-scope?",
 			},
-			{"base", T_TYPENAME}, --: string
-			{
-				"arguments",
-				parserOtherwise(parser.query "type-arguments?", freeze {})
-			}, --: [ Type ]
+			{"base", T_TYPENAME},
+
+			--: string
+			{"arguments", parserOtherwise(parser.query "type-arguments?", freeze {})},
+
+			--: [ Type ]
 		},
 
 		["package-scope"] = parser.composite {
@@ -806,11 +853,7 @@ local function parseSmol(tokens)
 			{"_", K_ROUND_OPEN, "`(` after method name"},
 			{"parameters", parser.query "variable,0+"},
 			{"_", K_ROUND_CLOSE, "`)` after method parameters"},
-			{
-				"returnTypes",
-				parser.query "type,1+",
-				"a return type"
-			},
+			{"returnTypes", parser.query "type,1+", "a return type"},
 			{"requires", parser.zeroOrMore(parser.named "requires")},
 			{"ensures", parser.zeroOrMore(parser.named "ensures")},
 		},
@@ -892,11 +935,7 @@ local function parseSmol(tokens)
 		["do-statement"] = parser.composite {
 			tag = "do-statement",
 			{"_", K_DO},
-			{
-				"expression",
-				parser.named "expression",
-				"an expression to execute after `do`"
-			},
+			{"expression", parser.named "expression", "an expression to execute after `do`"},
 			{"_", K_SEMICOLON, "`;` to end do-statement"},
 		},
 
@@ -973,43 +1012,50 @@ local function parseSmol(tokens)
 		},
 
 		-- Expressions!
-		["expression"] = parser.map(parser.composite {
-			tag = "***expression",
-			{"base", parser.named "atom"},
-			{"operations", parser.query "operation*"},
-			{"isa", parser.query "isa?"},
-		}, function(x)
-			-- XXX: no precedence yet; assume left-associative
-			local out = x.base
-			assertis(out.tag, "string")
+		["expression"] = parser.map(
+			parser.composite {
+				tag = "***expression",
+				{"base", parser.named "atom"},
+				{"operations", parser.query "operation*"},
+				{"isa", parser.query "isa?"},
+			},
+			function(x)
+				-- XXX: no precedence yet; assume left-associative
+				local out = x.base
+				assertis(out.tag, "string")
 
-			local isa = x.isa
+				local isa = x.isa
 
-			if #x.operations >= 2 then
-				quit("You must explicitly parenthesize the operators ", x.operations[2].location)
-			end
+				if #x.operations >= 2 then
+					quit(
+						"You must explicitly parenthesize the operators ",
+						x.operations[2].location
+					)
+				end
 
-			for _, operation in ipairs(x.operations) do
-				out = freeze {
-					tag = "binary",
-					left = out,
-					right = operation.operand,
-					operator = operation.operator,
-				}
-				assert(isstring(out.operator))
-			end
+				for _, operation in ipairs(x.operations) do
+					out = freeze {
+						tag = "binary",
+						left = out,
+						right = operation.operand,
+						operator = operation.operator,
+					}
+					assert(isstring(out.operator))
+				end
 
-			if isa then
-				return freeze {
-					tag = "isa",
-					base = out,
-					variant = isa.field,
-				}
-			end
+				if isa then
+					return freeze {
+						tag = "isa",
+						base = out,
+						variant = isa.field,
+					}
+				end
 
-			assert(out)
-			return out
-		end, true),
+				assert(out)
+				return out
+			end,
+			true
+		),
 
 		["operation"] = parser.composite {
 			tag = "***operation",
@@ -1032,27 +1078,32 @@ local function parseSmol(tokens)
 			{"value", parser.named "expression", "an expression after `=`"},
 		},
 
-		["atom"] = parser.map(parser.composite {
-			tag = "***atom",
-			{"base", parser.named "atom-base"},
-			{"accesses", parser.query "access*"},
-		}, function(x)
-			local out = x.base
-			for _, access in ipairs(x.accesses) do
-				local loc = freeze {
-					begins = out.location.begins,
-					ends = access.location.ends,
-				}
-				out = table.with(access, "base", out)
-				out = table.with(out, "location", loc)
-			end
-			return out
-		end, true),
+		["atom"] = parser.map(
+			parser.composite {
+				tag = "***atom",
+				{"base", parser.named "atom-base"},
+				{"accesses", parser.query "access*"},
+			},
+			function(x)
+				local out = x.base
+				for _, access in ipairs(x.accesses) do
+					local loc = freeze {
+						begins = out.location.begins,
+						ends = access.location.ends,
+					}
+					out = table.with(access, "base", out)
+					out = table.with(out, "location", loc)
+				end
+				return out
+			end,
+			true
+		),
 
 		["method-access"] = parser.composite {
 			tag = "method-call",
 			{"_", K_DOT},
 			{"methodName", T_IDENTIFIER, "a method/field name"},
+
 			-- What follows is optional, since a field access is also possible
 			{"bang", parser.optional(K_BANG)},
 			{
@@ -1071,10 +1122,7 @@ local function parseSmol(tokens)
 			{"field", T_IDENTIFIER, "a field name"},
 		},
 
-		["access"] = parser.choice {
-			parser.named "method-access",
-			parser.named "field-access"
-		},
+		["access"] = parser.choice {parser.named "method-access", parser.named "field-access"},
 
 		["static-call"] = parser.composite {
 			tag = "static-call",
@@ -1111,16 +1159,28 @@ local function parseSmol(tokens)
 			K_FALSE,
 			K_UNIT_VALUE,
 			parser.named "forall",
-			parser.map(T_STRING_LITERAL, function(v)
-				return {tag = "string-literal", value = v}
-			end, true),
-			parser.map(T_INTEGER_LITERAL, function(v)
-				return {tag = "int-literal", value = v}
-			end, true),
+			parser.map(
+				T_STRING_LITERAL,
+				function(v)
+					return {tag = "string-literal", value = v}
+				end,
+				true
+			),
+			parser.map(
+				T_INTEGER_LITERAL,
+				function(v)
+					return {tag = "int-literal", value = v}
+				end,
+				true
+			),
 			parser.named "static-call",
-			parser.map(T_IDENTIFIER, function(n)
-				return {tag = "identifier", name = n}
-			end, true),
+			parser.map(
+				T_IDENTIFIER,
+				function(n)
+					return {tag = "identifier", name = n}
+				end,
+				true
+			),
 			parser.composite {
 				tag = "***parenthesized expression",
 				{"_", K_ROUND_OPEN},
@@ -1188,7 +1248,9 @@ REGISTER_TYPE("InterfaceIR", recordType {
 REGISTER_TYPE("Definition", choiceType("ClassIR", "UnionIR", "InterfaceIR"))
 
 REGISTER_TYPE("TypeParameterIR", recordType {
-	name = "string", -- Type parameter name (e.g., "#Right")
+	name = "string",
+
+	-- Type parameter name (e.g., "#Right")
 	constraints = listType(recordType {
 		interface = "InterfaceType+",
 	}),
@@ -1215,26 +1277,20 @@ REGISTER_TYPE("Signature", recordType {
 	bang = "boolean",
 	requiresAST = listType "ASTExpression",
 	ensuresAST = listType "ASTExpression",
-	logic = choiceType(
-		constantType(false),
-		mapType(
-			"boolean",
-			listType(listType(choiceType("boolean", constantType "*")))
-		)
-	),
+	logic = choiceType(constantType(false), mapType(
+		"boolean",
+		listType(listType(choiceType("boolean", constantType "*")))
+	)),
 	eval = choiceType(constantType(false), "function"),
 })
 
 REGISTER_TYPE("ASTExpression", recordType {
 	tag = "string",
+
 	-- TODO
 })
 
-REGISTER_TYPE("maybe", choiceType(
-	constantType "yes",
-	constantType "no",
-	constantType "maybe"
-))
+REGISTER_TYPE("maybe", choiceType(constantType "yes", constantType "no", constantType "maybe"))
 
 REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	-- Execution
@@ -1505,9 +1561,7 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 
 --------------------------------------------------------------------------------
 
-REGISTER_TYPE("Type+", choiceType(
-	"ConcreteType+", "KeywordType+", "GenericType+"
-))
+REGISTER_TYPE("Type+", choiceType("ConcreteType+", "KeywordType+", "GenericType+"))
 
 REGISTER_TYPE("InterfaceType+", recordType {
 	tag = constantType "interface-type",
@@ -1536,13 +1590,16 @@ REGISTER_TYPE("KeywordType+", recordType {
 REGISTER_TYPE("GenericType+", recordType {
 	tag = constantType "generic+",
 
-	name = "string", -- e.g., "Foo" for `#Foo`
+	name = "string",
+
+	-- e.g., "Foo" for `#Foo`
 
 	location = "Location",
 })
 
 -- Main ------------------------------------------------------------------------
 
+-- RETURNS the string prefix in common to all members of list
 local function commonPrefix(list)
 	assert(#list >= 1)
 	local out = list[1]
@@ -1555,7 +1612,8 @@ local function commonPrefix(list)
 	return out
 end
 
-local common = commonPrefix(commandMap.sources):gsub("%.[a-zA-Z0-9]+$", ""):gsub("[a-zA-Z_0-9]+$", "")
+local commonRaw = commonPrefix(commandMap.sources)
+local common = commonRaw:gsub("%.[a-zA-Z0-9]+$", ""):gsub("[a-zA-Z_0-9]+$", "")
 local sourceFiles = {}
 for _, source in ipairs(commandMap.sources) do
 	table.insert(sourceFiles, {

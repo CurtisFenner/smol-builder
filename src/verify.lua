@@ -146,10 +146,9 @@ local function excerpt(location)
 		if line == ends.line then
 			high = ends.column
 		end
-		out = out ..source[line]:sub(low, high)
+		out = out .. source[line]:sub(low, high)
 	end
 	return out
-	--return "(" .. begins.line .. ":" .. begins.column .. "):(" .. ends.line .. ":" .. ends.column .. ") " .. out
 end
 
 -- RETURNS a string (as executable Smol code)
@@ -327,6 +326,11 @@ end
 
 -- RETURNS a string
 local function showStatement(statement, indent)
+	-- RETURNS a string representing a list of VariableIR destinations
+	local function showDestinations(destinations)
+		return table.concat(table.map(table.getter "name", destinations), ", ")
+	end
+
 	indent = (indent or "")
 	local color = ansi.blue
 	if statement.tag == "verify" or statement.tag == "assume" or statement.tag == "proof" then
@@ -372,20 +376,20 @@ local function showStatement(statement, indent)
 		}
 		return table.concat(x)
 	elseif statement.tag == "method-call" then
-		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
+		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
 		local rhs = statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
-		return pre .. " " .. destinations.. " := " .. rhs
+		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "static-call" then
-		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
+		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
 		local rhs = showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
-		return pre .. " " .. destinations.. " := " .. rhs
+		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "generic-method-call" then
-		local destinations = table.concat(table.map(table.getter "name", statement.destinations), ", ")
+		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
 		local rhs = statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
-		return pre .. " " .. destinations.. " := " .. rhs
+		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "return" then
 		local out = {}
 		for _, s in ipairs(statement.sources) do
@@ -550,7 +554,7 @@ end
 -- path: a string used to generate unique names
 local function getPredicateSet(scope, assignments, path, skip)
 	assertis(scope, listType "Action")
-	assertis(assignments, mapType("string", recordType{
+	assertis(assignments, mapType("string", recordType {
 		value = "Assertion",
 		definition = "VariableIR",
 	}))
@@ -574,6 +578,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 			local t = action.destination.type
 
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
+
 			--	.. "'" .. verifyTheory:canonKey(action.value):gsub("[^a-zA-Z0-9]+", "_")
 			local newVariable = freeze {
 				type = action.destination.type,
@@ -581,7 +586,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 				name = newID,
 			}
 			local newV = variableAssertion(newVariable)
-			
+
 			-- Record the value of this new assignment at this time
 			profile.open("inNow")
 			local current = inNow(action.value)
@@ -612,13 +617,18 @@ local function getPredicateSet(scope, assignments, path, skip)
 				profile.close("setup branch")
 
 				profile.open("recursive getPredicateSet")
-				local branchPredicates = getPredicateSet(branch.scope, branchAssignments, path .. "'" .. bi)
+				local branchPredicates = getPredicateSet(
+					branch.scope,
+					branchAssignments,
+					path .. "'" .. bi
+				)
 				for _, p in ipairs(branchPredicates) do
 					table.insert(predicates, impliesAssertion(condition, p))
 				end
 				profile.close("recursive getPredicateSet")
 
 				profile.open("merge")
+
 				-- Capture modified variables into a select operation
 				for variable, newValue in pairs(branchAssignments) do
 					local oldValue = assignments[variable]
@@ -627,9 +637,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 					elseif newValue.value ~= oldValue.value then
 						-- Create new dummy variable
 						local id = "merged'" .. variable .. "'" .. path .. "'" .. i
-						local merged = variableAssertion(
-							table.with(newValue.definition, "name", id)
-						)
+						local merged = variableAssertion(table.with(newValue.definition, "name", id))
 						assignments[variable] = freeze {
 							value = merged,
 							definition = newValue.definition,
@@ -673,15 +681,16 @@ local function mustModel(scope, target)
 
 	assertis(target, "Assertion")
 	local result = inNow(target)
+
 	--print("=?=> " .. verifyTheory:canonKey(result))
 	local tautology, counter = smt.implies(verifyTheory, predicates, result)
+
 	--print("<-", tautology)
 
 	if not tautology then
 		local explanation = {}
 		for assertion, truth in pairs(counter) do
-			local shown = assertionExprString(assertion)
-			.. "\n\t\t" .. verifyTheory:canonKey(assertion)
+			local shown = assertionExprString(assertion) .. "\n\t\t" .. verifyTheory:canonKey(assertion)
 			table.insert(explanation, {expression = shown, truth = truth})
 		end
 		return false, explanation
@@ -867,7 +876,9 @@ local function verifyStatement(statement, scope, semantics)
 	assertis(semantics, "Semantics")
 
 	local allDefinitions = table.concatted(
-		semantics.classes, semantics.interfaces, semantics.unions
+		semantics.classes,
+		semantics.interfaces,
+		semantics.unions
 	)
 	allDefinitions = freeze(allDefinitions)
 
@@ -878,6 +889,7 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "verify" then
 		profile.open("verifyStatement verify " .. statement.reason)
+
 		-- Check that this variable is true in the current scope
 		local models, counter = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
@@ -1001,7 +1013,7 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "match" then
 		local branches = {}
-	
+
 		-- Check each case
 		assert(#statement.cases > 0)
 		local posts = {}
@@ -1021,7 +1033,7 @@ local function verifyStatement(statement, scope, semantics)
 			-- Add variant predicate
 			addPredicate(subscope, condition)
 			verifyStatement(case.statement, subscope, semantics)
-			
+
 			if case.statement.returns ~= "yes" then
 				table.insert(branches, {
 					scope = subscope,
@@ -1053,7 +1065,11 @@ local function verifyStatement(statement, scope, semantics)
 		local conditionAssertion = variableAssertion(statement.condition)
 
 		-- Capture the truth value of the condition at evaluation time
-		local snappedCondition = addSnapshot(scope, conditionAssertion, statement.condition.location)
+		local snappedCondition = addSnapshot(
+			scope,
+			conditionAssertion,
+			statement.condition.location
+		)
 
 		local posts = {}
 
@@ -1071,10 +1087,7 @@ local function verifyStatement(statement, scope, semantics)
 		local branches = {}
 		if statement.bodyThen.returns ~= "yes" then
 			local newThen = scopeAdditional(scope, thenScope)
-			table.insert(branches, {
-				scope = newThen,
-				condition = conditionAssertion
-			})
+			table.insert(branches, {scope = newThen, condition = conditionAssertion})
 		else
 			-- Learn the cut; may assume not(condition)
 			table.insert(posts, notAssertion(snappedCondition))
@@ -1084,7 +1097,7 @@ local function verifyStatement(statement, scope, semantics)
 			local newElse = scopeAdditional(scope, elseScope)
 			table.insert(branches, {
 				scope = newElse,
-				condition = notAssertion(conditionAssertion)
+				condition = notAssertion(conditionAssertion),
 			})
 		else
 			-- Learn the cut; may assume condition
@@ -1120,13 +1133,12 @@ local function verifyStatement(statement, scope, semantics)
 		profile.close "verifyStatement proof"
 		return
 	elseif statement.tag == "forall" then
-
 		local subscopePrime = scopeCopy(scope)
-		
+
 		-- RETURNS background assertions, result value, VariableIR made from name
 		local function instantiate(self, name)
 			assertis(name, "string")
-			
+
 			-- Get an arbitrary instantiation
 			local arbitrary = freeze {
 				name = name,
@@ -1134,11 +1146,11 @@ local function verifyStatement(statement, scope, semantics)
 				location = statement.location,
 			}
 			assertis(arbitrary, "VariableIR")
-			
+
 			local subscope = scopeCopy(subscopePrime)
 			local inCode, inOut = statement.instantiate(arbitrary)
 			verifyStatement(inCode, subscope, semantics)
-			
+
 			-- Discover the newly learned facts in this hypothetical
 			local learnedPredicates, inNow = getPredicateSet(subscope, {}, "", #subscopePrime)
 

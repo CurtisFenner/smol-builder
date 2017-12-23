@@ -2,7 +2,10 @@ out.last
 output.lua
 output.c
 *.exe
+bin
 *.stackdump
 
 smolc.sh
 smolc.bat
+
+luafmt.lua

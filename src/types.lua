@@ -88,9 +88,10 @@ end
 
 -- Redefine `pairs` to use `__pairs` metamethod
 function pairs(object)
-	assert(isobject(object),
-		"object must be reference type in pairs();"
-		.. "\ngot `" .. type(object) .. "`")
+	assert(
+		isobject(object),
+		"object must be reference type in pairs();" .. "\ngot `" .. type(object) .. "`"
+	)
 
 	local metatable = getmetatable(object)
 	if metatable and metatable.__pairs then
@@ -101,10 +102,10 @@ end
 
 -- Redefine `ipairs` to respect `__index` metamethod
 local function ipairsIterator(list, i)
-	if list[i+1] == nil then
+	if list[i + 1] == nil then
 		return nil
 	end
-	return i+1, list[i+1]
+	return i + 1, list[i + 1]
 end
 
 function ipairs(list)
@@ -135,7 +136,7 @@ end
 
 -- RETURNS whether or not instance is a Lua number that is integral
 function isinteger(instance)
-	return type(instance) == "number" and instance%1 == 0
+	return type(instance) == "number" and instance % 1 == 0
 end
 
 -- RETURNS whether or not instance is a Lua function
@@ -178,8 +179,7 @@ function memoized(count, f)
 
 	local memoizedF = function(...)
 		local arguments = {...}
-		assert(arguments[count+1] == nil,
-			"memoized function given too many arguments!")
+		assert(arguments[count + 1] == nil, "memoized function given too many arguments!")
 
 		-- Check that the arguments are immutable
 		for i = 1, count do
@@ -190,7 +190,7 @@ function memoized(count, f)
 
 		-- Search for the arguments in the cache
 		local c = cache
-		for i = 1, count-1 do
+		for i = 1, count - 1 do
 			if c[arguments[i]] == nil then
 				c[arguments[i]] = table.weak()
 			end
@@ -217,6 +217,7 @@ end
 --------------------------------------------------------------------------------
 
 local traces = {}
+
 -- RETURNS an immutable copy of `object` that errors when a non-existent key
 -- is read.
 -- REQUIRES all components are immutable, including functions
@@ -236,32 +237,30 @@ function freeze(object)
 		if object[key] == nil then
 			local available = {}
 			for key, value in pairs(object) do
-				table.insert(available,
-					tostring(key) .. "=" .. tostring(value))
+				table.insert(available, tostring(key) .. "=" .. tostring(value))
 			end
 
 			if type(key) == "number" then
 				-- XXX: allow reading one past end of arrays
-				local previous = object[key-1]
+				local previous = object[key - 1]
 				if previous ~= nil or key == 1 then
 					return nil
 				end
 			end
-			error("frozen object has no field `"
-				.. tostring(key) .. "`: available `"
-				.. show(object) .. "`\nFrozen at " .. traces[_], 2)
+			error(
+				"frozen object has no field `" .. tostring(key) .. "`: available `" .. show(object),
+				2
+			)
 		end
 
 		-- Recursively freeze and cache
 		if mem[key] == nil then
 			mem[key] = freeze(object[key])
-			--print("freeze subkey", key, "on", object, "freezing", object[key], "into", mem[key])
 		end
 		return mem[key]
 	end
 	metatable.__newindex = function(_, key)
-		error("cannot write to field `"
-			.. tostring(key) .. "` on frozen object", 2)
+		error("cannot write to field `" .. tostring(key) .. "` on frozen object", 2)
 	end
 	metatable.__pairs = function()
 		return function(o, ...)
@@ -289,8 +288,7 @@ local _TYPE_SPEC_BY_NAME = {}
 -- RETURNS nothing
 function REGISTER_TYPE(name, t)
 	assert(isstring(name), "name must be a string")
-	assert(not _TYPE_SPEC_BY_NAME[name],
-		"Type `" .. name .. "` has already been defined")
+	assert(not _TYPE_SPEC_BY_NAME[name], "Type `" .. name .. "` has already been defined")
 	assert(isobject(t), "type description must be an object")
 
 	local function describe()
@@ -372,8 +370,10 @@ local function _assertis(value, t)
 		else
 			reason = "<no reason from " .. tostring(t) .. ">"
 		end
-		error("value must be a `" .. TYPE_DESCRIPTION(t) .. "`."
-			.. "\nHowever it is not: " .. reason .. "\n" .. show(value), 2)
+		error(
+			"value must be a `" .. TYPE_DESCRIPTION(t) .. "`." .. "\nHowever it is not: " .. reason .. "\n" .. show(value),
+			2
+		)
 	end
 
 	return true
@@ -381,6 +381,7 @@ end
 _assertis = memoized(2, _assertis)
 
 local normalizedT = {}
+
 -- ASSERTS that `value` is of the specified type `t`
 function assertis(value, t)
 	--do return true end
@@ -401,7 +402,9 @@ function constantType(value)
 		predicate = function(object)
 			return object == value, "value must be `" .. show(value) .. "`"
 		end,
-		describe = function() return show(value) end,
+		describe = function()
+			return show(value)
+		end,
 	}
 end
 constantType = memoized(1, constantType)
@@ -416,8 +419,11 @@ function recordType(record)
 		table.insert(keys, {key = key, value = value})
 		assert(isstring(key), "record key must be string")
 	end
-	table.sort(keys, function(a, b) return a.key < b.key end)
+	table.sort(keys, function(a, b)
+		return a.key < b.key
+	end)
 	local recordID = ""
+
 	-- XXX: show() isn't necessary injective!!!
 	for _, kv in ipairs(keys) do
 		recordID = recordID .. show(kv.key) .. " => " .. show(kv.value) .. "; "
@@ -479,8 +485,8 @@ function listType(elementType)
 		for key, value in pairs(object) do
 			if not isinteger(key) then
 				return false, "value has non-integer key " .. show(key)
-			elseif key ~= 1 and object[key-1] == nil then
-				return false, "value is missing key " .. show(key-1)
+			elseif key ~= 1 and object[key - 1] == nil then
+				return false, "value is missing key " .. show(key - 1)
 			end
 
 			local predicate = TYPE_PREDICATE(elementType)
@@ -516,7 +522,7 @@ function mapType(from, to)
 		if not isobject(object) then
 			return false, "value is not an object (for map type)"
 		end
-	
+
 		for key, value in pairs(object) do
 			local okay, reason = from(key)
 			if not okay then
@@ -525,8 +531,7 @@ function mapType(from, to)
 
 			local okay, reason = to(value)
 			if not okay then
-				return false,
-					reason .. " for value at key `" .. tostring(key) .. "`"
+				return false, reason .. " for value at key `" .. tostring(key) .. "`"
 			end
 		end
 
@@ -621,9 +626,8 @@ function predicateType(f)
 		if okay then
 			return true
 		end
-		
-		return false, "value does not satisfy predicate from line "
-			.. debug.getinfo(f).linedefined
+
+		return false, "value does not satisfy predicate from line " .. debug.getinfo(f).linedefined
 	end
 
 	return freeze {predicate = predicate, describe = describe}
@@ -650,7 +654,7 @@ function tupleType(...)
 		if #value ~= #ts then
 			return false, "value does not have length " .. #ts
 		end
-		
+
 		for i = 1, #ts do
 			local okay, reason = TYPE_PREDICATE(ts[i])(value[i])
 			if not okay then
@@ -684,7 +688,9 @@ REGISTER_TYPE("boolean", predicateType(isboolean))
 REGISTER_TYPE("false", constantType(false))
 REGISTER_TYPE("true", constantType(true))
 REGISTER_TYPE("nil", constantType(nil))
-REGISTER_TYPE("any", predicateType(function() return true end))
+REGISTER_TYPE("any", predicateType(function()
+	return true
+end))
 
 --------------------------------------------------------------------------------
 
