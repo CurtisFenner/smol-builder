@@ -55,7 +55,7 @@ REGISTER_TYPE("MethodAssertion", recordType {
 	tag = constantType "method",
 	base = "Assertion",
 	arguments = listType "Assertion",
-	signature = choiceType("Signature", "Signature"),
+	signature = "Signature",
 	index = "integer",
 
 	-- XXX: delete this

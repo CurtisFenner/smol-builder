@@ -752,11 +752,6 @@ function theory:breakup(assertion, target)
 
 	if assertion.tag == "method" then
 		local signature = assertion.signature
-
-		if signature == false then
-			return false
-		end
-
 		assertis(signature, "Signature")
 
 		local logic = signature.logic
