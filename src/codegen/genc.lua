@@ -384,7 +384,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("}")
 		return
 	elseif statement.tag == "static-call" then
-		comment("... = " .. showType(statement.baseType) .. "." .. statement.staticName .. "(...);")
+		comment("... = " .. showType(statement.baseType) .. "." .. statement.signature.name .. "(...);")
 		-- Collect value arguments
 		local argumentNames = {}
 		for _, argument in ipairs(statement.arguments) do
@@ -401,14 +401,14 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 
 		-- Emit code
-		local invocation = staticFunctionName(statement.staticName, statement.baseType.name)
+		local invocation = staticFunctionName(statement.signature.name, statement.baseType.name)
 		local arguments = table.concat(argumentNames, ", ")
 
 		local class = table.findwith(semantics.classes, "name", statement.baseType.name)
 		local union = table.findwith(semantics.unions, "name", statement.baseType.name)
 		local definition = class or union
 		assert(definition)
-		local signature = table.findwith(definition.signatures, "name", statement.staticName)
+		local signature = table.findwith(definition.signatures, "name", statement.signature.name)
 		assert(signature)
 
 		local types = {}
@@ -426,7 +426,8 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 		return
 	elseif statement.tag == "method-call" then
-		comment("... = " .. statement.baseInstance.name .. "." .. statement.methodName .. "(...);")
+		local nameOfMethod = statement.signature.name
+		comment("... = " .. statement.baseInstance.name .. "." .. nameOfMethod .. "(...);")
 
 		-- Collect C arguments
 		local argumentNames = {}
@@ -447,7 +448,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local builtin = table.findwith(semantics.builtins, "name", baseName)
 		local definition = class or union or builtin
 		assert(definition)
-		local signature = table.findwith(definition.signatures, "name", statement.methodName)
+		local signature = table.findwith(definition.signatures, "name", nameOfMethod)
 		assert(signature)
 
 		-- Get the C return-type of the function (which may not be the same
@@ -460,7 +461,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local tmp = "tmp" .. UID()
 
 		local tuple = preTupleName(destinationTypes)
-		local invocation = methodFunctionName(statement.methodName, baseName) .. "(" .. arguments .. ")"
+		local invocation = methodFunctionName(nameOfMethod, baseName) .. "(" .. arguments .. ")"
 		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
 		for i, destination in ipairs(statement.destinations) do
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
@@ -472,7 +473,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("\t" .. localName(statement.base.name) .. "->" .. classFieldName(statement.name) .. ";")
 		return
 	elseif statement.tag == "generic-static-call" then
-		comment("... = " .. "... ." .. statement.staticName .. "(...);")
+		comment("... = " .. "... ." .. statement.signature.name .. "(...);")
 
 		-- Collect explicit arguments
 		local argumentValues = {}
@@ -488,7 +489,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
 		assert(interface)
-		local signature = table.findwith(interface.signatures, "name", statement.staticName)
+		local signature = table.findwith(interface.signatures, "name", statement.signature.name)
 		assert(signature)
 
 		local destinationTypes = {}
@@ -498,7 +499,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local tuple = preTupleName(destinationTypes)
 
 		local constraint = cConstraint(statement.constraint, semantics)
-		local member = interfaceMember(statement.staticName)
+		local member = interfaceMember(statement.signature.name)
 		local invocation = "CLOSURE_CALL(" .. constraint .. "->" .. member .. ", " .. arguments .. ")"
 		local tmp = "tmp" .. UID()
 		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
@@ -509,7 +510,8 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 		return
 	elseif statement.tag == "generic-method-call" then
-		comment("... = " .. statement.baseInstance.name .. "." .. statement.methodName .. "(...);")
+		local nameOfMethod = statement.signature.name
+		comment("... = " .. statement.baseInstance.name .. "." .. nameOfMethod .. "(...);")
 		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 
 		-- Collect the arguments
@@ -527,12 +529,12 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
 		assert(interface)
-		local signature = table.findwith(interface.signatures, "name", statement.methodName)
+		local signature = table.findwith(interface.signatures, "name", nameOfMethod)
 		assert(signature)
 
 		local tmp = "_tmp" .. UID()
 		local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-		emit(outType .. " " .. tmp .. " = CLOSURE_CALL(" .. cConstraint(statement.constraint, semantics) .. "->" .. interfaceMember(statement.methodName) .. ", " .. arguments .. ");")
+		emit(outType .. " " .. tmp .. " = CLOSURE_CALL(" .. cConstraint(statement.constraint, semantics) .. "->" .. interfaceMember(nameOfMethod) .. ", " .. arguments .. ");")
 		for i, destination in ipairs(statement.destinations) do
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
 		end

@@ -56,7 +56,11 @@ local function showAdd(object, indent, out)
 			table.insert(line, "\n" .. string.rep("\t", indent) .. "\t[")
 			showAdd(key, indent + 1, line)
 			table.insert(line, "] = ")
-			showAdd(value, indent + 1, line)
+			if rawequal(key, "location") then
+				table.insert(line, "<location>")
+			else
+				showAdd(value, indent + 1, line)
+			end
 			table.insert(line, ",")
 			table.insert(internal, table.concat(line))
 		end

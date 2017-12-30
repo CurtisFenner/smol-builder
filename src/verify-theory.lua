@@ -32,7 +32,6 @@ local function notAssertion(a)
 
 	return freeze {
 		tag = "method",
-		methodName = "not",
 		base = a,
 		arguments = {},
 
@@ -49,7 +48,6 @@ local function eqAssertion(a, b, t)
 
 	local p = freeze {
 		tag = "method",
-		methodName = "eq",
 		base = a,
 		arguments = {b},
 		signature = makeEqSignature(t),
@@ -104,14 +102,14 @@ local function showAssertion(assertion)
 			table.insert(arguments, showAssertion(v))
 		end
 		arguments = table.concat(arguments, " ")
-		return "(method " .. assertion.staticName .. " " .. assertion.base .. " [" .. arguments .. "])"
+		return "(method " .. assertion.signature.name .. " " .. assertion.base .. " [" .. arguments .. "])"
 	elseif assertion.tag == "method" then
 		local arguments = {}
 		for _, v in ipairs(assertion.arguments) do
 			table.insert(arguments, showAssertion(v))
 		end
 		arguments = table.concat(arguments, " ")
-		return "(method " .. assertion.methodName .. " " .. showAssertion(assertion.base) .. " [" .. arguments .. "])"
+		return "(method " .. assertion.signature.name .. " " .. showAssertion(assertion.base) .. " [" .. arguments .. "])"
 	elseif assertion.tag == "int" then
 		return "(int " .. tostring(assertion.value) .. ")"
 	elseif assertion.tag == "boolean" then
@@ -168,7 +166,7 @@ local function evaluateConstantAssertion(e, lowerConstant)
 		return e.value
 	elseif e.tag == "method" then
 		local signature = e.signature
-		if e.methodName == "eq" and #e.arguments == 1 then
+		if e.signature.name == "eq" and #e.arguments == 1 then
 			if showAssertion(e.base) == showAssertion(e.arguments[1]) then
 				return true
 			end
@@ -257,7 +255,6 @@ function m_scan(self, object)
 		local canon = freeze {
 			tag = "static",
 			base = object.base,
-			staticName = object.staticName,
 			arguments = scanned(self, object.arguments),
 			signature = object.signature,
 			index = object.index,
@@ -270,7 +267,6 @@ function m_scan(self, object)
 		local canon = freeze {
 			tag = "method",
 			base = self:scan(object.base),
-			methodName = object.methodName,
 			arguments = scanned(self, object.arguments),
 			signature = object.signature,
 			index = object.index,
@@ -413,9 +409,9 @@ end
 local function approximateStructure(x)
 	assertis(x, "Assertion")
 	if x.tag == "method" then
-		return "method-" .. x.methodName
+		return "method-" .. x.signature.name
 	elseif x.tag == "static" then
-		return "static-" .. x.staticName
+		return "static-" .. x.signature.name
 	elseif x.tag == "field" then
 		return "field-" .. x.fieldName
 	else
@@ -470,7 +466,7 @@ function theory:isSatisfiable(modelInput)
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
 	for assertion, truth in pairs(simple) do
-		if assertion.tag == "method" and assertion.methodName == "eq" then
+		if assertion.tag == "method" and assertion.signature.name == "eq" then
 			assert(#assertion.arguments == 1)
 			local left = canon:scan(assertion.base)
 			local right = canon:scan(assertion.arguments[1])
@@ -572,7 +568,7 @@ function theory:isSatisfiable(modelInput)
 			-- cannot be shown to be equal here
 			return false
 		elseif x.tag == "method" then
-			if x.methodName ~= y.methodName then
+			if x.signature.name ~= y.signature.name then
 				return false
 			elseif not eq:query(x.base, y.base) then
 				return false
@@ -585,7 +581,7 @@ function theory:isSatisfiable(modelInput)
 			end
 			return true
 		elseif x.tag == "static" then
-			if x.staticName ~= y.staticName then
+			if x.signature.name ~= y.signature.name then
 				return false
 			end
 			assert(#x.arguments == #y.arguments)

@@ -1,0 +1,18 @@
+package test;
+
+class Test {
+
+	static opaque() Boolean {
+		return false;
+	}
+
+	static main() Unit {
+
+		if Test.opaque() {
+			do unit;
+			assert Test.opaque();
+		}
+
+		assert Test.opaque();
+	}
+}

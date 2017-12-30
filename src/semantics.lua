@@ -835,7 +835,6 @@ local function closedUnionAssumption(union, var)
 			tag = "method-call",
 			destinations = {any},
 			baseInstance = any,
-			methodName = "or",
 			arguments = {ises[i]},
 			signature = OR_SIGNATURE,
 			returns = "no",
@@ -864,7 +863,6 @@ local function closedUnionAssumption(union, var)
 					baseInstance = va,
 					arguments = {vb},
 					destinations = {both},
-					methodName = "and",
 					signature = AND_SIGNATURE,
 					returns = "no",
 				})
@@ -879,7 +877,6 @@ local function closedUnionAssumption(union, var)
 					baseInstance = both,
 					arguments = {},
 					destinations = {bothNot},
-					methodName = "not",
 					signature = NOT_SIGNATURE,
 					returns = "no",
 				})
@@ -1212,7 +1209,6 @@ function compileExpression(pExpression, scope, environment)
 			local callSt = {
 				tag = "generic-static-call",
 				constraint = static.constraintIR,
-				staticName = pExpression.funcName,
 				arguments = argumentSources,
 				destinations = destinations,
 				returns = "no",
@@ -1348,7 +1344,6 @@ function compileExpression(pExpression, scope, environment)
 		local call = {
 			tag = "static-call",
 			baseType = t,
-			staticName = method.name,
 			arguments = argumentSources,
 			constraints = constraints,
 			destinations = outs,
@@ -1513,7 +1508,6 @@ function compileExpression(pExpression, scope, environment)
 				tag = "generic-method-call",
 				baseInstance = baseInstance,
 				constraint = method.constraintIR,
-				methodName = pExpression.methodName,
 				arguments = arguments,
 				destinations = destinations,
 				returns = "no",
@@ -1646,7 +1640,6 @@ function compileExpression(pExpression, scope, environment)
 		table.insert(evaluation, {
 			tag = "method-call",
 			baseInstance = baseInstance,
-			methodName = method.name,
 			arguments = arguments,
 			destinations = destinations,
 			returns = "no",
@@ -1899,8 +1892,8 @@ function compileExpression(pExpression, scope, environment)
 			end
 		end
 
-		local methodName = OPERATOR_ALIAS[pExpression.operator]
-		if not methodName then
+		local operatorAsMethodName = OPERATOR_ALIAS[pExpression.operator]
+		if not operatorAsMethodName then
 			return Report.UNKNOWN_OPERATOR_USED {
 				operator = pExpression.operator,
 				location = pExpression.location,
@@ -1913,7 +1906,7 @@ function compileExpression(pExpression, scope, environment)
 			base = pExpression.left,
 			bang = false,
 			arguments = {pExpression.right},
-			methodName = methodName,
+			methodName = operatorAsMethodName,
 			location = pExpression.location,
 		}
 
@@ -3369,7 +3362,6 @@ local function semanticsSmol(sources, main)
 						table.insert(seq, {
 							tag = "method-call",
 							baseInstance = isBad,
-							methodName = "not",
 							arguments = {},
 							destinations = {isNotBad},
 							signature = NOT_SIGNATURE,

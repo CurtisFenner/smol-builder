@@ -55,9 +55,11 @@ REGISTER_TYPE("MethodAssertion", recordType {
 	tag = constantType "method",
 	base = "Assertion",
 	arguments = listType "Assertion",
-	methodName = "string",
 	signature = choiceType("Signature", "Signature"),
 	index = "integer",
+
+	-- XXX: delete this
+	methodName = "nil",
 })
 
 REGISTER_TYPE("FieldAssertion", recordType {
@@ -93,9 +95,11 @@ REGISTER_TYPE("Assertion", choiceType(
 		tag = constantType "static",
 		base = "string",
 		arguments = listType "Assertion",
-		staticName = "string",
 		signature = "Signature",
 		index = "integer",
+
+		-- XXX: delete this
+		staticName = "nil",
 	},
 	recordType {
 		tag = constantType "variable",
@@ -177,7 +181,7 @@ local function assertionExprString(a, grouped)
 		-- Search for aliasing operator
 		local hit = false
 		for key, v in pairs(provided.OPERATOR_ALIAS) do
-			if v == a.methodName then
+			if v == a.signature.name then
 				hit = key
 			end
 		end
@@ -190,13 +194,13 @@ local function assertionExprString(a, grouped)
 			return inner
 		end
 
-		return base .. "." .. a.methodName .. "(" .. table.concat(arguments, ", ") .. ")"
+		return base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
 	elseif a.tag == "static" then
 		local arguments = {}
 		for _, v in ipairs(a.arguments) do
 			table.insert(arguments, assertionExprString(v))
 		end
-		return a.base .. "." .. a.staticName .. "(" .. table.concat(arguments, ", ") .. ")"
+		return a.base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
 	elseif a.tag == "variable" then
 		if not a.variable.name:find("['_]") then
 			return a.variable.name
@@ -238,7 +242,6 @@ local function andAssertion(a, b)
 
 	local p = freeze {
 		tag = "method",
-		methodName = "and",
 		base = a,
 		arguments = {b},
 		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "and"),
@@ -260,7 +263,6 @@ local function impliesAssertion(a, b)
 
 	local p = freeze {
 		tag = "method",
-		methodName = "implies",
 		base = a,
 		arguments = {b},
 		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "implies"),
@@ -378,17 +380,17 @@ local function showStatement(statement, indent)
 	elseif statement.tag == "method-call" then
 		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		local rhs = statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
+		local rhs = statement.baseInstance.name .. "." .. statement.signature.name .. "(" .. arguments .. ")"
 		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "static-call" then
 		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		local rhs = showType(statement.baseType) .. "." .. statement.staticName .. "(" .. arguments .. ")"
+		local rhs = showType(statement.baseType) .. "." .. statement.signature.name .. "(" .. arguments .. ")"
 		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "generic-method-call" then
 		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		local rhs = statement.baseInstance.name .. "." .. statement.methodName .. "(" .. arguments .. ")"
+		local rhs = statement.baseInstance.name .. "." .. statement.signature.name .. "(" .. arguments .. ")"
 		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "return" then
 		local out = {}
@@ -729,7 +731,6 @@ local function resultAssertion(statement, index)
 		return freeze {
 			tag = "method",
 			base = variableAssertion(statement.baseInstance),
-			methodName = statement.methodName,
 			arguments = table.map(variableAssertion, statement.arguments),
 
 			signature = statement.signature,
@@ -747,7 +748,6 @@ local function resultAssertion(statement, index)
 		return freeze {
 			tag = "static",
 			base = base,
-			staticName = statement.staticName,
 			arguments = table.map(variableAssertion, statement.arguments),
 			signature = statement.signature,
 			index = index,

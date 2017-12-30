@@ -1432,39 +1432,47 @@ EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
-	staticName = "string",
 	signature = "Signature",
+
+	-- XXX: delete this
+	staticName = "nil",
 })
 
 EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "method-call",
 	baseInstance = "VariableIR",
-	methodName = "string",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	signature = "Signature",
+
+	-- XXX: delete
+	methodName = "nil",
 })
 
 EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "generic-method-call",
 	baseInstance = "VariableIR",
 	constraint = "ConstraintIR",
-	methodName = "string",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	signature = "Signature",
+
+	-- XXX: delete this
+	methodName = "nil",
 })
 
 EXTEND_TYPE("GenericStaticCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "generic-static-call",
 	constraint = "ConstraintIR",
-	staticName = "string",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	signature = "Signature",
+	
+	-- XXX: delete this
+	staticName = "nil",
 })
 
 EXTEND_TYPE("BooleanLoadSt", "AbstractStatementIR", recordType {
