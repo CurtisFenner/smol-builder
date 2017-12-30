@@ -1,0 +1,27 @@
+package test;
+
+class A {
+	static f(n Int) Int {
+		return 3;
+	}
+}
+
+class B {
+	static f(n Int) Int {
+		return 7;
+	}
+}
+
+class Test {
+	static process(n Int) Int {
+		return n;
+	}
+
+	static main() Unit {
+		var a Int = Test.process(1);
+		var b Int = Test.process(2);
+		if a == b {
+			assert A.f(a) == B.f(b);
+		}
+	}
+}

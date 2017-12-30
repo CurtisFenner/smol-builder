@@ -552,6 +552,18 @@ function theory:isSatisfiable(modelInput)
 		table.insert(byStructure[s], x)
 	end
 
+	-- RETURNS true when a and b are the same signature
+	local function isSignatureEqual(a, b)
+		assertis(a, "Signature")
+		assertis(b, "Signature")
+
+		assertis(a.name, "string")
+		assertis(a.container, "string")
+
+		return a.name == b.name and a.container == b.container
+	end
+
+
 	-- RETURNS true when assertions x, y are equivalent due to being
 	-- equal functions of equal arguments 
 	local function childrenSame(x, y)
@@ -568,11 +580,14 @@ function theory:isSatisfiable(modelInput)
 			-- cannot be shown to be equal here
 			return false
 		elseif x.tag == "method" then
-			if x.signature.name ~= y.signature.name then
+			if not isSignatureEqual(x.signature, y.signature) then
 				return false
 			elseif not eq:query(x.base, y.base) then
 				return false
 			end
+
+			-- The same method name on the same base type must be the same
+			-- signature
 			assert(#x.arguments == #y.arguments)
 			for i in ipairs(x.arguments) do
 				if not eq:query(x.arguments[i], y.arguments[i]) then
@@ -581,7 +596,7 @@ function theory:isSatisfiable(modelInput)
 			end
 			return true
 		elseif x.tag == "static" then
-			if x.signature.name ~= y.signature.name then
+			if not isSignatureEqual(x.signature, y.signature) then
 				return false
 			end
 			assert(#x.arguments == #y.arguments)
