@@ -65,7 +65,7 @@ class MinBinaryHeap[#T | #T is core:Orderable[#T], #T is core:Showable] {
 		}
 	}
 
-	method insert!(value #T) MinBinaryHeap[#T] {
+	method insert(value #T) MinBinaryHeap[#T] {
 		var modified core:Array[#T] = this.sequence.append(value);
 		modified = MinBinaryHeap[#T].bubbleUp(modified, modified.size() - 1);
 		return MinBinaryHeap[#T].make(modified);
@@ -104,13 +104,13 @@ class N is core:Orderable[N], core:Showable {
 class Test {
 	static main!() Unit {
 		var heap MinBinaryHeap[N] = MinBinaryHeap[N].makeEmpty();
-		heap = heap.insert!(N.make(70));
-		heap = heap.insert!(N.make(40));
-		heap = heap.insert!(N.make(30));
-		heap = heap.insert!(N.make(60));
-		heap = heap.insert!(N.make(50));
-		heap = heap.insert!(N.make(20));
-		heap = heap.insert!(N.make(10));
+		heap = heap.insert(N.make(70));
+		heap = heap.insert(N.make(40));
+		heap = heap.insert(N.make(30));
+		heap = heap.insert(N.make(60));
+		heap = heap.insert(N.make(50));
+		heap = heap.insert(N.make(20));
+		heap = heap.insert(N.make(10));
 
 		var element N = N.make(1);
 

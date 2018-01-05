@@ -424,6 +424,10 @@ local function showStatement(statement, indent)
 		rhs = table.concat(rhs, ", ")
 		local t = showType(statement.type)
 		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
+	elseif statement.tag == "new-union" then
+		local rhs = statement.field .. " -> " .. statement.value.name
+		local t = showType(statement.type)
+		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
 	else
 		return pre .. " <?>"
 	end

@@ -851,7 +851,7 @@ local function closedUnionAssumption(union, var)
 	-- Generate at-most-one
 	for i, va in ipairs(ises) do
 		for j, vb in ipairs(ises) do
-			if i ~= j then
+			if i < j then
 				local both = {
 					type = BOOLEAN_TYPE,
 					name = generateLocalID("both_variant" .. va.name .. "_" .. vb.name),
