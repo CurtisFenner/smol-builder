@@ -1799,11 +1799,9 @@ profile.close "parsing"
 assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
-print("Beginning semantics")
 profile.open "semantics"
 local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
 profile.close "semantics"
-print("Finished semantics")
 
 profile.open "verify"
 verify(semantics)
