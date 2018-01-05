@@ -1925,17 +1925,10 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- Rewrite the operations as a method call
-		local rewrite = freeze {
-			tag = "method-call",
-			base = pExpression.left,
-			bang = false,
-			arguments = {pExpression.right},
-			methodName = operatorAsMethodName,
-			location = pExpression.location,
-		}
-		
-		local out1, out2 = compileExpression(rewrite, scope, environment)
-		return out1, out2
+		local a, b = compileMethod(
+			left, {right}, operatorAsMethodName, false, pExpression.location, environment
+		)
+		return a, b
 	elseif pExpression.tag == "isa" then
 		local baseEvaluation, baseOut = compileExpression(pExpression.base, scope, environment)
 		if #baseOut ~= 1 then
