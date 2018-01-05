@@ -1,144 +1,65 @@
 package test;
 import core;
 
-class KVPair[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
-	var key #K;
-	var value #V;
-
-	static make(key #K, value #V) KVPair[#K, #V]
-	ensures return.getKey() == key
-	ensures return.getValue() == value {
-		return new(key=key, value=value);
-	}
-
-	method getKey() #K ensures return == this.key {
-		return this.key;
-	}
-
-	method getValue() #V ensures return == this.value {
-		return this.value;
-	}
-
-	method eq(other KVPair[#K, #V]) Boolean {
-		return (this.key == other.key).and(this.value == other.value);
-	}
-}
-
-class KVAdd[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
-	var pair KVPair[#K, #V];
-	var rest Map[#K, #V];
-
-	static make(pair KVPair[#K, #V], rest Map[#K, #V]) KVAdd[#K, #V] {
-		return new(pair = pair, rest = rest);
-	}
-
-	method getRest() Map[#K, #V] {
-		return this.rest;
-	}
-
-	method getPair() KVPair[#K, #V] {
-		return this.pair;
-	}
-
-	method eq(other KVAdd[#K, #V]) Boolean {
-		return (this.pair == other.pair).and(this.rest == other.rest);
-	}
-}
-
-union List[#T | #T is core:Eq[#T]] is core:Eq[List[#T]] {
+union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] is core:Eq[Map[#K, #V]] {
 	var empty Unit;
-	var concatenation core:Pair[#T, List[#T]];
+	var addition core:Pair[core:Pair[#K, #V], Map[#K, #V]];
 
-	static make() List[#T] {
-		return new(empty = unit);
-	}
-	
-	method head() #T
-	requires this is concatenation {
-		return this.concatenation.getLeft();
+	method valid() Boolean {
+		return true;
 	}
 
-	method isEmpty() Boolean
-	ensures return == (this is empty) {
-		return this is empty;
-	}
-
-	method rest() List[#T]
-	requires this is concatenation
-	ensures return == this.concatenation.getRight() {
-		return this.concatenation.getRight();
-	}
-
-	method eq(other List[#T]) Boolean {
-		if this is empty {
-			return other is empty;
-		} elseif other is empty {
-			return false;
-		}
-		return this.concatenation == other.concatenation;
-	}
-}
-
-// Represents a linked-list map
-union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] {
-	var empty Unit;
-	var addition KVAdd[#K, #V];
-
-	static makeEmpty() Map[#K, #V] {
-		return new(empty = unit);
-	}
-
-	method size() Int {
+	// RETURNS true when the maps have the same contents AND structure.
+	// This is because matching is (unfortunately) NOT private.
+	method eq(other Map[#K, #V]) Boolean {
 		match this {
-			case empty empty {
-				return 0;
+			case e1 empty {
+				match other {
+					case e2 empty {
+						return true;
+					}
+					case a2 addition {
+						return false;
+					}
+				}
 			}
-			case add addition {
-				return 1 + add.getRest().size();
+			case a1 addition {
+				match other {
+					case e2 empty {
+						return false;
+					}
+					case a2 addition {
+						return a1 == a2;
+					}
+				}
 			}
 		}
 	}
 
+	// RETURNS an empty map
+	static makeEmpty() Map[#K, #V]
+	ensures return is empty {
+		return new(empty = unit);
+	}
+
+	// RETURNS a map without the key
 	method get(key #K) core:Option[#V]
-	// The key exists
-	ensures (this.addition.getPair().getKey() == key)
-		.implies(return is some)
-		when this is addition
-	// The key is the most recent put
-	ensures (this.addition.getPair().getKey() == key)
-		.implies(return.get() == this.addition.getPair().getValue())
-		when this is addition
+	ensures return is none when this is empty
+	ensures return is some when (this is addition).and(this.addition.getLeft().getLeft() == key)
+	//ensures return == this.addition.getRight().get(key)
+	//when (this is addition).and((this.addition.getLeft().getLeft() == (key)).not())
 	{
 		match this {
-			case empty empty {
-				assert (this is addition).not();
+			case e empty {
 				return core:Option[#V].makeNone();
 			}
-			case add addition {
-				if add.getPair().getKey() == key {
-					var out core:Option[#V] = core:Option[#V].makeSome(add.getPair().getValue());
-					assert out is some;
-					assert this.addition == add;
-					//assert out.get() == add.getPair().getValue();
-					assert out.get() == this.addition.getPair().getValue();
-					return out;
+			case a addition {
+				if a.getLeft().getLeft() == key {
+					return core:Option[#V].makeSome(a.getLeft().getRight());
 				}
-
-				return add.getRest().get(key);
+				return a.getRight().get(key);
 			}
 		}
-	}
-
-	method add(key #K, value #V) Map[#K, #V]
-	ensures return.get(key) is some
-	ensures return.get(key).get() == value {
-		var next KVAdd[#K, #V] = KVAdd[#K, #V].make(KVPair[#K, #V].make(key, value), this);
-		return new(addition = next);
-	}
-
-	method eq(other Map[#K, #V]) Boolean {
-		// Returns the same thing for all gets
-		return true;
 	}
 }
 

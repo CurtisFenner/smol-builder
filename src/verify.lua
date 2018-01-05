@@ -676,18 +676,18 @@ local function mustModel(scope, target)
 	local predicates, inNow = getPredicateSet(scope, {}, "")
 	profile.close "translating-in-scope"
 
-	--print("\n\n\n\n")
-	--for i, p in ipairs(predicates) do
-	--	print("& " .. verifyTheory:canonKey(p))
-	--end
+	print("\n\n\n\n")
+	for i, p in ipairs(predicates) do
+		print("& " .. verifyTheory:canonKey(p))
+	end
 
 	assertis(target, "Assertion")
 	local result = inNow(target)
 
-	--print("=?=> " .. verifyTheory:canonKey(result))
+	print("=?=> " .. verifyTheory:canonKey(result))
 	local tautology, counter = smt.implies(verifyTheory, predicates, result)
 
-	--print("<-", tautology)
+	print("<-", tautology)
 
 	if not tautology then
 		local explanation = {}
@@ -1071,7 +1071,6 @@ local function verifyStatement(statement, scope, semantics)
 			statement.condition.location
 		)
 
-		local posts = {}
 
 		-- Evaluate the then body with condition given
 		local thenScope = scopeCopy(scope)
@@ -1084,6 +1083,7 @@ local function verifyStatement(statement, scope, semantics)
 		verifyStatement(statement.bodyElse, elseScope, semantics)
 
 		-- Learn the disjunction of new statements
+		local posts = {}
 		local branches = {}
 		if statement.bodyThen.returns ~= "yes" then
 			local newThen = scopeAdditional(scope, thenScope)
@@ -1202,8 +1202,8 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	--print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
-	--print(showStatement(func.body))
+	print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
+	print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {}, semantics)
