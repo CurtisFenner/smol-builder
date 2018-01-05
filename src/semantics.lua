@@ -1925,10 +1925,10 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- Rewrite the operations as a method call
-		local a, b = compileMethod(
+		local callEvaluation, callOut = compileMethod(
 			left, {right}, operatorAsMethodName, false, pExpression.location, environment
 		)
-		return a, b
+		return buildBlock {leftEvaluation, rightEvaluation, callEvaluation}, callOut
 	elseif pExpression.tag == "isa" then
 		local baseEvaluation, baseOut = compileExpression(pExpression.base, scope, environment)
 		if #baseOut ~= 1 then
