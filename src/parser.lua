@@ -148,7 +148,7 @@ function parser.composite(components)
 		if #extracts == 1 then
 			local fullLocation = object.location
 			object = object[extracts[1]]
-			if isobject(object) then
+			if isobject(object) and components.location ~= false then
 				object = table.with(object, "location", fullLocation)
 			end
 		end

@@ -658,8 +658,8 @@ end
 -- REQUIRES assertion has already been checked for type and value count
 local function generatePreconditionVerify(assertion, method, invocation, environment, context, checkLocation)
 	assertis(assertion, recordType {
-		when = choiceType(constantType(false), "object"),
-		condition = "object",
+		whens = listType "ASTExpression",
+		condition = "ASTExpression",
 	})
 	assertis(method, "Signature")
 	assertis(invocation, recordType {
@@ -722,8 +722,8 @@ end
 -- REQUIRES assertion has already been checked for type and value count
 local function generatePostconditionAssume(assertion, method, invocation, environment, returnOuts)
 	assertis(assertion, recordType {
-		when = choiceType(constantType(false), "object"),
-		condition = "object",
+		whens = listType "ASTExpression",
+		condition = "ASTExpression",
 	})
 	assertis(method, "Signature")
 	assertis(invocation, recordType {

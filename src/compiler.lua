@@ -866,6 +866,7 @@ local function parseSmol(tokens)
 				"whens",
 				parserOtherwise(parser.optional(parser.composite {
 					tag = "when",
+					location = false,
 					{"_", K_WHEN},
 					{"#when", parser.query "expression,1+", "an expression"},
 				}), {}),
@@ -879,6 +880,7 @@ local function parseSmol(tokens)
 				"whens",
 				parserOtherwise(parser.optional(parser.composite {
 					tag = "when",
+					location = false,
 					{"_", K_WHEN},
 					{"#when", parser.query "expression,1+", "an expression"},
 				}), {}),
