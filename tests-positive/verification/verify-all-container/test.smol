@@ -45,9 +45,9 @@ union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] is core:Eq[Map[#K, #V]]
 	// RETURNS a map without the key
 	method get(key #K) core:Option[#V]
 	ensures return is none when this is empty
-	ensures return is some when (this is addition).and(this.addition.getLeft().getLeft() == key)
-	ensures return == this.addition.getRight().get(key)
-	when (this is addition).and((this.addition.getLeft().getLeft() == (key)).not())
+	ensures return is some when this is addition, this.addition.getLeft().getLeft() == key
+	//ensures return == this.addition.getRight().get(key)
+	//when (this is addition).and((this.addition.getLeft().getLeft() == (key)).not())
 	{
 		match this {
 			case e empty {

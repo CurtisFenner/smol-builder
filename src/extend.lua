@@ -142,3 +142,13 @@ function table.bind(object, f)
 		return f(object, ...)
 	end
 end
+
+local function ripairsit(list, i)
+	if i - 1 >= 1 then
+		return i - 1, list[i - 1]
+	end
+end
+
+function ripairs(list)
+	return ripairsit, list, #list + 1
+end

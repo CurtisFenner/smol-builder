@@ -623,6 +623,37 @@ end
 
 local compileExpression
 
+-- conditionExpression: AST
+-- thenBody: StatementIR
+-- RETURNS StatementIR
+local function compileWhen(conditionExpression, thenBody, scope, subEnvironment)
+	assertis(thenBody, "StatementIR")
+
+	local conditionEval, conditionVars = compileExpression(conditionExpression, scope, subEnvironment)
+	checkSingleBoolean(conditionVars, "when")
+	assert(#conditionVars == 1)
+	assert(areTypesEqual(conditionVars[1].type, BOOLEAN_TYPE))
+
+	local assume = freeze {
+		tag = "assume",
+		variable = conditionVars[1],
+		location = conditionVars[1].location,
+		returns = "no",
+	}
+
+	local guarded = freeze {
+		tag = "if",
+		condition = conditionVars[1],
+		bodyThen = buildBlock {assume, thenBody},
+		bodyElse = buildBlock {},
+		returns = "no",
+	}
+
+	return buildBlock {
+		conditionEval, guarded,
+	}
+end
+
 -- RETURNS a StatementIR
 -- REQUIRES assertion has already been checked for type and value count
 local function generatePreconditionVerify(assertion, method, invocation, environment, context, checkLocation)
@@ -680,32 +711,8 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 	assertis(out, "StatementIR")
 
 	-- Add a guard
-	if assertion.when then
-		local cEval, cVars = compileExpression(assertion.when, scope, subEnvironment)
-
-		checkSingleBoolean(cVars, "when")
-
-		assert(#cVars == 1)
-		assert(areTypesEqual(cVars[1].type, BOOLEAN_TYPE))
-
-		local assume = freeze {
-			tag = "assume",
-			variable = cVars[1],
-			location = cVars[1].location,
-			returns = "no",
-		}
-
-		local guarded = freeze {
-			tag = "if",
-			condition = cVars[1],
-			bodyThen = buildBlock {assume, out},
-			bodyElse = buildBlock {},
-			returns = "no",
-		}
-		return buildProof(buildBlock {
-			cEval,
-			guarded,
-		})
+	for _, when in ripairs(assertion.whens) do
+		out = compileWhen(when, out, scope, subEnvironment)
 	end
 
 	return buildProof(out)
@@ -761,29 +768,8 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 	assertis(out, "StatementIR")
 
 	-- Add a guard
-	if assertion.when then
-		local cEval, cVars = compileExpression(assertion.when, scope, subEnvironment)
-		assert(#cVars == 1)
-		assert(areTypesEqual(cVars[1].type, BOOLEAN_TYPE))
-
-		local assume = freeze {
-			tag = "assume",
-			variable = cVars[1],
-			location = cVars[1].location,
-			returns = "no",
-		}
-
-		local guarded = freeze {
-			tag = "if",
-			condition = cVars[1],
-			bodyThen = buildBlock {assume, out},
-			bodyElse = buildBlock {},
-			returns = "no",
-		}
-		return buildProof(buildBlock {
-			cEval,
-			guarded,
-		})
+	for _, when in ripairs(assertion.whens) do
+		out = compileWhen(when, out, scope, subEnvironment)
 	end
 
 	return buildProof(out)
@@ -2859,12 +2845,12 @@ local function semanticsSmol(sources, main)
 				-- Check that each requires has type Boolean
 				for _, requires in ipairs(signature.requiresAST) do
 					checkBoolean(requires.condition, "requires condition")
-					if requires.when then
-						checkBoolean(requires.when, "requires when condition")
-						if not isExprPure(requires.when) then
+					for _, when in ipairs(requires.whens) do
+						checkBoolean(when, "requires when condition")
+						if not isExprPure(when) then
 							Report.BANG_NOT_ALLOWED {
 								context = "requires-when",
-								location = requires.when.location,
+								location = when.location,
 							}
 						end
 					end
@@ -2879,12 +2865,12 @@ local function semanticsSmol(sources, main)
 				-- Check that each ensures has type Boolean
 				for _, ensures in ipairs(signature.ensuresAST) do
 					checkBoolean(ensures.condition, "ensures condition")
-					if ensures.when then
-						checkBoolean(ensures.when, "ensures when condition")
-						if not isExprPure(ensures.when) then
+					for _, when in ipairs(ensures.whens) do
+						checkBoolean(when, "ensures when condition")
+						if not isExprPure(when) then
 							Report.BANG_NOT_ALLOWED {
 								context = "ensures-when",
-								location = ensures.when.location,
+								location = when.location,
 							}
 						end
 					end

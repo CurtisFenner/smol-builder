@@ -863,12 +863,12 @@ local function parseSmol(tokens)
 			{"_", K_REQUIRES},
 			{"condition", parser.named "expression", "an expression"},
 			{
-				"when",
-				parser.optional(parser.composite {
+				"whens",
+				parserOtherwise(parser.optional(parser.composite {
 					tag = "when",
 					{"_", K_WHEN},
-					{"#when", parser.named "expression", "an expression"},
-				}),
+					{"#when", parser.query "expression,1+", "an expression"},
+				}), {}),
 			},
 		},
 		["ensures"] = parser.composite {
@@ -876,12 +876,12 @@ local function parseSmol(tokens)
 			{"_", K_ENSURES},
 			{"condition", parser.named "expression", "an expression"},
 			{
-				"when",
-				parser.optional(parser.composite {
+				"whens",
+				parserOtherwise(parser.optional(parser.composite {
 					tag = "when",
 					{"_", K_WHEN},
-					{"#when", parser.named "expression", "an expression"},
-				}),
+					{"#when", parser.query "expression,1+", "an expression"},
+				}), {}),
 			},
 		},
 
