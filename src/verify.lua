@@ -680,18 +680,18 @@ local function mustModel(scope, target)
 	local predicates, inNow = getPredicateSet(scope, {}, "")
 	profile.close "translating-in-scope"
 
-	print("\n\n\n\n")
-	for i, p in ipairs(predicates) do
-		print("& " .. verifyTheory:canonKey(p))
-	end
+	--print("\n\n\n\n")
+	--for i, p in ipairs(predicates) do
+	--	print("& " .. verifyTheory:canonKey(p))
+	--end
 
 	assertis(target, "Assertion")
 	local result = inNow(target)
 
-	print("=?=> " .. verifyTheory:canonKey(result))
+	--print("=?=> " .. verifyTheory:canonKey(result))
 	local tautology, counter = smt.implies(verifyTheory, predicates, result)
 
-	print("<-", tautology)
+	--print("<-", tautology)
 
 	if not tautology then
 		local explanation = {}
@@ -897,9 +897,6 @@ local function verifyStatement(statement, scope, semantics)
 		-- Check that this variable is true in the current scope
 		local models, counter = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
-			--print("$ !!!", models)
-			--dumpScope(scope)
-			--print("$ =/=>", verifyTheory:canonKey(variableAssertion(statement.variable)))
 			Report.DOES_NOT_MODEL {
 				reason = statement.reason,
 				conditionLocation = statement.conditionLocation,
@@ -1206,8 +1203,8 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
-	print(showStatement(func.body))
+	--print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
+	--print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {}, semantics)

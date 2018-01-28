@@ -330,19 +330,12 @@ local function implies(theory, givens, expression)
 	table.insert(args, expression)
 	table.insert(truths, false)
 
-	--print("implies()?")
-
 	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
 	profile.close("smt.implies setup")
-
-	--print("~~~~")
-	--print(showCNF(theory, cnf))
-	--print("~~~~")
 
 	profile.open("smt.implies sat")
 	local sat = cnfSAT(theory, cnf, {}, 0)
 
-	--print("(&givens) &!expression got sat", sat)
 	profile.close("smt.implies sat")
 	if sat then
 		return false, sat

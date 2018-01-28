@@ -71,14 +71,11 @@ end
 
 -- RETURNS a string
 local showSkip = {}
-local shows = 0
 local function showAssertion(assertion)
 	if showSkip[assertion] then
 		return showSkip[assertion]
 	end
 
-	--shows = shows + 1
-	--print(shows, "Shows")
 	assertis(assertion, "Assertion")
 	assert(isimmutable(assertion))
 
