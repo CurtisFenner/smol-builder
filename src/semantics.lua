@@ -683,7 +683,6 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 		-- Can be not-false when checking `ensures` at `return` statement
 		returnOuts = environment.returnOuts,
 	}
-	assertis(subEnvironment.containerType, "Type+")
 
 	local scope = {{}}
 	for i, argument in ipairs(invocation.arguments) do
@@ -1083,7 +1082,6 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		}
 	end
 
-	
 	-- Create destinations for each return value
 	local evaluation = {}
 	local destinations = {}
@@ -1139,6 +1137,20 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	return buildBlock(evaluation), freeze(destinations)
 end
 
+-- RETURNS VariableIR, LocalSt
+local function generateVariable(nameHint, type, location)
+	assertis(nameHint, "string")
+	assertis(type, "Type+")
+	assertis(location, "Location")
+	
+	local variable = freeze {
+		name = generateLocalID(nameHint),
+		type = type,
+		location = location,
+	}
+	return variable, localSt(variable)
+end
+
 -- RETURNS StatementIR, [Variable]
 function compileExpression(pExpression, scope, environment)
 	assertis(pExpression, recordType {tag = "string"})
@@ -1158,15 +1170,11 @@ function compileExpression(pExpression, scope, environment)
 	local containingSignature = environment.containingSignature
 
 	if pExpression.tag == "string-literal" then
-		local out = {
-			name = generateLocalID("stringliteral"),
-			type = STRING_TYPE,
-			location = pExpression.location,
-		}
+		local out, outDef = generateVariable("stringliteral", STRING_TYPE, pExpression.location)
 
 		local block = buildBlock {
-			localSt(out),
-			{
+			outDef,
+			freeze {
 				tag = "string",
 				string = pExpression.value,
 				destination = out,
@@ -1175,11 +1183,7 @@ function compileExpression(pExpression, scope, environment)
 		}
 		return block, freeze {out}
 	elseif pExpression.tag == "int-literal" then
-		local out = {
-			name = generateLocalID("intliteral"),
-			type = INT_TYPE,
-			location = pExpression.location,
-		}
+		local out, outDef = generateVariable("intliteral", INT_TYPE, pExpression.location)
 
 		local block = buildBlock {
 			localSt(out),
@@ -1192,11 +1196,7 @@ function compileExpression(pExpression, scope, environment)
 		}
 		return block, freeze {out}
 	elseif pExpression.tag == "new-expression" then
-		local out = {
-			name = generateLocalID("new"),
-			type = containerType,
-			location = pExpression.location
-		}
+		local out = generateVariable("new", containerType, pExpression.location)
 		assertis(out.type, "ConcreteType+")
 
 		local newSt = {
@@ -1316,16 +1316,21 @@ function compileExpression(pExpression, scope, environment)
 		return block, freeze {out}
 	elseif pExpression.tag == "identifier" then
 		local block = buildBlock({})
-		local out = nil
+		local found = nil
 		for i = #scope, 1, -1 do
-			out = out or scope[i][pExpression.name]
+			found = found or scope[i][pExpression.name]
 		end
-		if not out then
+		if not found then
 			Report.NO_SUCH_VARIABLE {
 				name = pExpression.name,
 				location = pExpression.location,
 			}
 		end
+		local out = freeze {
+			name = found.name,
+			type = found.type,
+			location = pExpression.location,
+		}
 		return block, freeze {out}
 	elseif pExpression.tag == "static-call" then
 		local t = resolveType(pExpression.baseType)
@@ -1463,6 +1468,7 @@ function compileExpression(pExpression, scope, environment)
 			assertis(callSt, "StatementIR")
 			table.insert(evaluation, callSt)
 
+			print("TODO: this should be replaced with a forall so that it is not recursive")
 			-- Generate Assume statements
 			for _, ensure in ipairs(static.signature.ensuresAST) do
 				local assumption = generatePostconditionAssume(
@@ -1487,13 +1493,8 @@ function compileExpression(pExpression, scope, environment)
 
 		local method = table.findwith(baseDefinition.signatures, "name", pExpression.funcName)
 
-		local alternatives = table.map(
-			function(x)
-				return x.name
-			end,
-			baseDefinition.signatures
-		)
 		if not method or method.modifier ~= "static" then
+			local alternatives = table.map(table.getter "name", baseDefinition.signatures)
 			Report.NO_SUCH_METHOD {
 				modifier = "static",
 				type = showType(t),
@@ -1651,7 +1652,7 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 
-			table.insert(arguments, table.with(outs[1], "location", pArgument.location))
+			table.insert(arguments, outs[1])
 			table.insert(evaluation, subEvaluation)
 
 			if not isExprPure(pArgument) then
