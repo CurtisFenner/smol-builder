@@ -42,6 +42,32 @@ local function generateLocalID(hint)
 	return "_local" .. indicator .. tostring(idCount) .. "_" .. tostring(hint)
 end
 
+-- RETURNS a LocalSt
+local function localSt(variable)
+	assertis(variable, "VariableIR")
+
+	return freeze {
+		tag = "local",
+		variable = variable,
+		returns = "no",
+	}
+end
+
+-- RETURNS VariableIR, LocalSt
+local function generateVariable(nameHint, type, location)
+	assertis(nameHint, "string")
+	assertis(type, "Type+")
+	assertis(location, "Location")
+	
+	local variable = freeze {
+		name = generateLocalID(nameHint),
+		type = type,
+		location = location,
+		description = false,
+	}
+	return variable, localSt(variable)
+end
+
 -- RETURNS a StatementIR representing the execution of statements in
 -- sequence
 local function buildBlock(statements)
@@ -75,17 +101,6 @@ local function buildProof(statement)
 	return freeze {
 		tag = "proof",
 		body = statement,
-		returns = "no",
-	}
-end
-
--- RETURNS a LocalSt
-local function localSt(variable)
-	assertis(variable, "VariableIR")
-
-	return freeze {
-		tag = "local",
-		variable = variable,
 		returns = "no",
 	}
 end
@@ -781,11 +796,7 @@ local function closedUnionAssumption(union, var)
 	local seq = {}
 	local ises = {}
 	for _, variant in ipairs(union.fields) do
-		local v = {
-			type = BOOLEAN_TYPE,
-			name = generateLocalID("closed_union_is_" .. variant.name),
-			location = var.location,
-		}
+		local v = generateVariable("closed_union_is" .. variant.name, BOOLEAN_TYPE, var.location)
 		table.insert(ises, v)
 		table.insert(seq, localSt(v))
 		table.insert(seq, {
@@ -798,11 +809,7 @@ local function closedUnionAssumption(union, var)
 	end
 
 	-- Generate any (is a or is b or is c ...)
-	local any = freeze {
-		type = BOOLEAN_TYPE,
-		name = generateLocalID("any-closed"),
-		location = var.location,
-	}
+	local any = generateVariable("any-closed", BOOLEAN_TYPE, var.location)
 	table.insert(seq, localSt(any))
 
 	local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "not")
@@ -837,11 +844,8 @@ local function closedUnionAssumption(union, var)
 	for i, va in ipairs(ises) do
 		for j, vb in ipairs(ises) do
 			if i < j then
-				local both = {
-					type = BOOLEAN_TYPE,
-					name = generateLocalID("both_variant" .. va.name .. "_" .. vb.name),
-					location = var.location,
-				}
+				local both = generateVariable("both_variant" .. va.name .. "_" .. vb.name, BOOLEAN_TYPE, var.location)
+				-- TODO: add description to both
 				table.insert(seq, localSt(both))
 				table.insert(seq, {
 					tag = "method-call",
@@ -851,11 +855,8 @@ local function closedUnionAssumption(union, var)
 					signature = AND_SIGNATURE,
 					returns = "no",
 				})
-				local bothNot = {
-					type = BOOLEAN_TYPE,
-					name = generateLocalID("bothNot_variant" .. va.name .. "_" .. vb.name),
-					location = var.location,
-				}
+				-- TODO: add description to bothNot
+				local bothNot = generateVariable("bothNot_variant" .. va.name .. "_" .. vb.name, BOOLEAN_TYPE, var.location)
 				table.insert(seq, localSt(bothNot))
 				table.insert(seq, {
 					tag = "method-call",
@@ -953,11 +954,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		local evaluation = {}
 		local destinations = {}
 		for _, returnType in ipairs(method.signature.returnTypes) do
-			local destination = {
-				name = generateLocalID("gm_return"),
-				type = substituter(returnType),
-				location = location,
-			}
+			local destination = generateVariable("gm_return", substituter(returnType), location)
 			table.insert(destinations, destination)
 			table.insert(evaluation, localSt(destination))
 		end
@@ -1090,6 +1087,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 			name = generateLocalID(method.name .. "_result"),
 			type = substituter(returnType),
 			location = location,
+			description = false,
 		}
 		table.insert(destinations, destination)
 		table.insert(evaluation, localSt(destination))
@@ -1135,20 +1133,6 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	end
 
 	return buildBlock(evaluation), freeze(destinations)
-end
-
--- RETURNS VariableIR, LocalSt
-local function generateVariable(nameHint, type, location)
-	assertis(nameHint, "string")
-	assertis(type, "Type+")
-	assertis(location, "Location")
-	
-	local variable = freeze {
-		name = generateLocalID(nameHint),
-		type = type,
-		location = location,
-	}
-	return variable, localSt(variable)
 end
 
 -- RETURNS StatementIR, [Variable]
@@ -1330,6 +1314,7 @@ function compileExpression(pExpression, scope, environment)
 			name = found.name,
 			type = found.type,
 			location = pExpression.location,
+			description = false,
 		}
 		return block, freeze {out}
 	elseif pExpression.tag == "static-call" then
@@ -1416,12 +1401,7 @@ function compileExpression(pExpression, scope, environment)
 			-- Create variables for the output
 			local destinations = {}
 			for _, returnType in pairs(static.signature.returnTypes) do
-				local returnVariable = {
-					name = generateLocalID("gs_return"),
-					type = substituter(returnType),
-					location = pExpression.location,
-					returns = "no",
-				}
+				local returnVariable = generateVariable("gs_return", substituter(returnType), pExpression.location)
 				table.insert(destinations, returnVariable)
 				table.insert(evaluation, localSt(returnVariable))
 			end
@@ -1566,11 +1546,7 @@ function compileExpression(pExpression, scope, environment)
 		-- Create variables for the output
 		local outs = {}
 		for _, returnType in pairs(method.returnTypes) do
-			local returnVariable = {
-				name = generateLocalID(method.name .. "_result"),
-				type = substituter(returnType),
-				location = pExpression.location,
-			}
+			local returnVariable = generateVariable(method.name .. "_result", substituter(returnType), pExpression.location)
 			table.insert(outs, returnVariable)
 			table.insert(evaluation, localSt(returnVariable))
 		end
@@ -1676,11 +1652,7 @@ function compileExpression(pExpression, scope, environment)
 		return buildBlock {buildBlock(evaluation), call}, out
 	elseif pExpression.tag == "keyword" then
 		if pExpression.keyword == "false" or pExpression.keyword == "true" then
-			local boolean = {
-				type = BOOLEAN_TYPE,
-				name = generateLocalID("booleanliteral"),
-				location = pExpression.location,
-			}
+			local boolean = generateVariable("booleanliteral", BOOLEAN_TYPE, pExpression.location)
 			local execution = {
 				localSt(boolean),
 				{
@@ -1704,11 +1676,7 @@ function compileExpression(pExpression, scope, environment)
 
 			return buildBlock {}, {thisV}
 		elseif pExpression.keyword == "unit" then
-			local variable = {
-				type = UNIT_TYPE,
-				name = generateLocalID("unit"),
-				location = pExpression.location,
-			}
+			local variable = generateVariable("unit", UNIT_TYPE, pExpression.location)
 			local execution = {
 				localSt(variable),
 				{
@@ -1770,11 +1738,7 @@ function compileExpression(pExpression, scope, environment)
 
 			-- TODO: verify that access is to the current class
 
-			local result = {
-				type = substituter(field.type),
-				name = generateLocalID("field"),
-				location = pExpression.location,
-			}
+			local result = generateVariable("field", substituter(field.type), pExpression.location)
 			local accessStatement = {
 				tag = "field",
 				name = pExpression.field,
@@ -1801,11 +1765,7 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 
-			local result = {
-				type = substituter(field.type),
-				name = generateLocalID("variant"),
-				location = pExpression.location,
-			}
+			local result = generateVariable("variant", substituter(field.type), pExpression.location)
 			local access = {
 				tag = "variant",
 				variant = pExpression.field,
@@ -1818,11 +1778,7 @@ function compileExpression(pExpression, scope, environment)
 			-- Assert that the union variable comes from a closed set
 			local assumeUnion = closedUnionAssumption(definition, base)
 
-			local isVar = {
-				type = BOOLEAN_TYPE,
-				name = generateLocalID("variantis"),
-				location = pExpression.location,
-			}
+			local isVar = generateVariable("variantis", BOOLEAN_TYPE, pExpression.location)
 			local isStatement = {
 				tag = "isa",
 				base = base,
@@ -1936,11 +1892,7 @@ function compileExpression(pExpression, scope, environment)
 			}
 		end
 
-		local result = {
-			type = BOOLEAN_TYPE,
-			name = generateLocalID("isa"),
-			location = pExpression.location,
-		}
+		local result = generateVariable("isa", BOOLEAN_TYPE, pExpression.location)
 
 		local isA = freeze {
 			tag = "isa",
@@ -2000,11 +1952,11 @@ function compileExpression(pExpression, scope, environment)
 				environment
 			)
 
-			local instantiatedResult = freeze {
-				type = BOOLEAN_TYPE,
-				name = generateLocalID("forall_result_" .. pExpression.variable.name),
-				location = pExpression.location,
-			}
+			local instantiatedResult = generateVariable(
+				"forall_result_" .. pExpression.variable.name,
+				BOOLEAN_TYPE,
+				pExpression.location
+			)
 
 			-- Check types
 			checkSingleBoolean(predicates, "forall predicate")
@@ -2064,18 +2016,18 @@ function compileExpression(pExpression, scope, environment)
 		-- Generate the code once to verify that it is valid
 		-- (In particular, that preconditions hold!)
 		-- Bring the variable into scope
-		local variable1 = freeze {
-			type = resolveType(pExpression.variable.type),
-			name = generateLocalID(pExpression.variable.name),
-			location = pExpression.variable.location,
-		}
+		local variable1 = generateVariable(
+			pExpression.variable.name,
+			resolveType(pExpression.variable.type),
+			pExpression.variable.location
+		)
 		local testInstantiation = instantiate(variable1)
 
-		local result = freeze {
-			type = BOOLEAN_TYPE,
-			name = generateLocalID("forall_" .. pExpression.variable.name),
-			location = pExpression.location,
-		}
+		local result = generateVariable(
+			"forall_" .. pExpression.variable.name,
+			BOOLEAN_TYPE,
+			pExpression.location
+		)
 
 		local forall = freeze {
 			tag = "forall",
@@ -2403,6 +2355,7 @@ local function semanticsSmol(sources, main)
 							name = p.name,
 							type = resolveType(p.type, scope),
 							location = p.location,
+							description = false,
 						}
 					end,
 					signature.parameters
@@ -2499,10 +2452,11 @@ local function semanticsSmol(sources, main)
 				end
 				memberLocationMap[field.name] = field.location
 
-				table.insert(fields, {
+				table.insert(fields, freeze {
 					name = field.name,
 					type = resolveType(field.type, generics),
 					location = field.location,
+					description = false,
 				})
 			end
 
@@ -2539,6 +2493,9 @@ local function semanticsSmol(sources, main)
 				end
 			end
 
+			assertis(fields, listType "VariableIR")
+			assertis(signatures, listType "Signature")
+
 			return freeze {
 				tag = tag,
 				name = structName,
@@ -2553,7 +2510,7 @@ local function semanticsSmol(sources, main)
 
 		local function compiledInterface(definition)
 			-- Create the fully qualified name
-			local name = package .. ":" .. definition.name
+			local fullName = package .. ":" .. definition.name
 
 			-- Create the generics
 			local generics = compiledGenerics(definition.generics)
@@ -2561,14 +2518,16 @@ local function semanticsSmol(sources, main)
 			local signatures = table.map(
 				function(raw)
 					local compiled = compiledSignature(raw, generics, false)
-					return table.with(compiled, "container", name)
+					return table.with(compiled, "container", fullName)
 				end,
 				definition.signatures
 			)
 
+			assertis(signatures, listType "Signature")
+
 			return freeze {
 				tag = "interface",
-				name = name,
+				name = fullName,
 				generics = generics,
 				signatures = signatures,
 				location = definition.location,
@@ -2815,6 +2774,7 @@ local function semanticsSmol(sources, main)
 						location = UNKNOWN_LOCATION,
 						name = "this",
 						type = containerType,
+						description = "this",
 					}
 				end
 
@@ -2824,6 +2784,7 @@ local function semanticsSmol(sources, main)
 						location = UNKNOWN_LOCATION,
 						name = "_r" .. i,
 						type = returned,
+						description = "return#" .. i,
 					})
 				end
 
@@ -2905,6 +2866,7 @@ local function semanticsSmol(sources, main)
 				name = "this",
 				type = containerType,
 				location = UNKNOWN_LOCATION,
+				description = "this",
 			}
 		end
 		local resolveType = makeTypeResolver(
@@ -2994,6 +2956,7 @@ local function semanticsSmol(sources, main)
 						name = pVariable.name,
 						type = resolveType(pVariable.type),
 						location = pVariable.location,
+						description = false,
 					}
 
 					scope[#scope][variable.name] = variable
@@ -3069,11 +3032,7 @@ local function semanticsSmol(sources, main)
 					sources = subsources
 				elseif #pStatement.values == 0 then
 					-- Returning no values is equivalent to returning one unit
-					local unitVariable = freeze {
-						type = UNIT_TYPE,
-						name = generateLocalID("unit_return"),
-						location = pStatement.location,
-					}
+					local unitVariable = generateVariable("unit_return", UNIT_TYPE, pStatement.location)
 					local execution = buildBlock {
 						localSt(unitVariable),
 						{
@@ -3294,6 +3253,7 @@ local function semanticsSmol(sources, main)
 						name = case.head.variable,
 						type = unionSubstituter(field.type),
 						location = case.head.location,
+						description = false,
 					}
 
 					scope[#scope][variable.name] = variable
@@ -3349,16 +3309,8 @@ local function semanticsSmol(sources, main)
 					}
 
 					for _, variant in ipairs(unhandledVariants) do
-						local isBad = {
-							type = BOOLEAN_TYPE,
-							name = generateLocalID("isBad_" .. variant),
-							location = pStatement.location,
-						}
-						local isNotBad = {
-							type = BOOLEAN_TYPE,
-							name = generateLocalID("isNotBad_" .. variant),
-							location = pStatement.location,
-						}
+						local isBad = generateVariable("isBad_" .. variant, BOOLEAN_TYPE, pStatement.location)
+						local isNotBad = generateVariable("isNotBad_" .. variant, BOOLEAN_TYPE, pStatement.location)
 						table.insert(seq, localSt(isBad))
 						table.insert(seq, localSt(isNotBad))
 						table.insert(seq, {
@@ -3630,11 +3582,8 @@ local function semanticsSmol(sources, main)
 				end
 
 				-- Returning no values is equivalent to returning one unit
-				local unitVariable = freeze {
-					type = UNIT_TYPE,
-					name = generateLocalID("unit_return"),
-					location = containingSignature.body.location,
-				}
+				local unitVariable = generateVariable("unit_return", UNIT_TYPE, containingSignature.body.location)
+				unitVariable = table.with(unitVariable, "description", "unit")
 				local returnSt = {
 					tag = "unit",
 					destination = unitVariable,

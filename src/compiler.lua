@@ -1547,6 +1547,7 @@ REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "Type+",
 	location = "Location",
+	description = choiceType(constantType(false), "string"),
 })
 
 REGISTER_TYPE("ConstraintIR", choiceType(

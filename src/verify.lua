@@ -202,7 +202,7 @@ local function assertionExprString(a, grouped)
 		end
 		return a.base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
 	elseif a.tag == "variable" then
-		if not a.variable.name:find("['_]") then
+		if not a.variable.name:find "['_]" then
 			return a.variable.name
 		end
 		local inner = excerpt(a.variable.location)
@@ -488,6 +488,7 @@ local function uniqueVariable(type, location)
 		location = location,
 		type = type,
 		name = "__unique" .. uniqueNameID,
+		description = false,
 	}
 end
 
@@ -549,6 +550,7 @@ local function addSnapshot(scope, assertion, location)
 		type = typeOfAssertion(assertion),
 		name = name,
 		location = location,
+		description = false,
 	}
 
 	assignRaw(scope, variable, assertion)
@@ -590,6 +592,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 				type = action.destination.type,
 				location = action.destination.location,
 				name = newID,
+				description = action.destination.description,
 			}
 			local newV = variableAssertion(newVariable)
 
@@ -1145,6 +1148,7 @@ local function verifyStatement(statement, scope, semantics)
 				name = name,
 				type = statement.quantified,
 				location = statement.location,
+				description = false,
 			}
 			assertis(arbitrary, "VariableIR")
 

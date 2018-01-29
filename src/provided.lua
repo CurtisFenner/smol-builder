@@ -103,6 +103,15 @@ local BUILTIN_LOC = freeze {
 	ends = "builtin",
 }
 
+local function dummy(name, type)
+	return freeze {
+		name = name,
+		type = type,
+		location = BUILTIN_LOC,
+		description = false,
+	}
+end
+
 local BOOLEAN_DEF = freeze {
 	type = BOOLEAN_TYPE,
 	name = "Boolean",
@@ -110,7 +119,7 @@ local BOOLEAN_DEF = freeze {
 	signatures = {
 		{
 			name = "eq",
-			parameters = {{location = BUILTIN_LOC, name = "other", type = BOOLEAN_TYPE}},
+			parameters = {dummy("other", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
 			container = "Boolean",
@@ -128,7 +137,7 @@ local BOOLEAN_DEF = freeze {
 		},
 		{
 			name = "and",
-			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			parameters = {dummy("right", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
 			container = "Boolean",
@@ -146,7 +155,7 @@ local BOOLEAN_DEF = freeze {
 		},
 		{
 			name = "or",
-			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			parameters = {dummy("right", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
 			container = "Boolean",
@@ -164,7 +173,7 @@ local BOOLEAN_DEF = freeze {
 		},
 		{
 			name = "implies",
-			parameters = {{location = BUILTIN_LOC, name = "right", type = BOOLEAN_TYPE}},
+			parameters = {dummy("right", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
 			container = "Boolean",
@@ -239,7 +248,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "lessThan",
-				parameters = {{location = BUILTIN_LOC, name = "one", type = INT_TYPE}},
+				parameters = {dummy("right", INT_TYPE)},
 				returnTypes = {BOOLEAN_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -254,7 +263,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "eq",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
+				parameters = {dummy("right", INT_TYPE)},
 				returnTypes = {BOOLEAN_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -269,7 +278,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "quotient",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
+				parameters = {dummy("right", INT_TYPE)},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -284,7 +293,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "product",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
+				parameters = {dummy("right", INT_TYPE)},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -299,7 +308,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "sum",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
+				parameters = {dummy("right", INT_TYPE)},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -314,7 +323,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "difference",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = INT_TYPE}},
+				parameters = {dummy("right", INT_TYPE)},
 				returnTypes = {INT_TYPE},
 				modifier = "method",
 				container = "Int",
@@ -336,7 +345,7 @@ local BUILTIN_DEFINITIONS = freeze {
 		signatures = {
 			{
 				name = "concatenate",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = STRING_TYPE}},
+				parameters = {dummy("right", STRING_TYPE)},
 				returnTypes = {STRING_TYPE},
 				modifier = "method",
 				container = "String",
@@ -351,7 +360,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			},
 			{
 				name = "eq",
-				parameters = {{location = BUILTIN_LOC, name = "other", type = STRING_TYPE}},
+				parameters = {dummy("right", STRING_TYPE)},
 				returnTypes = {BOOLEAN_TYPE},
 				modifier = "method",
 				container = "String",
@@ -415,10 +424,7 @@ local function makeEqSignature(t)
 
 	local eqSignature = freeze {
 		name = "eq",
-		parameters = {
-			freeze {name = "left", type = t, location = unknown},
-			freeze {name = "right", type = t, location = unknown}
-		},
+		parameters = {dummy("left", t), dummy("right", t)},
 		returnTypes = {BOOLEAN_TYPE},
 		modifier = "method",
 		container = showType(t),
