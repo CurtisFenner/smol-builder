@@ -116,6 +116,18 @@ function ipairs(list)
 	return ipairsIterator, list, 0
 end
 
+local realUnpack = unpack
+function unpack(object)
+	if type(object) == "userdata" then
+		local asList = {}
+		for i = 1, #object do
+			asList[i] = object[i]
+		end
+		return realUnpack(asList)
+	end
+	return realUnpack(object)
+end
+
 --------------------------------------------------------------------------------
 
 -- RETURNS whether or not instance is a Lua string

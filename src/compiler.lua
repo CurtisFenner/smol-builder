@@ -451,7 +451,6 @@ local function lexSmol(source, filename)
 		end
 	end
 
-	assertis(tokens, listType "Token")
 	return freeze(tokens)
 end
 
@@ -480,6 +479,7 @@ REGISTER_TYPE("Token", recordType {
 local function Stream(list, offset)
 	offset = offset or 0
 	assert(isinteger(offset), "offset must be an integer")
+	list = freeze(list)
 	assertis(list, listType "Token")
 
 	return freeze {

@@ -143,6 +143,14 @@ function table.bind(object, f)
 	end
 end
 
+function table.rest(object, from)
+	local out = {}
+	for i = from, #object do
+		out[i - from + 1] = object[i]
+	end
+	return out
+end
+
 local function ripairsit(list, i)
 	if i - 1 >= 1 then
 		return i - 1, list[i - 1]
