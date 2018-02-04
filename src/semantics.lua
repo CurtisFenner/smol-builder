@@ -950,23 +950,18 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 			methodName,
 			location,
 			containingDefinition.generics,
-			{
-				allDefinitions = allDefinitions,
-				containingSignature = containingSignature,
-				thisVariable = environment.thisVariable,
-			}
+			environment
 		)
 		assertis(method.signature, "Signature")
 
 		local substituter = getSubstituterFromConcreteType(method.constraint, allDefinitions)
-		assertis(substituter, "function")
 
 		local methodFullName = method.fullName
 
 		-- Verify the correct number of arguments is provided
 		if #arguments ~= #method.signature.parameters then
 			Report.WRONG_VALUE_COUNT {
-				purpose = "interface method " .. methodFullName,
+				purpose = "interface method `" .. methodFullName .. "`",
 				expectedCount = #method.signature.parameters,
 				givenCount = #arguments,
 				location = location,
@@ -1123,7 +1118,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		}
 	elseif method.bang and not containingSignature.bang then
 		Report.BANG_NOT_ALLOWED {
-			context = containingSignature.modifier .. " " .. definition.name .. "." .. containingSignature.name,
+			context = containingSignature.modifier .. " `" .. containingDefinition.name .. "." .. containingSignature.name .. "`",
 			location = location,
 		}
 	end
@@ -1208,11 +1203,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 			funcName,
 			t.location,
 			containingDefinition.generics,
-			{
-				allDefinitions = allDefinitions,
-				containingSignature = containingSignature,
-				thisVariable = environment.thisVariable,
-			}
+			environment
 		)
 		assert(static and static.signature.modifier == "static")
 		assertis(static.constraint, "InterfaceType+")
@@ -1220,10 +1211,12 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		-- Map type variables to the type-values used for this instantiation
 		local substituter = getSubstituterFromConcreteType(static.constraint, allDefinitions)
 
+		local fullName = static.fullName
+
 		-- Check the number of parameters
-		if #static.signature.parameters ~= #argumentSources then
+		if #argumentSources ~= #static.signature.parameters then
 			Report.WRONG_VALUE_COUNT {
-				purpose = "static function `" .. static.fullName .. "`",
+				purpose = "interface static `" .. fullName .. "`",
 				expectedCount = #static.signature.parameters,
 				givenCount = #argumentSources,
 				location = location,
@@ -1235,7 +1228,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 			local parameterType = substituter(static.signature.parameters[i].type)
 			if not areTypesEqual(argument.type, parameterType) then
 				Report.TYPES_DONT_MATCH {
-					purpose = string.ordinal(i) .. " argument to " .. fullName,
+					purpose = string.ordinal(i) .. " argument to `" .. fullName .. "`",
 					expectedLocation = static.signature.parameters[i].location,
 					givenType = showType(argument.type),
 					location = argument.location,
@@ -1263,7 +1256,6 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 				location = location,
 			}
 		elseif static.signature.bang and not containingSignature.bang then
-			local fullName = definition.name .. "." .. containingSignature.name
 			Report.BANG_NOT_ALLOWED {
 				context = containingSignature.modifier .. " " .. fullName,
 				location = location,
@@ -1278,7 +1270,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 				{arguments = argumentSources, this = false},
 				environment,
 				"the " .. string.ordinal(i) .. " `requires` condition for static " .. fullName,
-				pExpression.location
+				location
 			)
 			table.insert(evaluation, verification)
 		end
@@ -1472,7 +1464,7 @@ function compileExpression(pExpression, scope, environment)
 		local out, outDef = generateVariable("intliteral", INT_TYPE, pExpression.location)
 
 		local block = buildBlock {
-			localSt(out),
+			outDef,
 			{
 				tag = "int",
 				number = pExpression.value,
@@ -2853,14 +2845,6 @@ local function semanticsSmol(sources, main)
 			definition.generics,
 			allDefinitions
 		)
-
-		-- RETURNS a (verified) InterfaceType+
-		local function resolveInterface(parsedInterface)
-			local typeScope = definition.generics
-			local outType = containingSignature.resolveInterface(parsedInterface, typeScope)
-			verifyTypeValid(outType, definition.generics, allDefinitions)
-			return outType
-		end
 
 		local environment = freeze {
 			resolveType = resolveType,

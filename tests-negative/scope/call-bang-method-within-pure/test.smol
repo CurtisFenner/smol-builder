@@ -1,0 +1,14 @@
+package test;
+
+class Test {
+	method action!() Unit {
+	}
+
+	static pure() Unit {
+		do new().action!();
+	}
+
+	static main!() Unit {
+		var x Unit = Test.pure();
+	}
+}

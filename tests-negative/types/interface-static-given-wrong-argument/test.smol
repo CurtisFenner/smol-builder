@@ -1,0 +1,17 @@
+package test;
+
+interface I {
+	static foo!(n Int) Unit;
+}
+
+class Boxed[#T | #T is I] {
+	static test!() Unit {
+		do #T.foo!("foo");
+	}
+}
+
+
+class Test {
+	static main() Unit {
+	}
+}
