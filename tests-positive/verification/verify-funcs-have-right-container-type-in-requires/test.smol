@@ -1,0 +1,26 @@
+package test;
+
+class Other {
+	static good(other Other) Boolean ensures return == true {
+		return true;
+	}
+
+	static foo() Unit
+	requires Other.good(new()) {
+	}
+
+	method bar() Unit
+	requires Other.good(this) {
+	}
+
+	static make() Other {
+		return new();
+	}
+}
+
+class Test {
+	static main!() Unit {
+		do Other.foo();
+		do Other.make().bar();
+	}
+}

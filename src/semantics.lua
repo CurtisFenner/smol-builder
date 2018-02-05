@@ -688,6 +688,10 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 	assertis(context, "string")
 	assertis(checkLocation, "Location")
 
+	if invocation.this then
+		assert(areTypesEqual(invocation.this.type, invocation.container))
+	end
+
 	local subEnvironment = freeze {
 		resolveType = environment.resolveType,
 		containerType = invocation.container,
@@ -1127,12 +1131,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	local evaluation = {}
 	local destinations = {}
 	for _, returnType in ipairs(method.returnTypes) do
-		local destination = {
-			name = generateLocalID(method.name .. "_result"),
-			type = substituter(returnType),
-			location = location,
-			description = false,
-		}
+		local destination = generateVariable(method.name .. "_result", substituter(returnType), location)
 		table.insert(destinations, destination)
 		table.insert(evaluation, localSt(destination))
 	end
@@ -1193,8 +1192,6 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	local containerType = environment.containerType
 	local containingDefinition = definitionFromType(containerType, allDefinitions)
 
-	local evaluation = {}
-
 	if t.tag == "generic+" then
 		-- Generic static function
 		local static = findConstraintByMember(
@@ -1238,6 +1235,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		end
 
 		-- Create variables for the output
+		local evaluation = {}
 		local destinations = {}
 		for _, returnType in pairs(static.signature.returnTypes) do
 			local returnVariable = generateVariable("gs_return", substituter(returnType), location)
@@ -1382,6 +1380,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	end
 
 	-- Create variables for the output
+	local evaluation = {}
 	local outs = {}
 	for _, returnType in pairs(method.returnTypes) do
 		local returnVariable = generateVariable(method.name .. "_result", substituter(returnType), location)
@@ -1394,7 +1393,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		local verification = generatePreconditionVerify(
 			require,
 			method,
-			{arguments = argumentSources, this = false, container = containerType},
+			{arguments = argumentSources, this = false, container = t},
 			environment,
 			"the " .. string.ordinal(i) .. " `requires` condition for static " .. fullName,
 			location
@@ -2871,12 +2870,6 @@ local function semanticsSmol(sources, main)
 				for _, a in ipairs(containingSignature.parameters) do
 					table.insert(arguments, getFromScope(scope, a.name))
 				end
-				local invocation = {
-					arguments = arguments,
-					this = thisVariable,
-					container = containerType
-				}
-				assertis(invocation.container, "Type+")
 
 				local sub = table.with(environment, "returnOuts", returnOuts)
 
@@ -2884,7 +2877,11 @@ local function semanticsSmol(sources, main)
 				local verify = generatePreconditionVerify(
 					ensures,
 					containingSignature,
-					invocation,
+					{
+						arguments = arguments,
+						this = thisVariable,
+						container = containerType
+					},
 					sub,
 					context,
 					location
