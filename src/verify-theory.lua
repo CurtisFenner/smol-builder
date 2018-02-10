@@ -87,7 +87,7 @@ local function showAssertion(assertion)
 		return "(var " .. assertion.variable.name .. ")"
 	elseif assertion.tag == "new-class" then
 		local fields = {}
-		for f, v in pairs(assertion.fields) do
+		for f, v in spairs(assertion.fields) do
 			table.insert(fields, f .. "=" .. showAssertion(v))
 		end
 		table.sort(fields)
@@ -346,7 +346,7 @@ function theory:additionalClauses(model, term, cnf)
 			-- Scan important constants
 			canon:scan(TRUE_ASSERTION)
 			canon:scan(FALSE_ASSERTION)
-			for _, v in pairs(INT_ASSERTIONS) do
+			for _, v in spairs(INT_ASSERTIONS) do
 				canon:scan(v)
 			end
 

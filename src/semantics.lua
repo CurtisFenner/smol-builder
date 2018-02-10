@@ -1237,7 +1237,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		-- Create variables for the output
 		local evaluation = {}
 		local destinations = {}
-		for _, returnType in pairs(static.signature.returnTypes) do
+		for _, returnType in ipairs(static.signature.returnTypes) do
 			local returnVariable = generateVariable("gs_return", substituter(returnType), location)
 			table.insert(destinations, returnVariable)
 			table.insert(evaluation, localSt(returnVariable))
@@ -1382,7 +1382,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	-- Create variables for the output
 	local evaluation = {}
 	local outs = {}
-	for _, returnType in pairs(method.returnTypes) do
+	for _, returnType in ipairs(method.returnTypes) do
 		local returnVariable = generateVariable(method.name .. "_result", substituter(returnType), location)
 		table.insert(outs, returnVariable)
 		table.insert(evaluation, localSt(returnVariable))
@@ -1478,7 +1478,7 @@ function compileExpression(pExpression, scope, environment)
 		-- All of the constraints are provided as arguments to this
 		-- static function
 		local constraints = {}
-		for constraintName, interface in pairs(containingDefinition.constraints) do
+		for constraintName, interface in spairs(containingDefinition.constraints) do
 			constraints[constraintName] = freeze {
 				tag = "parameter-constraint",
 				name = constraintName,

@@ -234,15 +234,12 @@ local function cnfSAT(theory, cnf, assignment, odds)
 	assert(type(cnf) == "table")
 
 	-- Find an assignment that the theory accepts
-	profile.open("theory:isSatisfiable(? assignments)")
-	if (math.random() < odds or #cnf == 0) and not theory:isSatisfiable(assignment) then
-		profile.close("theory:isSatisfiable(? assignments)")
-		return false
-	elseif #cnf == 0 then
-		profile.close("theory:isSatisfiable(? assignments)")
-		return assignment
+	if #cnf == 0 then
+		profile.open("theory:isSatisfiable")
+		local out = theory:isSatisfiable(assignment)
+		profile.close("theory:isSatisfiable")
+		return out and assignment
 	end
-	profile.close("theory:isSatisfiable(? assignments)")
 
 	-- Find the smallest clause
 	local smallestClauseIndex = 1

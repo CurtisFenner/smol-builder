@@ -128,12 +128,16 @@ function table.findwith(list, property, value)
 end
 
 -- RETURNS an index of `list` such that `list[return] == element`
+-- REQUIRES `list` not have two distinct keys with the same element value
 function table.indexof(list, element)
+	local index = nil
 	for i, v in pairs(list) do
 		if v == element then
-			return i
+			assert(index == nil)
+			index = i
 		end
 	end
+	return index
 end
 
 -- RETURNS a function
@@ -159,4 +163,19 @@ end
 
 function ripairs(list)
 	return ripairsit, list, #list + 1
+end
+
+function spairs(t)
+	local keys = {}
+	for key in pairs(t) do
+		keys[#keys + 1] = key
+	end
+	table.sort(keys)
+	local i = 0
+	return function()
+		i = i + 1
+		if i <= #keys then
+			return keys[i], t[keys[i]]
+		end
+	end
 end

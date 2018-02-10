@@ -327,10 +327,10 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		cT = cT:sub(1, -2)
 		emit(name .. " = ALLOCATE(" .. cT .. ");")
 
-		for key, value in pairs(statement.fields) do
+		for key, value in spairs(statement.fields) do
 			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
 		end
-		for key, constraint in pairs(statement.constraints) do
+		for key, constraint in spairs(statement.constraints) do
 			local constraintField = structConstraintField(key)
 			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
 		end
@@ -815,7 +815,7 @@ struct _smol_Int {
 	for _, definition in ipairs(table.concatted(semantics.classes, semantics.unions)) do
 		for i, implement in ipairs(definition.implements) do
 			local requirements = {}
-			for key, constraint in pairs(definition.constraints) do
+			for key, constraint in spairs(definition.constraints) do
 				table.insert(requirements, {name = key, constraint = constraint})
 			end
 			table.sort(requirements, function(a, b) return a.name < b.name end)

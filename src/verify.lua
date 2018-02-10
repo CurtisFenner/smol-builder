@@ -179,15 +179,9 @@ local function assertionExprString(a, grouped)
 		end
 
 		-- Search for aliasing operator
-		local hit = false
-		for key, v in pairs(provided.OPERATOR_ALIAS) do
-			if v == a.signature.name then
-				hit = key
-			end
-		end
-
-		if hit and #arguments == 1 then
-			local inner = base .. " " .. hit .. " " .. assertionExprString(a.arguments[1])
+		local operatorName = table.indexof(provided.OPERATOR_ALIAS, a.signature.name)
+		if operatorName and #arguments == 1 then
+			local inner = base .. " " .. operatorName .. " " .. assertionExprString(a.arguments[1])
 			if grouped then
 				return "(" .. inner .. ")"
 			end
@@ -418,7 +412,7 @@ local function showStatement(statement, indent)
 		return pre .. " " .. statement.destination.name .. " := " .. rhs
 	elseif statement.tag == "new-class" then
 		local rhs = {}
-		for k, v in pairs(statement.fields) do
+		for k, v in spairs(statement.fields) do
 			table.insert(rhs, k .. " -> " .. v.name)
 		end
 		rhs = table.concat(rhs, ", ")
