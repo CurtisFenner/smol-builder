@@ -30,6 +30,9 @@ local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
 
 local typeOfAssertion = provided.typeOfAssertion
 
+local excerpt = provided.excerpt
+local variableDescription = provided.variableDescription
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -126,35 +129,6 @@ REGISTER_TYPE("Assertion", choiceType(
 	}
 ))
 
--- RETURNS a string containing the contents of the source code within this
--- Location
-local function excerpt(location)
-	assertis(location, "Location")
-
-	local begins = location.begins
-	local ends = location.ends
-
-	if type(begins) == "string" or type(ends) == "string" then
-		-- Internal code
-		return "<at " .. begins .. ">"
-	end
-
-	local source = begins.sourceLines
-	local out = ""
-	for line = begins.line, ends.line do
-		local low = 1
-		local high = #source[line]
-		if line == begins.line then
-			low = begins.column
-		end
-		if line == ends.line then
-			high = ends.column
-		end
-		out = out .. source[line]:sub(low, high)
-	end
-	return out
-end
-
 -- RETURNS a string (as executable Smol code)
 local function assertionExprString(a, grouped)
 	assertis(a, "Assertion")
@@ -196,14 +170,11 @@ local function assertionExprString(a, grouped)
 		end
 		return a.base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
 	elseif a.tag == "variable" then
-		if not a.variable.name:find "['_]" then
-			return a.variable.name
+		local result = variableDescription(a.variable)
+		if grouped and result:find "%s" then
+			return "(" .. result .. ")"
 		end
-		local inner = excerpt(a.variable.location)
-		if grouped and inner:find("%s") then
-			return "(" .. inner .. ")"
-		end
-		return inner
+		return result
 	elseif a.tag == "isa" then
 		local inner = assertionExprString(a.base, true) .. " is " .. a.variant
 		if grouped then

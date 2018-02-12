@@ -6,6 +6,8 @@ local provided = import "provided.lua"
 local showType = provided.showType
 local areTypesEqual = provided.areTypesEqual
 local areInterfaceTypesEqual = provided.areInterfaceTypesEqual
+local excerpt = provided.excerpt
+local variableDescription = provided.variableDescription
 
 local BOOLEAN_DEF = table.findwith(provided.BUILTIN_DEFINITIONS, "name", "Boolean")
 local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
@@ -797,18 +799,37 @@ local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "not")
 local OR_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "or")
 local AND_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "and")
 
--- RETURNS a StatementIR, VariableIR
-local function irNot(base, location)
-	assertis(base, "VariableIR")
-	assertis(location, "Location")
+local function parened(s)
+	assertis(s, "string")
+	if s:find "%W" then
+		return "(" .. s .. ")"
+	end
+	return s
+end
 
-	local result = generateVariable("not_result", BOOLEAN_TYPE, location)
+-- RETURNS a StatementIR, VariableIR
+local function irMethod(location, signature, base, arguments)
+	assertis(location, "Location")
+	assertis(signature, "Signature")
+	assertis(base, "VariableIR")
+	assertis(arguments, listType "VariableIR")
+	
+	assert(#signature.returnTypes == 1)
+
+	local result = generateVariable(signature.name .. "_result", signature.returnTypes[1], location)
+	local d1 = variableDescription(base)
+	local ds = {}
+	for i = 1, #arguments do
+		ds[i] = variableDescription(arguments[i])
+	end
+	local description = parened(d1) .. "." .. signature.name .. "(" .. table.concat(ds, ", ") .. ")"
+	result = table.with(result, "description", description)
 	local method = freeze {
 		tag = "method-call",
 		baseInstance = base,
-		arguments = {},
+		arguments = arguments,
 		destinations = {result},
-		signature = NOT_SIGNATURE,
+		signature = signature,
 		returns = "no",
 	}
 	return buildBlock {localSt(result), method}, result
@@ -822,6 +843,9 @@ local function closedUnionAssumption(union, var)
 	local ises = {}
 	for _, variant in ipairs(union.fields) do
 		local v = generateVariable("closed_union_is" .. variant.name, BOOLEAN_TYPE, var.location)
+		local description = parened(excerpt(var.location)) .. " is " .. variant.name
+		v = table.with(v, "description", description)
+
 		table.insert(ises, v)
 		table.insert(seq, localSt(v))
 		table.insert(seq, freeze {
@@ -834,29 +858,19 @@ local function closedUnionAssumption(union, var)
 	end
 
 	-- Generate any (is a or is b or is c ...)
-	local any = generateVariable("any-closed", BOOLEAN_TYPE, var.location)
-	table.insert(seq, localSt(any))
-
-	table.insert(seq, freeze {
-		tag = "assign",
-		destination = any,
-		source = ises[1],
-		returns = "no",
-	})
+	local isAny = ises[1]
 	for i = 2, #ises do
-		table.insert(seq, freeze {
-			tag = "method-call",
-			destinations = {any},
-			baseInstance = any,
-			arguments = {ises[i]},
-			signature = OR_SIGNATURE,
-			returns = "no",
-		})
+		local compute, nextIsAny = irMethod(var.location, OR_SIGNATURE, isAny, {ises[i]})
+		table.insert(seq, compute)
+		isAny = nextIsAny
 	end
+	local any = generateVariable("any-closed", BOOLEAN_TYPE, var.location)
+	any = table.with(any, "description", "???")
+	table.insert(seq, localSt(any))
 
 	table.insert(seq, {
 		tag = "assume",
-		variable = any,
+		variable = isAny,
 		location = var.location,
 		returns = "no",
 	})
@@ -865,20 +879,10 @@ local function closedUnionAssumption(union, var)
 	for i, va in ipairs(ises) do
 		for j, vb in ipairs(ises) do
 			if i < j then
-				local both = generateVariable("both_variant" .. va.name .. "_" .. vb.name, BOOLEAN_TYPE, var.location)
-				-- TODO: add description to both
-				table.insert(seq, localSt(both))
-				table.insert(seq, {
-					tag = "method-call",
-					baseInstance = va,
-					arguments = {vb},
-					destinations = {both},
-					signature = AND_SIGNATURE,
-					returns = "no",
-				})
+				local computeBoth, both = irMethod(var.location, AND_SIGNATURE, va, {vb})
+				table.insert(seq, computeBoth)
 
-				-- TODO: add description to bothNot
-				local bothNotSt, bothNot = irNot(both, var.location)
+				local bothNotSt, bothNot = irMethod(var.location, NOT_SIGNATURE, both, {})
 				table.insert(seq, bothNotSt)
 				table.insert(seq, {
 					tag = "assume",
@@ -3279,7 +3283,7 @@ local function semanticsSmol(sources, main)
 							returns = "no",
 						})
 
-						local isNotBadSt, isNotBad = irNot(isBad, pStatement.location)
+						local isNotBadSt, isNotBad = irMethod(pStatement.location, NOT_SIGNATURE, isBad, {})
 						table.insert(seq, isNotBadSt)
 
 						table.insert(seq, {

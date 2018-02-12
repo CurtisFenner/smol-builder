@@ -1,6 +1,47 @@
 -- provided.lua contains functions in common to many files (semantics, codegen,
 -- verification)
 
+-- RETURNS a string containing the contents of the source code within this
+-- Location
+local function excerpt(location)
+	assertis(location, "Location")
+
+	local begins = location.begins
+	local ends = location.ends
+
+	if type(begins) == "string" or type(ends) == "string" then
+		-- Internal code
+		return "<at " .. begins .. ">"
+	end
+
+	local source = begins.sourceLines
+	local out = ""
+	for line = begins.line, ends.line do
+		local low = 1
+		local high = #source[line]
+		if line == begins.line then
+			low = begins.column
+		end
+		if line == ends.line then
+			high = ends.column
+		end
+		out = out .. source[line]:sub(low, high)
+	end
+	return out
+end
+
+-- RETURNS a string representing the variable
+local function variableDescription(variable)
+	assertis(variable, "VariableIR")
+
+	if variable.description then
+		return variable.description
+	end
+
+	-- TODO: eliminate type
+	return excerpt(variable.location)
+end
+
 -- RETURNS whether or not a and b are the same type
 -- REQUIRES that type names cannot be shadowed and
 -- that a and b come from the same (type) scope
@@ -494,4 +535,7 @@ return freeze {
 	makeEqSignature = makeEqSignature,
 
 	typeOfAssertion = typeOfAssertion,
+
+	excerpt = excerpt,
+	variableDescription = variableDescription,
 }
