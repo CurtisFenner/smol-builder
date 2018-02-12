@@ -16,22 +16,22 @@ local ansi = import "ansi.lua"
 
 --------------------------------------------------------------------------------
 
-local provided = import "provided.lua"
+local common = import "common.lua"
 
-local STRING_TYPE = provided.STRING_TYPE
-local INT_TYPE = provided.INT_TYPE
-local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
-local UNIT_TYPE = provided.UNIT_TYPE
-local NEVER_TYPE = provided.NEVER_TYPE
+local STRING_TYPE = common.STRING_TYPE
+local INT_TYPE = common.INT_TYPE
+local BOOLEAN_TYPE = common.BOOLEAN_TYPE
+local UNIT_TYPE = common.UNIT_TYPE
+local NEVER_TYPE = common.NEVER_TYPE
 
-local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
+local BUILTIN_DEFINITIONS = common.BUILTIN_DEFINITIONS
 
 local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
 
-local typeOfAssertion = provided.typeOfAssertion
+local typeOfAssertion = common.typeOfAssertion
 
-local excerpt = provided.excerpt
-local variableDescription = provided.variableDescription
+local excerpt = common.excerpt
+local variableDescription = common.variableDescription
 
 --------------------------------------------------------------------------------
 
@@ -153,7 +153,7 @@ local function assertionExprString(a, grouped)
 		end
 
 		-- Search for aliasing operator
-		local operatorName = table.indexof(provided.OPERATOR_ALIAS, a.signature.name)
+		local operatorName = table.indexof(common.OPERATOR_ALIAS, a.signature.name)
 		if operatorName and #arguments == 1 then
 			local inner = base .. " " .. operatorName .. " " .. assertionExprString(a.arguments[1])
 			if grouped then

@@ -7,22 +7,22 @@ local theory = {
 
 local UnionFind = import "unionfind.lua"
 
-local showType = import("provided.lua").showType
+local common = import "common.lua"
+local showType = common.showType
 
-local provided = import "provided.lua"
-local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
+local BUILTIN_DEFINITIONS = common.BUILTIN_DEFINITIONS
 local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
-local makeEqSignature = provided.makeEqSignature
+local makeEqSignature = common.makeEqSignature
 
-local areTypesEqual = provided.areTypesEqual
+local areTypesEqual = common.areTypesEqual
 
-local STRING_TYPE = provided.STRING_TYPE
-local INT_TYPE = provided.INT_TYPE
-local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
-local UNIT_TYPE = provided.UNIT_TYPE
-local NEVER_TYPE = provided.NEVER_TYPE
+local STRING_TYPE = common.STRING_TYPE
+local INT_TYPE = common.INT_TYPE
+local BOOLEAN_TYPE = common.BOOLEAN_TYPE
+local UNIT_TYPE = common.UNIT_TYPE
+local NEVER_TYPE = common.NEVER_TYPE
 
-local typeOfAssertion = provided.typeOfAssertion
+local typeOfAssertion = common.typeOfAssertion
 
 --------------------------------------------------------------------------------
 

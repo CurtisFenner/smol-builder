@@ -2,14 +2,14 @@
 
 local Report = import "semantic-errors.lua"
 local profile = import "profile.lua"
-local provided = import "provided.lua"
-local showType = provided.showType
-local areTypesEqual = provided.areTypesEqual
-local areInterfaceTypesEqual = provided.areInterfaceTypesEqual
-local excerpt = provided.excerpt
-local variableDescription = provided.variableDescription
+local common = import "common.lua"
+local showType = common.showType
+local areTypesEqual = common.areTypesEqual
+local areInterfaceTypesEqual = common.areInterfaceTypesEqual
+local excerpt = common.excerpt
+local variableDescription = common.variableDescription
 
-local BOOLEAN_DEF = table.findwith(provided.BUILTIN_DEFINITIONS, "name", "Boolean")
+local BOOLEAN_DEF = table.findwith(common.BUILTIN_DEFINITIONS, "name", "Boolean")
 local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
 
 -- RETURNS the clearest possible combination of a, and b.
@@ -339,14 +339,14 @@ end
 
 --------------------------------------------------------------------------------
 
-local STRING_TYPE = provided.STRING_TYPE
-local INT_TYPE = provided.INT_TYPE
-local BOOLEAN_TYPE = provided.BOOLEAN_TYPE
-local UNIT_TYPE = provided.UNIT_TYPE
-local NEVER_TYPE = provided.NEVER_TYPE
+local STRING_TYPE = common.STRING_TYPE
+local INT_TYPE = common.INT_TYPE
+local BOOLEAN_TYPE = common.BOOLEAN_TYPE
+local UNIT_TYPE = common.UNIT_TYPE
+local NEVER_TYPE = common.NEVER_TYPE
 
-local BUILTIN_DEFINITIONS = provided.BUILTIN_DEFINITIONS
-local OPERATOR_ALIAS = provided.OPERATOR_ALIAS
+local BUILTIN_DEFINITIONS = common.BUILTIN_DEFINITIONS
+local OPERATOR_ALIAS = common.OPERATOR_ALIAS
 
 --------------------------------------------------------------------------------
 

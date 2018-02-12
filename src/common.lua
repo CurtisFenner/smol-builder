@@ -1,4 +1,4 @@
--- provided.lua contains functions in common to many files (semantics, codegen,
+-- common.lua contains functions in common to many files (semantics, codegen,
 -- verification)
 
 -- RETURNS a string containing the contents of the source code within this
