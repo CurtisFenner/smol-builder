@@ -1,0 +1,18 @@
+package test;
+
+class Test {
+
+	static opaque(n Int) Int {
+		return n * n;
+	}
+
+	static foo(n Int) Int {
+		var q Int = Test.opaque(n);
+		assert(q == Test.foo(q));
+		return q;
+	}
+
+	static main() Unit {
+
+	}
+}

@@ -1,0 +1,13 @@
+package test;
+
+class Test {
+	static oracle(x Boolean) Unit ensures x {
+		if x.not() {
+			do Test.oracle(x);
+		}
+	}
+
+	static main() Unit {
+		do Test.oracle(false);
+	}
+}
