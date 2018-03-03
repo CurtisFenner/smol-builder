@@ -110,6 +110,20 @@ local function commented(message)
 	return "// " .. message:gsub("\n", "\n// ")
 end
 
+-- RETURNS a string of C-code representing a literal to use as
+-- the tag value for a union object
+local function unionTagValue(union, variant)
+	assertis(union, "UnionIR")
+	assertis(variant, "string")
+
+	for i, field in ipairs(union.fields) do
+		if field.name == variant then
+			return tostring(i)
+		end
+	end
+	error("no variant")
+end
+
 -- RETURNS a string
 local function cEncodedString(value)
 	assertis(value, "string")
@@ -343,22 +357,13 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local cT = cType(statement.destination.type, structScope)
 		assert(cT:sub(-1) == "*")
 		cT = cT:sub(1, -2)
-
 		emit(destination .. " = ALLOCATE(" .. cT .. ");")
 
 		local union = table.findwith(semantics.unions, "name", statement.type.name)
 		assert(union)
 
 		-- Initialize the tag
-		local found = false
-		for i, field in ipairs(union.fields) do
-			if field.name == statement.field then
-				emit(destination .. "->" .. TAG_FIELD .. " = " .. i .. ";")
-				assert(not found)
-				found = true
-			end
-		end
-		assert(found)
+		emit(destination .. "->" .. TAG_FIELD .. " = " .. unionTagValue(union, statement.field) .. ";")
 
 		-- Initialize the value
 		local value = localName(statement.value.name)
@@ -566,6 +571,17 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		error "verify statements should be guarded by proof"
 	elseif statement.tag == "proof" then
 		comment("proof")
+		return
+	elseif statement.tag == "isa" then
+		comment(statement.destination.name .. " = " .. statement.base.name .. " isa " .. statement.variant)
+		emit(localName(statement.destination.name) .. " = ALLOCATE(smol_Boolean);")
+		local union = table.findwith(semantics.unions, "name", statement.base.type.name)
+		assert(union)
+
+		-- Set value
+		local tagValue = unionTagValue(union, statement.variant)
+		local rhs = localName(statement.base.name) .. "->tag == " .. tagValue
+		emit(localName(statement.destination.name) .. "->value = " .. rhs .. ";")
 		return
 	end
 

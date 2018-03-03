@@ -1,0 +1,76 @@
+package test;
+
+class ICons[#T] {
+	var head #T;
+	var rest IList[#T];
+
+	static make(head #T, rest IList[#T]) ICons[#T] {
+		return new(head = head, rest = rest);
+	}
+
+	method getHead() #T {
+		return this.head;
+	}
+	method getRest() IList[#T] {
+		return this.rest;
+	}
+}
+
+union IList[#T] {
+	var nil Unit;
+	var cons ICons[#T];
+
+	static makeEmpty() IList[#T] {
+		return new(nil = unit);
+	}
+
+	static makeCons(head #T, rest IList[#T]) IList[#T] {
+		return new(cons = ICons[#T].make(head, rest));
+	}
+}
+
+class List[#T] {
+	var inner IList[#T];
+
+	static makeEmpty() List[#T] {
+		return new(inner = IList[#T].makeEmpty());
+	}
+
+	method makeCons(newHead #T) List[#T] {
+		return new(inner = IList[#T].makeCons(newHead, this.inner));
+	}
+
+	method isEmpty() Boolean
+	ensures return when this.inner is nil
+	ensures return.not() when this.inner is cons {
+		return this.inner is nil;
+	}
+
+	method head() #T
+	requires this.isEmpty().not() {
+		return this.inner.cons.getHead();
+	}
+
+	method rest() List[#T] 
+	requires this.isEmpty().not() {
+		return new(inner = this.inner.cons.getRest());
+	}
+}
+
+interface BinFun[#A, #B, #R] {
+	static f(a #A, b #B) #R;
+}
+
+class Folder[#T, #R, #F | #F is BinFun[#R, #T, #R]] {
+	static fold(list List[#T], zero #R) #R {
+		if list.isEmpty() {
+			return zero;
+		}
+		return Folder[#T, #R, #F].fold(list.rest(), #F.f(zero, list.head()));
+	}
+}
+
+class Test {
+	static main!() Unit {
+	}
+}

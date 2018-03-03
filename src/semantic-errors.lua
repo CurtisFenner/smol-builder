@@ -472,6 +472,8 @@ end
 
 function Report.TYPE_MUST_BE_CLASS(p)
 	assertis(p.purpose, "string")
+	assertis(p.givenType, "string")
+	assertis(p.location, "Location")
 
 	quit(
 		"The ",

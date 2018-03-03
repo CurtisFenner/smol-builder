@@ -1692,6 +1692,7 @@ function compileExpression(pExpression, scope, environment)
 		local base = bases[1]
 		if base.type.tag ~= "concrete-type+" then
 			Report.TYPE_MUST_BE_CLASS {
+				purpose = "base of `." .. pExpression.field .. "` field access",
 				givenType = showType(base.type),
 				location = pExpression.location,
 			}
