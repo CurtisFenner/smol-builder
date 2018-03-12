@@ -211,6 +211,7 @@ local function lexSmol(source, filename)
 		["Boolean"] = true,
 		["Int"] = true,
 		["Never"] = true,
+		["Self"] = true,
 		["String"] = true,
 		["Unit"] = true,
 
@@ -247,6 +248,9 @@ local function lexSmol(source, filename)
 			-- generic type parameters
 			"#[A-Z][A-Za-z0-9]*",
 			function(x)
+				if IS_KEYWORD[x:sub(2)] then
+					return {tag = "keyword-generic", name = "Self"}
+				end
 				return {tag = "generic", name = x:sub(2)}
 			end
 		},
@@ -596,6 +600,7 @@ local function parseSmol(tokens)
 	local K_NEVER = LEXEME "Never"
 	local K_INT = LEXEME "Int"
 	local K_BOOLEAN = LEXEME "Boolean"
+	local K_SELF = LEXEME "#Self"
 
 	-- PARSER for token tag ("typename", "identifier", "operator", etc)
 	local function TOKEN(tokenType, field)
@@ -768,6 +773,7 @@ local function parseSmol(tokens)
 			K_BOOLEAN,
 			K_UNIT_TYPE,
 			K_NEVER,
+			K_SELF,
 
 			-- User defined types
 			parser.map(
@@ -1572,7 +1578,7 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 
 --------------------------------------------------------------------------------
 
-REGISTER_TYPE("Type+", choiceType("ConcreteType+", "KeywordType+", "GenericType+"))
+REGISTER_TYPE("Type+", choiceType("ConcreteType+", "KeywordType+", "GenericType+", "SelfType+"))
 
 REGISTER_TYPE("InterfaceType+", recordType {
 	tag = constantType "interface-type",
@@ -1583,28 +1589,28 @@ REGISTER_TYPE("InterfaceType+", recordType {
 
 REGISTER_TYPE("ConcreteType+", recordType {
 	tag = constantType "concrete-type+",
-
 	name = "string",
 	arguments = listType "Type+",
-
 	location = "Location",
 })
 
 REGISTER_TYPE("KeywordType+", recordType {
 	tag = constantType "keyword-type+",
-
 	name = "string",
-
 	location = "Location",
 })
 
 REGISTER_TYPE("GenericType+", recordType {
 	tag = constantType "generic+",
 
+	-- e.g., "Foo" for `#Foo`
 	name = "string",
 
-	-- e.g., "Foo" for `#Foo`
+	location = "Location",
+})
 
+REGISTER_TYPE("SelfType+", recordType {
+	tag = constantType "self-type+",
 	location = "Location",
 })
 

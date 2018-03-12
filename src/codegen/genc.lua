@@ -83,7 +83,7 @@ local function cType(t, scope)
 	assertis(t, "Type+")
 	assertis(scope, mapType("string", "string"))
 
-	if t.tag == "generic+" then
+	if t.tag == "generic+" or t.tag == "self-type+" then
 		return "void*"
 	elseif t.tag == "concrete-type+" then
 		return scope[t.name] .. "*"

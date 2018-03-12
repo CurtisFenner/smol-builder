@@ -1,0 +1,43 @@
+package test;
+
+import core;
+
+interface Makeable[#F] {
+	static makeFrom(f #F) #Self;
+
+	method join(other #Self) #Self;
+}
+
+class Foo is Makeable[Int] {
+	var value Int;
+
+	static makeFrom(n Int) Foo {
+		return new(value = n);
+	}
+
+	method join(other Foo) Foo {
+		return new(value = other.value + this.value);
+	}
+
+	method getValue() Int {
+		return this.value;
+	}
+}
+
+class Joiner[#F, #T | #T is Makeable[#F]] {
+	static work(a #F, b #F) #T {
+		return #T.makeFrom(a).join(#T.makeFrom(b));
+	}
+}
+
+class Test {
+	static main!() Unit {
+		var n1 Int = Foo.makeFrom(3).join(Foo.makeFrom(7)).getValue();
+		var s1 String = core:ASCII.formatInt(n1);
+		do core:Out.println!(s1);
+
+		var n2 Int = Joiner[Int, Foo].work(37, 42).getValue();
+		var s2 String = core:ASCII.formatInt(n2);
+		do core:Out.println!(s2);
+	}
+}

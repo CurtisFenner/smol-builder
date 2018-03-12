@@ -113,6 +113,10 @@ end
 local function genericSubstituter(assignments)
 	assertis(assignments, mapType("string", "Type+"))
 
+	-- Self is a keyword; here is refers to the (more) concrete type that
+	-- implements this interface
+	assert(assignments.Self, "assignments.Self must be provided to genericSubstituer")
+
 	local function subs(t)
 		assertis(t, choiceType("InterfaceType+", "Type+"))
 
@@ -138,6 +142,8 @@ local function genericSubstituter(assignments)
 				Report.UNKNOWN_GENERIC_USED(t)
 			end
 			return assignments[t.name]
+		elseif t.tag == "self-type+" then
+			return assignments.Self
 		end
 		error("unknown Type+ tag `" .. t.tag .. "`")
 	end
@@ -146,24 +152,42 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a function Type+ -> Type+ to apply to types on the in interface's
+-- definition to get specific types for a given instantiation
+local function getSubstituterFromInterface(int, selfType, allDefinitions)
+	assertis(int, "InterfaceType+")
+	assertis(allDefinitions, listType "Definition")
+	assertis(selfType, "Type+")
+
+	local definition = table.findwith(allDefinitions, "name", int.name)
+	assert(definition)
+	assert(#definition.generics == #int.arguments)
+
+	-- Note that "Self" is a keyword, so it is not a valid generic name
+	local assignments = {Self = selfType}
+	for i, generic in ipairs(definition.generics) do
+		assignments[generic.name] = int.arguments[i]
+	end
+	return genericSubstituter(assignments)
+end
+
 -- RETURNS a function Type+ -> Type+ to apply to types on the
--- class/struct/interface's definition to use the specific types
+-- class/union's definition to use the specific types
 -- in this instance
 local function getSubstituterFromConcreteType(type, allDefinitions)
-	-- XXX: This union is not a good thing
-	assertis(type, choiceType("ConcreteType+", "InterfaceType+", "KeywordType+"))
+	assertis(type, "Type+")
 	assertis(allDefinitions, listType "Definition")
 
 	if type.tag == "keyword-type+" then
-		return genericSubstituter({})
+		return genericSubstituter({Self = type})
 	end
-	assertis(type, choiceType("ConcreteType+", "InterfaceType+"))
+	assertis(type, "ConcreteType+")
 
 	local definition = table.findwith(allDefinitions, "name", type.name)
 	assert(definition)
 	assert(#definition.generics == #type.arguments)
 
-	local assignments = {}
+	local assignments = {Self = type}
 	for i, generic in ipairs(definition.generics) do
 		assignments[generic.name] = type.arguments[i]
 	end
@@ -181,7 +205,7 @@ local function getTypeConstraints(type, typeScope, allDefinitions)
 		local definition = table.findwith(allDefinitions, "name", type.name)
 		assert(definition and #definition.generics == #type.arguments)
 
-		local substitute = getSubstituterFromConcreteType(type, allDefinitions)
+		local substitute = getSubstituterFromConcreteType(type, allDefinitions, type)
 		local constraints = table.map(substitute, definition.implements)
 		return constraints
 	elseif type.tag == "keyword-type+" then
@@ -270,13 +294,15 @@ local function verifyTypeValid(type, typeScope, allDefinitions)
 			verifyTypeValid(argument, typeScope, allDefinitions)
 		end
 	elseif type.tag == "keyword-type+" then
-		return
-
 		-- All keyword types are valid
-	elseif type.tag == "generic+" then
 		return
-
+	elseif type.tag == "generic+" then
 		-- All generic literals are valid
+		return
+	elseif type.tag == "self-type+" then
+		-- All #Self literals are valid
+		-- TODO: Though perhaps they should be forbidden in classes/unions
+		return
 	else
 		error("unknown Type+ tag `" .. type.tag .. "`")
 	end
@@ -291,7 +317,8 @@ local function verifyInterfaceValid(constraint, typeScope, allDefinitions)
 	local definition = table.findwith(allDefinitions, "name", constraint.name)
 	assert(definition.tag == "interface")
 
-	local substitute = getSubstituterFromConcreteType(constraint, allDefinitions)
+	local SELF_TYPE = freeze {tag = "self-type+", location = constraint.location}
+	local substitute = getSubstituterFromInterface(constraint, SELF_TYPE, allDefinitions)
 
 	-- Check each argument
 	for i, generic in ipairs(definition.generics) do
@@ -962,7 +989,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		)
 		assertis(method.signature, "Signature")
 
-		local substituter = getSubstituterFromConcreteType(method.constraint, allDefinitions)
+		local substituter = getSubstituterFromInterface(method.constraint, baseInstance.type, allDefinitions)
 
 		local methodFullName = method.fullName
 
@@ -1210,7 +1237,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		assertis(static.constraint, "InterfaceType+")
 
 		-- Map type variables to the type-values used for this instantiation
-		local substituter = getSubstituterFromConcreteType(static.constraint, allDefinitions)
+		local substituter = getSubstituterFromInterface(static.constraint, t, allDefinitions)
 
 		local fullName = static.fullName
 
@@ -2223,7 +2250,7 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
-				return {
+				return freeze {
 					tag = "concrete-type+",
 					name = fullName,
 					arguments = table.map(resolveType, t.arguments, typeScope),
@@ -2235,15 +2262,21 @@ local function semanticsSmol(sources, main)
 					Report.UNKNOWN_GENERIC_USED(t)
 				end
 
-				return {
+				return freeze {
 					tag = "generic+",
 					name = t.name,
 					location = t.location,
 				}
 			elseif t.tag == "type-keyword" then
-				return {
+				return freeze {
 					tag = "keyword-type+",
 					name = t.name,
+					location = t.location,
+				}
+			elseif t.tag == "keyword-generic" then
+				assert(t.name == "Self")
+				return freeze {
+					tag = "self-type+",
 					location = t.location,
 				}
 			end
@@ -2551,7 +2584,8 @@ local function semanticsSmol(sources, main)
 
 			-- Instantiate each of the interface's type parameters with the
 			-- argument specified in the "implements"
-			local subs = getSubstituterFromConcreteType(int, allDefinitions)
+			local classType = typeFromDefinition(class, allDefinitions)
+			local subs = getSubstituterFromInterface(int, classType, allDefinitions)
 
 			-- Check that each signature matches
 			for _, iSignature in ipairs(interface.signatures) do
