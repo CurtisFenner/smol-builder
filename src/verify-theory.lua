@@ -630,13 +630,14 @@ function theory:isSatisfiable(modelInput)
 		for _, element in pairs(list) do
 			local references = canon.referencedBy[element]
 			if references then
-				for _, reference in pairs(references) do
-					out[reference] = true
+				for i = 1, #references do
+					out[references[i]] = true
 				end
 			end
 		end
-		return out
+		return freeze(out)
 	end
+	thoseReferencingAny = memoized(1, thoseReferencingAny)
 
 	-- RETURNS nothing
 	local function union(a, b)
@@ -645,9 +646,8 @@ function theory:isSatisfiable(modelInput)
 
 		profile.open "union(a, b)"
 		if not eq:query(a, b) then
-			local eqClasses = eq:classes()
-			local thoseThatReferenceA = thoseReferencingAny(eqClasses[a])
-			local thoseThatReferenceB = thoseReferencingAny(eqClasses[b])
+			local thoseThatReferenceA = thoseReferencingAny(eq:classOf(a))
+			local thoseThatReferenceB = thoseReferencingAny(eq:classOf(b))
 			eq:union(a, b)
 
 			-- Union all functions of equal arguments

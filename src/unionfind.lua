@@ -4,7 +4,7 @@ local UnionFind = {}
 
 -- RETURNS an empty UnionFind data structure
 function UnionFind.new()
-	return setmetatable({representatives = {}}, {__index = UnionFind})
+	return setmetatable({representatives = {}, _classes = {}}, {__index = UnionFind})
 end
 
 function UnionFind:init(e)
@@ -17,6 +17,7 @@ end
 function UnionFind:tryinit(e)
 	if self.representatives[e] == nil then
 		self.representatives[e] = e
+		self._classes[e] = {e}
 		return true
 	end
 	return false
@@ -44,8 +45,18 @@ function UnionFind:union(a, b)
 
 	if math.random() < 0.5 then
 		self.representatives[ra] = rb
+
+		-- Move classes
+		for _, x in ipairs(self._classes[ra]) do
+			table.insert(self._classes[rb], x)
+		end
 	else
 		self.representatives[rb] = ra
+
+		-- Move classes
+		for _, x in ipairs(self._classes[rb]) do
+			table.insert(self._classes[ra], x)
+		end
 	end
 
 	return true
@@ -70,5 +81,24 @@ function UnionFind:classes()
 	end
 	return out
 end
+
+-- RETURNS []element
+function UnionFind:classOf(a)
+	return self._classes[self:_root(a)]
+end
+
+-- TEST
+
+local u = UnionFind.new()
+for i = 1, 20 do
+	u:init(i)
+end
+
+u:union(1, 5)
+u:union(1, 4)
+assert(#u:classOf(4) == 3)
+assert(#u:classOf(1) == 3)
+assert(#u:classOf(5) == 3)
+assert(#u:classOf(2) == 1)
 
 return UnionFind

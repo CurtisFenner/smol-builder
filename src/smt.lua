@@ -252,7 +252,7 @@ local function cnfSAT(theory, cnf, assignment, odds)
 	local smallestClause = cnf[smallestClauseIndex]
 	assert(#smallestClause >= 1)
 	if #smallestClause == 1 then
-		profile.open "unit clause"
+		--profile.open "unit clause"
 
 		-- Unit clauses have exactly one way to assign
 		local term, truth = smallestClause[1][1], smallestClause[1][2]
@@ -270,33 +270,33 @@ local function cnfSAT(theory, cnf, assignment, odds)
 		end
 
 		if not simplified then
-			profile.close "unit clause"
+			--profile.close "unit clause"
 			return false
 		end
 
 		local out = cnfSAT(theory, simplified, with, 0)
-		profile.close "unit clause"
+		--profile.close "unit clause"
 		return out
 	end
 
 	-- Try each truth assignment of the first term in the first clause
-	profile.open("decide yes")
+	--profile.open("decide yes")
 	local t1 = smallestClause[1][1]
 	local with = copywith(assignment, t1, smallestClause[1][2])
 	local simplified = simplifyCNF(cnf, with)
 	local out = simplified and cnfSAT(theory, simplified, with, 1)
-	profile.close("decide yes")
+	--profile.close("decide yes")
 	if out then
 		return out
 	end
 
 	-- Then it can only be satisfied with no
 	-- Add this to the set to prune more cases
-	profile.open("decide no")
+	--profile.open("decide no")
 	local with = copywith(assignment, t1, not smallestClause[1][2])
 	local simplified = simplifyCNF(cnf, with)
 	local out = simplified and cnfSAT(theory, simplified, with, 1)
-	profile.close("decide no")
+	--profile.close("decide no")
 	return out
 end
 
