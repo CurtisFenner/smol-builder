@@ -1,6 +1,8 @@
 -- common.lua contains functions in common to many files (semantics, codegen,
 -- verification)
 
+local syntax = import "syntax.lua"
+
 -- RETURNS a string containing the contents of the source code within this
 -- Location
 local function excerpt(location)
@@ -251,134 +253,135 @@ local BOOLEAN_DEF = freeze {
 	},
 }
 
-local BUILTIN_DEFINITIONS = freeze {
-	{
-		type = INT_TYPE,
-		name = "Int",
-		tag = "builtin",
-		signatures = {
-			{
-				name = "isPositive",
-				parameters = {},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(n)
-					return n > 0
-				end,
-			},
-			{
-				name = "negate",
-				parameters = {},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(n)
-					return -n
-				end,
-			},
-			{
-				name = "lessThan",
-				parameters = {dummy("right", INT_TYPE)},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a < b
-				end,
-			},
-			{
-				name = "eq",
-				parameters = {dummy("right", INT_TYPE)},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a == b
-				end,
-			},
-			{
-				name = "quotient",
-				parameters = {dummy("right", INT_TYPE)},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return math.floor(a / b)
-				end,
-			},
-			{
-				name = "product",
-				parameters = {dummy("right", INT_TYPE)},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a * b
-				end,
-			},
-			{
-				name = "sum",
-				parameters = {dummy("right", INT_TYPE)},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a + b
-				end,
-			},
-			{
-				name = "difference",
-				parameters = {dummy("right", INT_TYPE)},
-				returnTypes = {INT_TYPE},
-				modifier = "method",
-				container = "Int",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a - b
-				end,
-			},
+local INT_DEF = freeze {
+	type = INT_TYPE,
+	name = "Int",
+	tag = "builtin",
+	signatures = {
+		{
+			name = "isPositive",
+			parameters = {},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(n)
+				return n > 0
+			end,
+		},
+		{
+			name = "negate",
+			parameters = {},
+			returnTypes = {INT_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(n)
+				return -n
+			end,
+		},
+		{
+			name = "lessThan",
+			parameters = {dummy("right", INT_TYPE)},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(a, b)
+				return a < b
+			end,
+		},
+		{
+			name = "eq",
+			parameters = {dummy("right", INT_TYPE)},
+			returnTypes = {BOOLEAN_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(a, b)
+				return a == b
+			end,
+		},
+		{
+			name = "quotient",
+			parameters = {dummy("right", INT_TYPE)},
+			returnTypes = {INT_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(a, b)
+				return math.floor(a / b)
+			end,
+		},
+		{
+			name = "product",
+			parameters = {dummy("right", INT_TYPE)},
+			returnTypes = {INT_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(a, b)
+				return a * b
+			end,
+		},
+		{
+			name = "sum",
+			parameters = {dummy("right", INT_TYPE)},
+			returnTypes = {INT_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(a, b)
+				return a + b
+			end,
+		},
+		{
+			name = "difference",
+			parameters = {dummy("right", INT_TYPE)},
+			returnTypes = {INT_TYPE},
+			modifier = "method",
+			container = "Int",
+			foreign = true,
+			bang = false,
+			ensuresAST = {},
+			requiresAST = {},
+			logic = false,
+			eval = function(a, b)
+				return a - b
+			end,
 		},
 	},
+}
+
+local BUILTIN_DEFINITIONS = freeze {
 	{
 		type = STRING_TYPE,
 		name = "String",
@@ -416,6 +419,7 @@ local BUILTIN_DEFINITIONS = freeze {
 			}
 		},
 	},
+	INT_DEF,
 	BOOLEAN_DEF,
 	{
 		type = UNIT_TYPE,

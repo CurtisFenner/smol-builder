@@ -1,0 +1,12 @@
+package test;
+
+class Test {
+	static foo(n Int) Int
+	ensures n < return {
+		return n + 1;
+	}
+
+	static main() Unit {
+
+	}
+}
