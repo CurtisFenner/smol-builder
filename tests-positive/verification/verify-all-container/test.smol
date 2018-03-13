@@ -1,7 +1,7 @@
 package test;
 import core;
 
-union Map[#K, #V | #K is core:Eq[#K], #V is core:Eq[#V]] is core:Eq[Map[#K, #V]] {
+union Map[#K, #V | #K is core:Eq, #V is core:Eq] is core:Eq {
 	var empty Unit;
 	var addition core:Pair[core:Pair[#K, #V], Map[#K, #V]];
 

@@ -1687,7 +1687,7 @@ interface Showable {
 	method show() String;
 }
 
-union Option[#T | #T is Eq[#T]] {
+union Option[#T | #T is Eq] {
 	var some #T;
 	var none Unit;
 
@@ -1711,7 +1711,7 @@ union Option[#T | #T is Eq[#T]] {
 	}
 }
 
-class Pair[#A, #B | #A is Eq[#A], #B is Eq[#B]] is Eq[Pair[#A, #B]] {
+class Pair[#A, #B | #A is Eq, #B is Eq] is Eq {
 	var left #A;
 	var right #B;
 
@@ -1736,18 +1736,18 @@ class Pair[#A, #B | #A is Eq[#A], #B is Eq[#B]] is Eq[Pair[#A, #B]] {
 	}
 }
 
-interface Orderable[#T] {
+interface Orderable {
 	// RETURNS true when this is smaller than other in this ordering.
-	method lessThan(other #T) Boolean;
+	method lessThan(other #Self) Boolean;
 }
 
-interface Eq[#T] {
+interface Eq {
 	// RETURNS true when these elements are equal such that
 	// (a == b) => f(a) == f(b)
-	method eq(other #T) Boolean;
+	method eq(other #Self) Boolean;
 }
 
-class WInt is Eq[WInt] {
+class WInt is Eq {
 	var value Int;
 
 	method get() Int ensures return == this.value {
