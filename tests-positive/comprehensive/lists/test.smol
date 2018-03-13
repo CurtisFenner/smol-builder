@@ -55,6 +55,19 @@ class List[#T] {
 	requires this.isEmpty().not() {
 		return new(inner = this.inner.cons.getRest());
 	}
+
+	method length() Int
+	ensures (0 == return).or(0 < return) {
+		match this.inner {
+			case n nil {
+				return 0;
+			}
+			case c cons {
+				assert (this.rest().length() == 0).or(0 < this.rest().length());
+				return this.rest().length() + 1;
+			}
+		}
+	}
 }
 
 interface BinFun[#A, #B, #R] {
