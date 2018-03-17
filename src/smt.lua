@@ -35,22 +35,25 @@ local function copywith(t, k, v)
 end
 
 -- RETURNS a string representation of a CNF clause (for debugging)
-local function showClause(theory, c)
+local function showClause(theory, c, assignment)
+	assignment = assignment or {}
 	local terms = {}
 	for i = 1, #c do
 		terms[i] = theory:canonKey(c[i][1])
 		if not c[i][2] then
 			terms[i] = "~(" .. terms[i] .. ")"
 		end
+		terms[i] = terms[i] .. " " .. tostring(c[i][1])
 	end
 	return "[" .. table.concat(terms, " || ") .. "]"
 end
 
 -- RETURNS a string representation of a CNF formula (for debugging)
-local function showCNF(theory, n)
+local function showCNF(theory, n, assignment)
+	assignment = assignment or {}
 	local clauses = {}
 	for i = 1, #n do
-		clauses[i] = showClause(theory, n[i])
+		clauses[i] = showClause(theory, n[i], assignment)
 	end
 	return "&& " .. table.concat(clauses, "\n&& ")
 end
@@ -185,22 +188,22 @@ local function simplifyCNF(theory, cnf, assignment)
 
 	local cs = {}
 	for _, clause in ipairs(cnf) do
+		assert(1 <= #clause)
+
 		-- Simplify a clause
 		local c = {}
-		local contradiction = false
 		local satisfied = false
 
 		-- Search the clause of terms with known truth assignments
 		for _, term in ipairs(clause) do
 			local e, truth = term[1], term[2]
 			assert(type(truth) == "boolean")
-			if assignment[e] ~= nil then
+			if assignment[e] == true or assignment[e] == false then
 				if assignment[e] == truth then
 					satisfied = true
 				else
 					-- If only false terms are left, this clause is
 					-- unsatisfiable.
-					contradiction = true
 				end
 			else
 				table.insert(c, term)
@@ -211,10 +214,12 @@ local function simplifyCNF(theory, cnf, assignment)
 			-- Do not add empty clauses;
 			-- empty clauses may represent True or False.
 			if #c == 0 then
-				assert(contradiction)
+				-- An empty clause that is not satisfied only occurs from
+				-- all of the terms being contradicted by the assignment
 				profile.close "simplifyCNF"
 				return false
 			else
+				assert(1 <= #c)
 				table.insert(cs, c)
 			end
 		end
@@ -240,20 +245,99 @@ local function cnfSize(cnf)
 	return count
 end
 
+-- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
+-- according to the theory as a CNF clause
+local function unsatisfiableCoreClause(theory, assignment, order)
+	assertis(theory, "Theory")
+	assertis(assignment, mapType(theory.assertion_t, "boolean"))
+	assertis(order, listType(theory.assertion_t))
+	assert(#order == #table.keys(assignment))
+	assert(not theory:isSatisfiable(assignment))
+
+	local core = {}
+	local reduced = assignment
+
+	for _, id in ipairs(order) do
+		--assert(isimmutable(id), "assertion_t values must be immutable")
+
+		--assert(not theory:isSatisfiable(reduced))
+		assert(type(assignment[id]) == "boolean")
+
+		local without = table.with(reduced, id, nil)
+		if not theory:isSatisfiable(without) then
+			-- This term is NOT part of the core, because removing it does not
+			-- improve satisfiability
+			reduced = without
+		else
+			-- This term IS part of the core, because removing it unblocks
+			-- satisfiability
+			table.insert(core, {id, not assignment[id]})
+		end
+	end
+
+	-- Assert that the core clause is in fact unsatisfiable
+	-- local coreMap = {}
+	-- for _, e in ipairs(core) do
+	-- 	coreMap[e[1]] = not e[2]
+	-- end
+	-- assert(#table.keys(coreMap) == #table.keys(reduced), "#keys don't match")
+	-- for key, value in pairs(coreMap) do
+	-- 	assert(coreMap[key] == reduced[key])
+	-- end
+	--assert(not theory:isSatisfiable(coreMap))
+
+	return core
+end
+
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
--- RETURNS false when no satisfaction is possible
+-- RETURNS false, unsat core when no satisfaction is possible
 -- Does NOT modify assignment
-local function cnfSAT(theory, cnf, assignment, odds)
+local function cnfSAT(theory, cnf, assignment)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
 
+	cnf = simplifyCNF(theory, cnf, assignment)
+	if not cnf then
+		return false, {}
+	end
+
+	-- print()
+	-- print("# cnfSat(theory, cnf, assignment)")
+	-- for key, v in spairs(assignment, function(k) return theory:canonKey(k) end) do
+	-- 	print(theory:canonKey(key), key, "=>", v)
+	-- end
+	-- print()
+	-- print(showCNF(theory, cnf, assignment))
+	-- print()
+
 	-- Find an assignment that the theory accepts
 	if #cnf == 0 then
+		-- Ask the theory if the assignment is consistent
 		profile.open("theory:isSatisfiable")
 		local out = theory:isSatisfiable(assignment)
 		profile.close("theory:isSatisfiable")
-		return out and assignment
+
+		if not out then
+			-- TODO: ideally, these would be in reverse order
+			local keys = table.keys(assignment)
+
+			-- Sort for determinism
+			table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
+
+			-- Ask the theory for a minimal explanation of why this does not
+			-- work in order to prune the SAT search space
+			local coreClause = unsatisfiableCoreClause(theory, assignment, keys)
+
+			-- print("@@@ Unsat Core:")
+			-- print("", showCNF(theory, {coreClause}))
+			assert(1 <= #coreClause)
+
+			return false, {coreClause}
+		end
+
+		assert(assignment)
+		return assignment
 	end
 
 	-- Find the smallest clause
@@ -266,58 +350,44 @@ local function cnfSAT(theory, cnf, assignment, odds)
 
 	local smallestClause = cnf[smallestClauseIndex]
 	assert(#smallestClause >= 1)
-	if #smallestClause == 1 then
-		--profile.open "unit clause"
-
-		-- Unit clauses have exactly one way to assign
-		local term, truth = smallestClause[1][1], smallestClause[1][2]
-		assert(assignment[term] == nil)
-		local with = copywith(assignment, term, truth)
-		local simplified = simplifyCNF(theory, cnf, with)
-
-		-- Ask the theory for additional clauses
-		profile.open "theory:additionalClauses"
-		local additional = theory:additionalClauses(with, term, simplified)
-		profile.close "theory:additionalClauses"
-		for _, add in ipairs(additional) do
-			local addCNF = toCNF(theory, add, true, {})
-			simplified = andCNF(simplified, addCNF)
-		end
-
-		if not simplified then
-			--profile.close "unit clause"
-			return false
-		end
-
-		local out = cnfSAT(theory, simplified, with, 0)
-		--profile.close "unit clause"
-		return out
-	end
 
 	-- Try each truth assignment of the first term in the first clause
-	--profile.open("decide yes")
 	local t1 = smallestClause[1][1]
-	local with = copywith(assignment, t1, smallestClause[1][2])
-	local simplified = simplifyCNF(theory, cnf, with)
-	local additional = theory:additionalClauses(with, t1, simplified)
+	local withPositive = copywith(assignment, t1, smallestClause[1][2])
+	local cnfPositive = simplifyCNF(theory, cnf, withPositive)
+	local additional = theory:additionalClauses(withPositive, t1, cnfPositive)
 	for _, addition in ipairs(additional) do
-		local addCNF = toCNF(theory, add, true, {})
-		simplified = andCNF(simplified, addCNF)
+		local addCNF = toCNF(theory, addition, true, {})
+		cnfPositive = andCNF(cnfPositive, addCNF)
 	end
-	local out = simplified and cnfSAT(theory, simplified, with, 1)
-	--profile.close("decide yes")
-	if out then
-		return out
+
+	local unsatCoreCNF = {}
+
+	if cnfPositive then
+		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, 1)
+		if out then
+			return out
+		end
+		unsatCoreCNF = betterCNF
+		cnf = andCNF(cnf, betterCNF)
+	else
+		-- It's a contradiction for `t1` to be assigned `smallestClause[1][2]`
+		-- according to simplifyCNF
 	end
 
 	-- Then it can only be satisfied with no
 	-- Add this to the set to prune more cases
-	--profile.open("decide no")
-	local with = copywith(assignment, t1, not smallestClause[1][2])
-	local simplified = simplifyCNF(theory, cnf, with)
-	local out = simplified and cnfSAT(theory, simplified, with, 1)
-	--profile.close("decide no")
-	return out
+	local withNegative = copywith(assignment, t1, not smallestClause[1][2])
+	local cnfNegative = simplifyCNF(theory, cnf, withNegative)
+	if not cnfNegative then
+		return false, unsatCoreCNF
+	end
+
+	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, 1)
+	if out then
+		return out
+	end
+	return false, andCNF(unsatCoreCNF, moreUnsatCoreCNF)
 end
 
 -- RETURNS false | satisfaction
@@ -367,8 +437,8 @@ local plaintheory = {assertion_t = "any"}
 -- Test theory
 function plaintheory:isSatisfiable(model)
 	local anyGood = false
-	for x = 1, 2 do
-		for y = 1, 2 do
+	for x = 1, 4 do
+		for y = 1, 4 do
 			local good = true
 			for k, v in pairs(model) do
 				assert(type(v) == "boolean")
@@ -376,7 +446,7 @@ function plaintheory:isSatisfiable(model)
 					local e = k[2]
 					e = e:gsub("x", tostring(x))
 					e = e:gsub("y", tostring(y))
-					local left, right = e:match("^(%d+) == (%d+)$")
+					local left, right = e:match("^(%d+)%s*==%s*(%d+)$")
 					assert(left, "wrong pattern in `" .. e .. "`")
 					if (left == right) ~= v then
 						--print("\t\t\tfails for", k[2], "expected", v, "got", left == right)
@@ -489,6 +559,28 @@ assert(not implies(
 	},
 	{"f", "y == 2"}
 ))
+
+-- Performance test
+for N = 5, 15, 1 do
+	--print(string.rep("=", 80))
+	local begin = os.clock()
+	local q = {"f", "x == 1"}
+	for i = 1, N do
+		local clause = {
+			"x == " .. math.random(6, 999),
+			"x == " .. math.random(6, 999),
+			"x " .. string.rep(" ", i + 1) .. " == 1"
+		}
+
+		local a = freeze {"f", table.remove(clause, math.random(#clause))}
+		local b = freeze {"f", table.remove(clause, math.random(#clause))}
+		local c = freeze {"f", table.remove(clause, math.random(#clause))}
+		local f = {"or", a, {"or", b, c}}
+		q = {"and", q, f}
+	end
+	assert(isSatisfiable(plaintheory, q))
+	--print("N\tdt\t" .. N .. "\t" .. os.clock() - begin)
+end
 
 --------------------------------------------------------------------------------
 

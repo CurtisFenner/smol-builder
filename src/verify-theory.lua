@@ -362,7 +362,7 @@ function theory:additionalClauses(model, term, cnf)
 			-- TODO: PERFORMANCE: filter by triggers, see
 			-- https://doi.org/10.1007/978-3-540-73595-3_12
 			local opportunities = {}
-			for _, x in pairs(canon.relevant) do
+			for _, x in spairs(canon.relevant) do
 				assertis(x, "Assertion")
 
 				local tx = typeOfAssertion(x)
@@ -462,7 +462,7 @@ function theory:isSatisfiable(modelInput)
 
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
-	for assertion, truth in pairs(simple) do
+	for assertion, truth in spairs(simple, showAssertion) do
 		if assertion.tag == "method" and assertion.signature.name == "eq" then
 			assert(#assertion.arguments == 1)
 			local left = canon:scan(assertion.base)
@@ -498,7 +498,7 @@ function theory:isSatisfiable(modelInput)
 		assertis(of, "Assertion")
 
 		local out = {}
-		for _, other in pairs(canon.relevant) do
+		for _, other in spairs(canon.relevant) do
 			if eq:query(other, of) then
 				-- Only evaluate "terminal" constants
 				-- (Builds bottom up iteratively)
@@ -523,7 +523,7 @@ function theory:isSatisfiable(modelInput)
 	local function propagateConstants()
 		local keys = table.keys(canon.relevant)
 		local eqs = {}
-		for _, key in ipairs(keys) do
+		for key in spairs(canon.relevant) do
 			local a = canon.relevant[key]
 			local constant = evaluateConstantAssertion(a, equivalentConstant)
 			if constant ~= nil then
@@ -543,7 +543,7 @@ function theory:isSatisfiable(modelInput)
 
 	local byStructure = {}
 
-	for _, x in pairs(canon.relevant) do
+	for _, x in spairs(canon.relevant) do
 		local s = approximateStructure(x)
 		byStructure[s] = byStructure[s] or {}
 		table.insert(byStructure[s], x)

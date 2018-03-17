@@ -64,6 +64,8 @@ class List[#T] {
 			}
 			case c cons {
 				assert (this.rest().length() == 0).or(0 < this.rest().length());
+				assert 1 == (0 + 1);
+				assert 0 < (this.rest().length() + 1);
 				return this.rest().length() + 1;
 			}
 		}

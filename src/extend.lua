@@ -165,12 +165,13 @@ function ripairs(list)
 	return ripairsit, list, #list + 1
 end
 
-function spairs(t)
+function spairs(t, vf)
 	local keys = {}
 	for key in pairs(t) do
 		keys[#keys + 1] = key
 	end
-	table.sort(keys)
+	vf = vf or function(x) return x end
+	table.sort(keys, function(a, b) return vf(a) < vf(b) end)
 	local i = 0
 	return function()
 		i = i + 1
