@@ -257,34 +257,36 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 	local core = {}
 	local reduced = assignment
 
-	for _, id in ipairs(order) do
-		--assert(isimmutable(id), "assertion_t values must be immutable")
+	local i = 1
+	local chunk = math.ceil(#order / 6)
+	while i <= #order do
+		local without = reduced
 
-		--assert(not theory:isSatisfiable(reduced))
-		assert(type(assignment[id]) == "boolean")
+		-- Remove the first `chunk` elements
+		for j = i, math.min(#order, i + chunk - 1) do
+			without = table.with(without, order[j], nil)
+		end
 
-		local without = table.with(reduced, id, nil)
-		if not theory:isSatisfiable(without) then
-			-- This term is NOT part of the core, because removing it does not
-			-- improve satisfiability
+		local sat = theory:isSatisfiable(without)
+		if not sat then
+			-- Constraints [i ... i + chunk - 1] are not part of the
+			-- unsatisfiable core, as it remains unsatisfiable without those
+			i = i + chunk
+			chunk = chunk * 2
 			reduced = without
 		else
-			-- This term IS part of the core, because removing it unblocks
-			-- satisfiability
-			table.insert(core, {id, not assignment[id]})
+			-- At least some of [i ... i + chunk - 1] are part of the unsat
+			-- core, since it became satisifiable after lifting them
+			if chunk == 1 then
+				-- Thus the ONLY term MUST be in the unsatisfiable core
+				table.insert(core, {order[i], not assignment[order[i]]})
+				i = i + 1
+			else
+				-- Reduce the number of cores being considered
+				chunk = 1
+			end
 		end
 	end
-
-	-- Assert that the core clause is in fact unsatisfiable
-	-- local coreMap = {}
-	-- for _, e in ipairs(core) do
-	-- 	coreMap[e[1]] = not e[2]
-	-- end
-	-- assert(#table.keys(coreMap) == #table.keys(reduced), "#keys don't match")
-	-- for key, value in pairs(coreMap) do
-	-- 	assert(coreMap[key] == reduced[key])
-	-- end
-	--assert(not theory:isSatisfiable(coreMap))
 
 	return core
 end
