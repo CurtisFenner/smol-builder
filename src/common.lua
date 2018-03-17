@@ -1,7 +1,14 @@
 -- common.lua contains functions in common to many files (semantics, codegen,
 -- verification)
 
+local tokenization = import "tokenization.lua"
 local syntax = import "syntax.lua"
+
+-- RETURNS a parse object, or quits with a syntax error
+local function parseKind(s, k)
+	local tokens = tokenization(s, "<compiler-core>")
+	return syntax.parseKind(tokens, k)
+end
 
 -- RETURNS a string containing the contents of the source code within this
 -- Location
@@ -30,6 +37,18 @@ local function excerpt(location)
 		out = out .. source[line]:sub(low, high)
 	end
 	return out
+end
+
+local function locationBrief(location)
+	assertis(location, "Location")
+	
+	local begins, ends = location.begins, location.ends
+	if type(begins) == "string" or type(ends) == "string" then
+		-- Internal code
+		return "<at " .. begins .. ">"
+	end
+
+	return begins.filename .. ":" .. begins.line .. ":" .. begins.column
 end
 
 -- RETURNS a string representing the variable
@@ -356,7 +375,9 @@ local INT_DEF = freeze {
 			container = "Int",
 			foreign = true,
 			bang = false,
-			ensuresAST = {},
+			ensuresAST = {
+				parseKind("ensures this < return when 0 < right", "ensures"),
+			},
 			requiresAST = {},
 			logic = false,
 			eval = function(a, b)
@@ -541,5 +562,6 @@ return freeze {
 	typeOfAssertion = typeOfAssertion,
 
 	excerpt = excerpt,
+	locationBrief = locationBrief,
 	variableDescription = variableDescription,
 }

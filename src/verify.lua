@@ -648,11 +648,6 @@ local function mustModel(scope, target)
 	local predicates, inNow = getPredicateSet(scope, {}, "")
 	profile.close "translating-in-scope"
 
-	--print("\n\n\n\n")
-	--for i, p in ipairs(predicates) do
-	--	print("& " .. verifyTheory:canonKey(p))
-	--end
-
 	assertis(target, "Assertion")
 	local result = inNow(target)
 

@@ -179,7 +179,7 @@ end
 -- RETURNS a CNF simplified using the assignment such that all terms with
 -- all terms with assignments do not appear in the theory
 -- RETURNS false if the given cnf is unsatisfiable given the assignment
-local function simplifyCNF(cnf, assignment)
+local function simplifyCNF(theory, cnf, assignment)
 	profile.open "simplifyCNF"
 	assert(type(assignment) == "table")
 
@@ -225,6 +225,21 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS the number of unique variables in the CNF formula
+local function cnfSize(cnf)
+	local terms = {}
+	for _, clause in ipairs(cnf) do
+		for _, tpair in ipairs(clause) do
+			terms[tpair[1]] = true
+		end
+	end
+	local count = 0
+	for k in pairs(terms) do
+		count = count + 1
+	end
+	return count
+end
+
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no satisfaction is possible
@@ -258,7 +273,7 @@ local function cnfSAT(theory, cnf, assignment, odds)
 		local term, truth = smallestClause[1][1], smallestClause[1][2]
 		assert(assignment[term] == nil)
 		local with = copywith(assignment, term, truth)
-		local simplified = simplifyCNF(cnf, with)
+		local simplified = simplifyCNF(theory, cnf, with)
 
 		-- Ask the theory for additional clauses
 		profile.open "theory:additionalClauses"
@@ -283,7 +298,12 @@ local function cnfSAT(theory, cnf, assignment, odds)
 	--profile.open("decide yes")
 	local t1 = smallestClause[1][1]
 	local with = copywith(assignment, t1, smallestClause[1][2])
-	local simplified = simplifyCNF(cnf, with)
+	local simplified = simplifyCNF(theory, cnf, with)
+	local additional = theory:additionalClauses(with, t1, simplified)
+	for _, addition in ipairs(additional) do
+		local addCNF = toCNF(theory, add, true, {})
+		simplified = andCNF(simplified, addCNF)
+	end
 	local out = simplified and cnfSAT(theory, simplified, with, 1)
 	--profile.close("decide yes")
 	if out then
@@ -294,7 +314,7 @@ local function cnfSAT(theory, cnf, assignment, odds)
 	-- Add this to the set to prune more cases
 	--profile.open("decide no")
 	local with = copywith(assignment, t1, not smallestClause[1][2])
-	local simplified = simplifyCNF(cnf, with)
+	local simplified = simplifyCNF(theory, cnf, with)
 	local out = simplified and cnfSAT(theory, simplified, with, 1)
 	--profile.close("decide no")
 	return out
@@ -315,7 +335,7 @@ end
 -- RETURNS false, counterexample | true
 local function implies(theory, givens, expression)
 	profile.open("smt.implies setup")
-
+	
 	-- Is the case where givens are true but expression false satisfiable?
 	local args = {}
 	local truths = {}
@@ -323,10 +343,10 @@ local function implies(theory, givens, expression)
 		table.insert(args, givens[i])
 		table.insert(truths, true)
 	end
-
+	
 	table.insert(args, expression)
 	table.insert(truths, false)
-
+	
 	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
 	profile.close("smt.implies setup")
 
