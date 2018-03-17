@@ -246,7 +246,7 @@ if mode ~= "-" then
 			if status ~= 0 then
 				FAIL {name = "+ " .. test, expected = 0, got = status}
 			else
-				local bin = "tests-positive" .. SEP .. test .. SEP .. "bin"
+				local bin = "\"\"tests-positive" .. SEP .. test .. SEP .. "bin\"\""
 				local flags = {
 					"-g3",
 					"-pedantic",
@@ -263,7 +263,7 @@ if mode ~= "-" then
 				local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
 				if compiles then
 					local outFile = path {"tests-positive", test, "out.last"}
-					local runs = shell(bin .. " > " .. outFile)
+					local runs = shell("" .. bin .. " > " .. outFile)
 					if runs then
 						local correctFile = path {"tests-positive", test, "out.correct"}
 						local correct = shell("diff -w " .. correctFile .. " " .. outFile)
