@@ -151,6 +151,7 @@ function FAIL(p)
 	print("FAIL: " .. p.name)
 end
 
+local BEGIN_TIME = os.time()
 function REPORT()
 	printHeader("Detailed Results", "@", "center")
 
@@ -171,6 +172,8 @@ function REPORT()
 	printHeader("Summary Results", "@", "center")
 	print("Passed: " .. #passes)
 	print("Failed: " .. #fails)
+	local elapsed = os.difftime(os.time(), BEGIN_TIME)
+	print("Total time elapsed: " .. tostring(elapsed) .. " seconds")
 	if #fails == 0 and #passes > 0 then
 		print("Happy! :D")
 		os.exit(0)
@@ -242,7 +245,8 @@ if mode ~= "-" then
 			printHeader("TEST " .. test)
 			local before = os.time()
 			local status = compiler("tests-positive/" .. test, "test:Test")
-			print("ELAPSED:", os.time() - before)
+			local elapsed = os.difftime(os.time(), before)
+			print("ELAPSED:", elapsed)
 			if status ~= 0 then
 				FAIL {name = "+ " .. test, expected = 0, got = status}
 			else
