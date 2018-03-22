@@ -727,6 +727,7 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 		containingSignature = method,
 		allDefinitions = environment.allDefinitions,
 		thisVariable = invocation.this,
+		ignoreEnsures = environment.ignoreEnsures,
 
 		-- Can be not-false when checking `ensures` at `return` statement
 		returnOuts = environment.returnOuts,
@@ -789,8 +790,10 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 		allDefinitions = environment.allDefinitions,
 		thisVariable = invocation.this,
 		returnOuts = returnOuts,
+		ignoreEnsures = environment.ignoreEnsures,
 	}
 
+	-- Initialize the scope with just the arguments
 	local scope = {{}}
 	for i, argument in ipairs(invocation.arguments) do
 		scope[1][method.parameters[i].name] = argument
@@ -963,6 +966,50 @@ local function compileSubexpressions(expressions, purpose, location, scope, envi
 	return buildBlock(evaluation), freeze(outs)
 end
 
+-- RETURNS a ProofSt
+local function generateAssumeStatements(signature, info, environment)
+	assertis(signature, "Signature")
+	assertis(info, recordType {destinations = listType "VariableIR"})
+	assertis(environment, recordType {ignoreEnsures = mapType("string", "integer")})
+
+	if #signature.ensuresAST == 0 then
+		-- Nothing to be done
+		return buildBlock {}
+	end
+
+	local fullName = signature.container .. ":" .. signature.name
+	local depth = 0
+	if table.haskey(environment.ignoreEnsures, fullName) then
+		depth = environment.ignoreEnsures[fullName]
+	end
+
+	if depth >= 1 then
+		print("Warning: Skipping ensures of " .. fullName .. " gives up some amount of completeness")
+		--print(show(info))
+		return buildBlock {}
+	end
+
+	local evaluation = {}
+	for _, ensure in ipairs(signature.ensuresAST) do
+		local ignoreFurther = table.with(environment.ignoreEnsures, fullName, depth + 1)
+		local subEnvironment = table.with(environment, "ignoreEnsures", ignoreFurther)
+		local assumption = generatePostconditionAssume(
+			ensure,
+			signature,
+			{
+				arguments = info.arguments,
+				this = info.this,
+				container = info.container,
+			},
+			subEnvironment,
+			info.destinations
+		)
+		table.insert(evaluation, assumption)
+	end
+
+	return buildProof(buildBlock(evaluation))
+end
+
 -- RETURNS StatementIR, [VariableIR]
 local function compileMethod(baseInstance, arguments, methodName, bang, location, environment)
 	assertis(baseInstance, "VariableIR")
@@ -1064,20 +1111,13 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		table.insert(evaluation, callSt)
 
 		-- Generate Assume statements
-		for _, ensure in ipairs(method.signature.ensuresAST) do
-			local assumption = generatePostconditionAssume(
-				ensure,
-				method.signature,
-				{
-					arguments = arguments,
-					this = baseInstance,
-					container = baseInstance.type,
-				},
-				environment,
-				destinations
-			)
-			table.insert(evaluation, assumption)
-		end
+		local info = {
+			this = baseInstance,
+			arguments = arguments,
+			destinations = destinations,
+			container = baseInstance.type,
+		}
+		table.insert(evaluation, generateAssumeStatements(method.signature, info, environment))
 
 		return buildBlock(evaluation), freeze(destinations)
 	end
@@ -1191,20 +1231,13 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	})
 
 	-- Generate Assume statements
-	for _, ensure in ipairs(method.ensuresAST) do
-		local assumption = generatePostconditionAssume(
-			ensure,
-			method,
-			{
-				arguments = arguments,
-				this = baseInstance,
-				container = baseInstance.type,
-			},
-			environment,
-			destinations
-		)
-		table.insert(evaluation, assumption)
-	end
+	local info = {
+		this = baseInstance,
+		arguments = arguments,
+		destinations = destinations,
+		container = baseInstance.type,
+	}
+	table.insert(evaluation, generateAssumeStatements(method, info, environment))
 
 	return buildBlock(evaluation), freeze(destinations)
 end
@@ -1315,18 +1348,14 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		assertis(callSt, "StatementIR")
 		table.insert(evaluation, callSt)
 
-		print("TODO: this should be replaced with a forall so that it is not recursive")
 		-- Generate Assume statements
-		for _, ensure in ipairs(static.signature.ensuresAST) do
-			local assumption = generatePostconditionAssume(
-				ensure,
-				static.signature,
-				{arguments = argumentSources, this = false, container = t},
-				environment,
-				destinations
-			)
-			table.insert(evaluation, assumption)
-		end
+		local info = {
+			this = false,
+			arguments = argumentSources,
+			destinations = destinations,
+			container = t,
+		}
+		table.insert(evaluation, generateAssumeStatements(static.signature, info, environment))
 
 		return buildBlock(evaluation), freeze(destinations)
 	end
@@ -1445,16 +1474,13 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	table.insert(evaluation, call)
 
 	-- Generate Assume statements
-	for _, ensure in ipairs(method.ensuresAST) do
-		local assumption = generatePostconditionAssume(
-			ensure,
-			method,
-			{arguments = argumentSources, this = false, container = t},
-			environment,
-			outs
-		)
-		table.insert(evaluation, assumption)
-	end
+	local info = {
+		this = false,
+		arguments = argumentSources,
+		destinations = outs,
+		container = t,
+	}
+	table.insert(evaluation, generateAssumeStatements(method, info, environment))
 
 	return buildBlock(evaluation), freeze(outs)
 end
@@ -1470,6 +1496,7 @@ function compileExpression(pExpression, scope, environment)
 		containingSignature = "Signature",
 		allDefinitions = listType "Definition",
 		thisVariable = choiceType(constantType(false), "VariableIR"),
+		ignoreEnsures = mapType("string", "integer"),
 	})
 	local resolveType = environment.resolveType
 	local containerType = environment.containerType
@@ -2804,6 +2831,7 @@ local function semanticsSmol(sources, main)
 					allDefinitions = allDefinitions,
 					thisVariable = thisVariable,
 					returnOuts = returnOuts,
+					ignoreEnsures = {},
 				}
 
 				local function checkBoolean(e, purpose)
@@ -2891,6 +2919,7 @@ local function semanticsSmol(sources, main)
 			allDefinitions = allDefinitions,
 			thisVariable = thisVariable,
 			returnOuts = false,
+			ignoreEnsures = {},
 		}
 
 		local compileBlock

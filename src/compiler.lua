@@ -291,7 +291,10 @@ class Pair[#A, #B | #A is Eq, #B is Eq] is Eq {
 
 interface Orderable {
 	// RETURNS true when this is smaller than other in this ordering.
-	method lessThan(other #Self) Boolean;
+	method lessThan(other #Self) Boolean
+	// ensures this.lessThan(this).not()
+	// ensures forall (middle #Self) return when this.lessThan(middle).and( middle.lessThan(other)  )
+	;
 }
 
 interface Eq {

@@ -1,0 +1,17 @@
+package test;
+
+class Test {
+
+	static positive() Int
+	ensures 0 < return {
+		return 3;
+	}
+
+	static main() Unit {
+		//assert Test.positive() < (Test.positive() + 1);
+		// assume forall (middle Int) 0 < (Test.positive() + 1) when (0 < middle).and(middle < (Test.positive() + 1))
+		var x Boolean = 0 < (Test.positive() + 1);
+		assert (0 < Test.positive()).and(Test.positive() < (Test.positive() + 1));
+		assert x;
+	}
+}

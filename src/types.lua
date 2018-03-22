@@ -57,7 +57,7 @@ local function showAdd(object, indent, out)
 			showAdd(key, indent + 1, line)
 			table.insert(line, "] = ")
 			if rawequal(key, "location") then
-				table.insert(line, "<location>")
+				table.insert(line, "<location " .. (import "common.lua").locationBrief(value) .. ">")
 			else
 				showAdd(value, indent + 1, line)
 			end
@@ -400,7 +400,7 @@ local normalizedT = {}
 
 -- ASSERTS that `value` is of the specified type `t`
 function assertis(value, t)
-	do return true end
+	--do return true end
 
 	-- TYPE_DESCRIPTION must be injective
 	-- Normalize types so that memoization works

@@ -108,6 +108,21 @@ function table.with(object, key, newValue)
 	return freeze(newObject)
 end
 
+-- RETURNS whether or not a table has a given key
+-- TODO: fix to be fast on frozen objects
+function table.haskey(object, key)
+	if not getmetatable(object) then
+		return object[key] ~= nil
+	end
+
+	for k, v in pairs(object) do
+		if key == k then
+			return true
+		end
+	end
+	return false
+end
+
 -- RETURNS a list produced by mapping each element of `list` through `f`
 function table.map(f, list, ...)
 	assert(type(f) == "function", "the first argument to table.map must be a function")

@@ -721,7 +721,7 @@ local function parseKind(tokens, kind)
 	local stream = Stream(tokens)
 
 	local source, rest = parsers[kind](stream, parsers)
-	assert(rest ~= nil)
+	assert(rest ~= nil, "failed to parse `" .. kind .. "`")
 	if rest:size() ~= 0 then
 		quit("The compiler expected another definition ", rest:location())
 	end

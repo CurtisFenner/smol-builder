@@ -417,6 +417,159 @@ local function approximateStructure(x)
 end
 approximateStructure = memoized(1, approximateStructure)
 
+-- RETURNS true when a and b are the same signature
+local function isSignatureEqual(a, b)
+	assertis(a, "Signature")
+	assertis(b, "Signature")
+
+	assertis(a.name, "string")
+	assertis(a.container, "string")
+
+	return a.name == b.name and a.container == b.container
+end
+
+-- RETURNS true when assertions x, y are equivalent due to being
+-- equal functions of equal arguments 
+local function childrenSame(eq, x, y)
+	assert(eq)
+	assertis(x, "Assertion")
+	assertis(y, "Assertion")
+	assert(not eq:query(x, y))
+
+	if x.tag ~= y.tag then
+		-- Elements that are structurally different cannot be shown
+		-- to be the same here
+		return false
+	elseif TERMINAL_TAG[x.tag] then
+		-- Terminal elements that aren't in the same representative group
+		-- cannot be shown to be equal here
+		return false
+	elseif x.tag == "method" then
+		if not isSignatureEqual(x.signature, y.signature) then
+			return false
+		elseif not eq:query(x.base, y.base) then
+			return false
+		end
+
+		-- The same method name on the same base type must be the same
+		-- signature
+		assert(#x.arguments == #y.arguments)
+		for i in ipairs(x.arguments) do
+			if not eq:query(x.arguments[i], y.arguments[i]) then
+				return false
+			end
+		end
+		return true
+	elseif x.tag == "static" then
+		if not isSignatureEqual(x.signature, y.signature) then
+			return false
+		end
+		assert(#x.arguments == #y.arguments)
+		for i in ipairs(x.arguments) do
+			if not eq:query(x.arguments[i], y.arguments[i]) then
+				return false
+			end
+		end
+		return true
+	elseif x.tag == "field" then
+		if x.fieldName ~= y.fieldName then
+			return false
+		end
+		return eq:query(x.base, y.base)
+	elseif x.tag == "isa" then
+		if x.variant ~= y.variant then
+			return false
+		end
+		return eq:query(x.base, y.base)
+	elseif x.tag == "variant" then
+		if x.variantName ~= y.variantName then
+			return false
+		end
+		return eq:query(x.base, y.base)
+	end
+	error("TODO childrenSame for tag `" .. x.tag .. "`")
+end
+
+-- RETURNS a set (map from Assertion to true)
+local function thoseReferencingAny(canon, list)
+	assertis(list, listType "Assertion")
+
+	local out = {}
+	for _, element in pairs(list) do
+		local references = canon.referencedBy[element]
+		if references then
+			for i = 1, #references do
+				out[references[i]] = true
+			end
+		end
+	end
+	return out
+end
+
+-- RETURNS an unboxed constant, false when there is one equal to the given
+-- assertion
+-- RETURNS nil, true if there is no such constant
+-- RETURNS nil, true when there is a conflict present
+local function equivalentConstant(eq, of)
+	assertis(of, "Assertion")
+	local constantConflict = false
+
+	local out = {}
+
+	for _, other in spairs(eq:classOf(of)) do
+		if eq:query(other, of) then
+			-- Only evaluate "terminal" constants
+			-- (Builds bottom up iteratively)
+			local constant = evaluateConstantAssertion(other, function()
+				return nil, false
+			end)
+			if constant ~= nil then
+				table.insert(out, constant)
+			end
+		end
+	end
+	for i = 2, #out do
+		if out[i] ~= out[1] then
+			return nil, true
+		end
+	end
+
+	return out[1], false
+end
+
+-- RETURNS a list of pairs to make
+-- RETURNS false when a contradiction is discovered
+local function propagateConstants(canon, eq)
+	local keys = table.keys(canon.relevant)
+	local eqs = {}
+	local contradiction = false
+	for key in spairs(canon.relevant) do
+		local a = canon.relevant[key]
+		local constant = evaluateConstantAssertion(a, function(v)
+			local value, con = equivalentConstant(eq, v)
+			if con then
+				contradiction = true
+			end
+			return value
+		end)
+		if constant ~= nil then
+			local boxed = canon:scan(boxConstant(constant))
+
+			-- Insert representative, so that it can be used in UF
+			eq:tryinit(boxed)
+
+			if not eq:query(a, boxed) then
+				table.insert(eqs, {a, boxed})
+			end
+		end
+	end
+
+	if contradiction then
+		return false
+	end
+	return eqs
+end
+
 function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
 
@@ -491,153 +644,12 @@ function theory:isSatisfiable(modelInput)
 		eq:init(expression)
 	end
 
-	-- RETURNS an unboxed constant that is equal to the given assertion
-	-- RETURNS nil if there is no such constant
-	local constantConflict = false
-	local function equivalentConstant(of)
-		assertis(of, "Assertion")
-
-		local out = {}
-		for _, other in spairs(canon.relevant) do
-			if eq:query(other, of) then
-				-- Only evaluate "terminal" constants
-				-- (Builds bottom up iteratively)
-				local constant = evaluateConstantAssertion(other, function()
-					return nil
-				end)
-				if constant ~= nil then
-					table.insert(out, constant)
-				end
-			end
-		end
-		for i = 2, #out do
-			if out[i] ~= out[1] then
-				constantConflict = true
-			end
-		end
-
-		return out[1]
-	end
-
-	-- RETURNS nothing
-	local function propagateConstants()
-		local keys = table.keys(canon.relevant)
-		local eqs = {}
-		for key in spairs(canon.relevant) do
-			local a = canon.relevant[key]
-			local constant = evaluateConstantAssertion(a, equivalentConstant)
-			if constant ~= nil then
-				local boxed = canon:scan(boxConstant(constant))
-
-				-- Insert representative, so that it can be used in UF
-				eq:tryinit(boxed)
-
-				if not eq:query(a, boxed) then
-					table.insert(eqs, {a, boxed})
-				end
-			end
-		end
-
-		return eqs
-	end
-
 	local byStructure = {}
-
 	for _, x in spairs(canon.relevant) do
 		local s = approximateStructure(x)
 		byStructure[s] = byStructure[s] or {}
 		table.insert(byStructure[s], x)
 	end
-
-	-- RETURNS true when a and b are the same signature
-	local function isSignatureEqual(a, b)
-		assertis(a, "Signature")
-		assertis(b, "Signature")
-
-		assertis(a.name, "string")
-		assertis(a.container, "string")
-
-		return a.name == b.name and a.container == b.container
-	end
-
-
-	-- RETURNS true when assertions x, y are equivalent due to being
-	-- equal functions of equal arguments 
-	local function childrenSame(x, y)
-		assertis(x, "Assertion")
-		assertis(y, "Assertion")
-		assert(not eq:query(x, y))
-
-		if x.tag ~= y.tag then
-			-- Elements that are structurally different cannot be shown
-			-- to be the same here
-			return false
-		elseif TERMINAL_TAG[x.tag] then
-			-- Terminal elements that aren't in the same representative group
-			-- cannot be shown to be equal here
-			return false
-		elseif x.tag == "method" then
-			if not isSignatureEqual(x.signature, y.signature) then
-				return false
-			elseif not eq:query(x.base, y.base) then
-				return false
-			end
-
-			-- The same method name on the same base type must be the same
-			-- signature
-			assert(#x.arguments == #y.arguments)
-			for i in ipairs(x.arguments) do
-				if not eq:query(x.arguments[i], y.arguments[i]) then
-					return false
-				end
-			end
-			return true
-		elseif x.tag == "static" then
-			if not isSignatureEqual(x.signature, y.signature) then
-				return false
-			end
-			assert(#x.arguments == #y.arguments)
-			for i in ipairs(x.arguments) do
-				if not eq:query(x.arguments[i], y.arguments[i]) then
-					return false
-				end
-			end
-			return true
-		elseif x.tag == "field" then
-			if x.fieldName ~= y.fieldName then
-				return false
-			end
-			return eq:query(x.base, y.base)
-		elseif x.tag == "isa" then
-			if x.variant ~= y.variant then
-				return false
-			end
-			return eq:query(x.base, y.base)
-		elseif x.tag == "variant" then
-			if x.variantName ~= y.variantName then
-				return false
-			end
-			return eq:query(x.base, y.base)
-		end
-		error("TODO childrenSame for tag `" .. x.tag .. "`")
-	end
-
-	-- RETURNS a set (map from Assertion to true)
-	local function thoseReferencingAny(list)
-		assertis(list, listType "Assertion")
-
-		local out = {}
-		for _, element in pairs(list) do
-			local references = canon.referencedBy[element]
-			if references then
-				for i = 1, #references do
-					out[references[i]] = true
-				end
-			end
-		end
-		return freeze(out)
-	end
-	thoseReferencingAny = memoized(1, thoseReferencingAny)
 
 	-- RETURNS nothing
 	local function union(a, b)
@@ -646,8 +658,8 @@ function theory:isSatisfiable(modelInput)
 
 		profile.open "union(a, b)"
 		if not eq:query(a, b) then
-			local thoseThatReferenceA = thoseReferencingAny(eq:classOf(a))
-			local thoseThatReferenceB = thoseReferencingAny(eq:classOf(b))
+			local thoseThatReferenceA = thoseReferencingAny(canon, eq:classOf(a))
+			local thoseThatReferenceB = thoseReferencingAny(canon, eq:classOf(b))
 			eq:union(a, b)
 
 			-- Union all functions of equal arguments
@@ -655,7 +667,7 @@ function theory:isSatisfiable(modelInput)
 			for x in pairs(thoseThatReferenceA) do
 				for y in pairs(thoseThatReferenceB) do
 					if not eq:query(x, y) then
-						if childrenSame(x, y) then
+						if childrenSame(eq, x, y) then
 							profile.open("#sub fun eq")
 							eq:union(x, y)
 							profile.close("#sub fun eq")
@@ -677,7 +689,10 @@ function theory:isSatisfiable(modelInput)
 			union(bin[1], bin[2])
 		end
 		profile.open "propagateConstants"
-		positiveEq = propagateConstants()
+		positiveEq = propagateConstants(canon, eq)
+		if not positiveEq then
+			return false
+		end
 		profile.close "propagateConstants"
 		profile.close("iteration x" .. nEq)
 	end
@@ -733,7 +748,7 @@ function theory:isSatisfiable(modelInput)
 
 	profile.close "#immediately?"
 
-	return not constantConflict
+	return true
 end
 local old = theory.inModel
 theory.inModel = function(...)

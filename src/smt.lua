@@ -252,10 +252,12 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
 	assertis(order, listType(theory.assertion_t))
 	assert(#order == #table.keys(assignment))
-	assert(not theory:isSatisfiable(assignment))
+	--assert(not theory:isSatisfiable(assignment))
 
 	local core = {}
 	local reduced = assignment
+
+	local times = {}
 
 	local i = 1
 	local chunk = math.ceil(#order / 6)
@@ -267,10 +269,13 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 			without = table.with(without, order[j], nil)
 		end
 
+		local before = os.clock()
 		local sat = theory:isSatisfiable(without)
+		table.insert(times, os.clock() - before)
 		if not sat then
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
+			--io.write(("."):rep(chunk))
 			i = i + chunk
 			chunk = chunk * 2
 			reduced = without
@@ -281,13 +286,16 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 				-- Thus the ONLY term MUST be in the unsatisfiable core
 				table.insert(core, {order[i], not assignment[order[i]]})
 				i = i + 1
+				--io.write("*")
 			else
 				-- Reduce the number of cores being considered
 				chunk = 1
 			end
 		end
 	end
-
+	--print()
+	table.sort(times)
+	--print(unpack(times))
 	return core
 end
 
@@ -295,29 +303,25 @@ end
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false, unsat core when no satisfaction is possible
 -- Does NOT modify assignment
-local function cnfSAT(theory, cnf, assignment)
+local function cnfSAT(theory, cnf, assignment, limit)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
+	assert(type(limit) == "number")
 
 	cnf = simplifyCNF(theory, cnf, assignment)
 	if not cnf then
 		return false, {}
 	end
 
-	-- print()
-	-- print("# cnfSat(theory, cnf, assignment)")
-	-- for key, v in spairs(assignment, function(k) return theory:canonKey(k) end) do
-	-- 	print(theory:canonKey(key), key, "=>", v)
-	-- end
-	-- print()
-	-- print(showCNF(theory, cnf, assignment))
-	-- print()
+	--print("#", cnfSize(cnf))
 
 	-- Find an assignment that the theory accepts
 	if #cnf == 0 then
 		-- Ask the theory if the assignment is consistent
 		profile.open("theory:isSatisfiable")
+		--print("?? >>> theory:isSatisfiable?")
 		local out = theory:isSatisfiable(assignment)
+		--print("?? <<< theory:isSatisfiable?")
 		profile.close("theory:isSatisfiable")
 
 		if not out then
@@ -329,13 +333,28 @@ local function cnfSAT(theory, cnf, assignment)
 
 			-- Ask the theory for a minimal explanation of why this does not
 			-- work in order to prune the SAT search space
+			--print("?? [[[ find core clause")
 			local coreClause = unsatisfiableCoreClause(theory, assignment, keys)
+			--print("?? ]]] find core clause")
 
 			-- print("@@@ Unsat Core:")
 			-- print("", showCNF(theory, {coreClause}))
 			assert(1 <= #coreClause)
 
 			return false, {coreClause}
+		end
+
+		if limit == 0 then
+			--print("Limiting with additional clauses!")
+			for key, truth in pairs(assignment) do
+				local additional = theory:additionalClauses(assignment, key, cnf)
+				for _, addition in ipairs(additional) do
+					local addCNF = toCNF(theory, addition, true, {})
+					cnf = andCNF(cnf, addCNF)
+				end
+			end
+
+			return cnfSAT(theory, cnf, assignment, 1)
 		end
 
 		assert(assignment)
@@ -357,16 +376,11 @@ local function cnfSAT(theory, cnf, assignment)
 	local t1 = smallestClause[1][1]
 	local withPositive = copywith(assignment, t1, smallestClause[1][2])
 	local cnfPositive = simplifyCNF(theory, cnf, withPositive)
-	local additional = theory:additionalClauses(withPositive, t1, cnfPositive)
-	for _, addition in ipairs(additional) do
-		local addCNF = toCNF(theory, addition, true, {})
-		cnfPositive = andCNF(cnfPositive, addCNF)
-	end
 
 	local unsatCoreCNF = {}
 
 	if cnfPositive then
-		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, 1)
+		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, limit)
 		if out then
 			return out
 		end
@@ -385,7 +399,7 @@ local function cnfSAT(theory, cnf, assignment)
 		return false, unsatCoreCNF
 	end
 
-	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, 1)
+	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, limit)
 	if out then
 		return out
 	end
@@ -396,8 +410,10 @@ end
 local function isSatisfiable(theory, expression)
 	assert(theory)
 	assert(expression)
-
+	--print(string.rep("=", 80))
+	
 	local cnf = toCNF(theory, expression, true, {})
+	--print("#", cnfSize(cnf), "terms")
 	local sat = cnfSAT(theory, cnf, {}, 0)
 	return sat
 end
@@ -451,7 +467,6 @@ function plaintheory:isSatisfiable(model)
 					local left, right = e:match("^(%d+)%s*==%s*(%d+)$")
 					assert(left, "wrong pattern in `" .. e .. "`")
 					if (left == right) ~= v then
-						--print("\t\t\tfails for", k[2], "expected", v, "got", left == right)
 						good = false
 					end
 				end
@@ -564,7 +579,6 @@ assert(not implies(
 
 -- Performance test
 for N = 5, 15, 1 do
-	--print(string.rep("=", 80))
 	local begin = os.clock()
 	local q = {"f", "x == 1"}
 	for i = 1, N do
@@ -581,7 +595,6 @@ for N = 5, 15, 1 do
 		q = {"and", q, f}
 	end
 	assert(isSatisfiable(plaintheory, q))
-	--print("N\tdt\t" .. N .. "\t" .. os.clock() - begin)
 end
 
 --------------------------------------------------------------------------------

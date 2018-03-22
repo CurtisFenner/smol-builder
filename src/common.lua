@@ -315,7 +315,9 @@ local INT_DEF = freeze {
 			container = "Int",
 			foreign = true,
 			bang = false,
-			ensuresAST = {},
+			ensuresAST = {
+				parseKind("ensures forall (middle Int) return when (this < middle).and(middle < right)", "ensures"),
+			},
 			requiresAST = {},
 			logic = false,
 			eval = function(a, b)
