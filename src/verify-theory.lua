@@ -506,6 +506,35 @@ local function thoseReferencingAny(canon, list)
 	return out
 end
 
+-- RETURNS nothing
+local function union(canon, eq, a, b)
+	assertis(a, "Assertion")
+	assertis(b, "Assertion")
+
+	profile.open "union(a, b)"
+	if not eq:query(a, b) then
+		local thoseThatReferenceA = thoseReferencingAny(canon, eq:classOf(a))
+		local thoseThatReferenceB = thoseReferencingAny(canon, eq:classOf(b))
+		eq:union(a, b)
+
+		-- Union all functions of equal arguments
+		profile.open("#recursive union")
+		for x in pairs(thoseThatReferenceA) do
+			for y in pairs(thoseThatReferenceB) do
+				if not eq:query(x, y) then
+					if childrenSame(eq, x, y) then
+						profile.open("#sub fun eq")
+						eq:union(x, y)
+						profile.close("#sub fun eq")
+					end
+				end
+			end
+		end
+		profile.close("#recursive union")
+	end
+	profile.close "union(a, b)"
+end
+
 -- RETURNS an unboxed constant, false when there is one equal to the given
 -- assertion
 -- RETURNS nil, true if there is no such constant
@@ -651,42 +680,13 @@ function theory:isSatisfiable(modelInput)
 		table.insert(byStructure[s], x)
 	end
 
-	-- RETURNS nothing
-	local function union(a, b)
-		assertis(a, "Assertion")
-		assertis(b, "Assertion")
-
-		profile.open "union(a, b)"
-		if not eq:query(a, b) then
-			local thoseThatReferenceA = thoseReferencingAny(canon, eq:classOf(a))
-			local thoseThatReferenceB = thoseReferencingAny(canon, eq:classOf(b))
-			eq:union(a, b)
-
-			-- Union all functions of equal arguments
-			profile.open("#recursive union")
-			for x in pairs(thoseThatReferenceA) do
-				for y in pairs(thoseThatReferenceB) do
-					if not eq:query(x, y) then
-						if childrenSame(eq, x, y) then
-							profile.open("#sub fun eq")
-							eq:union(x, y)
-							profile.close("#sub fun eq")
-						end
-					end
-				end
-			end
-			profile.close("#recursive union")
-		end
-		profile.close "union(a, b)"
-	end
-
 	-- Union find
 	profile.open "#union-find"
 	while #positiveEq > 0 do
 		local nEq = #positiveEq
 		profile.open("iteration x" .. nEq)
 		for _, bin in ipairs(positiveEq) do
-			union(bin[1], bin[2])
+			union(canon, eq, bin[1], bin[2])
 		end
 		profile.open "propagateConstants"
 		positiveEq = propagateConstants(canon, eq)
@@ -712,41 +712,12 @@ function theory:isSatisfiable(modelInput)
 	end
 	profile.close "#negative =="
 
-	-- RETURNS whether or not it is immediate that `assertion` has truth value
-	-- `truth` in the given model after applying UF for equality
-	local function immediately(assertion, truth)
-		assertis(truth, "boolean")
-
-		-- The boolean literals have known truth assignments
-		if truth then
-			if eq:query(assertion, trueAssertion) then
-				return true
-			end
-		else
-			if eq:query(assertion, falseAssertion) then
-				return true
-			end
-		end
-
-		for given, t in pairs(simple) do
-			if t == truth and eq:query(given, assertion) then
-				return true
-			end
-		end
-		return false
-	end
-
-	profile.open("#immediately?")
-
 	-- 5) Check if the assertion is true
 	-- It may be equal to any true statement
 
-	if immediately(falseAssertion, true) or immediately(trueAssertion, false) then
-		profile.close "#immediately?"
+	if eq:query(falseAssertion, trueAssertion) then
 		return false
 	end
-
-	profile.close "#immediately?"
 
 	return true
 end
