@@ -156,6 +156,7 @@ local OPERATOR_ALIAS = {
 	["-"] = "difference",
 	["<"] = "lessThan",
 	["++"] = "concatenate",
+	["=>"] = "implies",
 }
 
 --------------------------------------------------------------------------------
@@ -316,7 +317,14 @@ local INT_DEF = freeze {
 			foreign = true,
 			bang = false,
 			ensuresAST = {
+				-- Transitive
 				parseKind("ensures forall (middle Int) return when (this < middle).and(middle < right)", "ensures"),
+
+				-- Antireflexive
+				parseKind("ensures return.not() when this == right", "ensures"),
+
+				-- Antisymmetric
+				parseKind("ensures return.not() when right < this", "ensures"),
 			},
 			requiresAST = {},
 			logic = false,

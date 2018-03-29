@@ -19,8 +19,10 @@ REGISTER_TYPE("Theory", recordType {
 	-- RETURNS an object with a consistent identity (strings are simple)
 	canonKey = "function",
 
-	-- argument: (self, simpleModel, cnf)
-	-- RETURNS [assertion_t]
+	-- argument: (self, simpleModel, cnf, additionalInfo)
+	-- RETURNS [assertion_t], additionalInfo
+	-- additionalInfo is used to manage recursive instantiations, and may be
+	-- returned as nil
 	additionalClauses = "function",
 })
 
@@ -39,6 +41,8 @@ local function showClause(theory, c, assignment)
 	assignment = assignment or {}
 	local terms = {}
 	for i = 1, #c do
+		assert(#c[i] == 2)
+		assertis(c[i][1], theory.assertion_t)
 		terms[i] = theory:canonKey(c[i][1])
 		if not c[i][2] then
 			terms[i] = "~(" .. terms[i] .. ")"
@@ -303,23 +307,21 @@ end
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false, unsat core when no satisfaction is possible
 -- Does NOT modify assignment
-local function cnfSAT(theory, cnf, assignment, limit)
+local function cnfSAT(theory, cnf, assignment, meta)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
-	assert(type(limit) == "number")
 
 	cnf = simplifyCNF(theory, cnf, assignment)
 	if not cnf then
 		return false, {}
 	end
 
-	--print("#", cnfSize(cnf))
-
 	-- Find an assignment that the theory accepts
 	if #cnf == 0 then
 		-- Ask the theory if the assignment is consistent
 		profile.open("theory:isSatisfiable")
 		--print("?? >>> theory:isSatisfiable?")
+		print("#C", #table.keys(assignment))
 		local out = theory:isSatisfiable(assignment)
 		--print("?? <<< theory:isSatisfiable?")
 		profile.close("theory:isSatisfiable")
@@ -344,19 +346,27 @@ local function cnfSAT(theory, cnf, assignment, limit)
 			return false, {coreClause}
 		end
 
-		if limit == 0 then
-			--print("Limiting with additional clauses!")
-			for key, truth in pairs(assignment) do
-				local additional = theory:additionalClauses(assignment, key, cnf)
-				for _, addition in ipairs(additional) do
-					local addCNF = toCNF(theory, addition, true, {})
-					cnf = andCNF(cnf, addCNF)
-				end
+		-- Ask the theory if there are any extensions that can be made
+		-- (e.g., from quantifierS) that may make the model unsatisfiable
+		local additional, newMeta = theory:additionalClauses(assignment, meta)
+		if #additional ~= 0 then
+			local newCNF = {}
+			for _, addition in ipairs(additional) do
+				local addCNF = toCNF(theory, addition, true, {})
+				newCNF = andCNF(newCNF, addCNF)
 			end
+			local sat, subUnsatCore = cnfSAT(theory, newCNF, assignment, newMeta)
 
-			return cnfSAT(theory, cnf, assignment, 1)
+			-- We cannot use subUnsatCore, because :additionalClauses makes NEW
+			-- terms.
+
+			-- TODO:
+			-- We should compute an unsat core in terms of the conflicts between
+			-- quantifier terms and other terms.
+			return sat, {}
 		end
 
+		-- It could not have become unsatisfiable due to additional clauses
 		assert(assignment)
 		return assignment
 	end
@@ -380,7 +390,7 @@ local function cnfSAT(theory, cnf, assignment, limit)
 	local unsatCoreCNF = {}
 
 	if cnfPositive then
-		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, limit)
+		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, meta)
 		if out then
 			return out
 		end
@@ -399,7 +409,7 @@ local function cnfSAT(theory, cnf, assignment, limit)
 		return false, unsatCoreCNF
 	end
 
-	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, limit)
+	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, meta)
 	if out then
 		return out
 	end
@@ -414,7 +424,7 @@ local function isSatisfiable(theory, expression)
 	
 	local cnf = toCNF(theory, expression, true, {})
 	--print("#", cnfSize(cnf), "terms")
-	local sat = cnfSAT(theory, cnf, {}, 0)
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
 	return sat
 end
 
@@ -439,7 +449,7 @@ local function implies(theory, givens, expression)
 	profile.close("smt.implies setup")
 
 	profile.open("smt.implies sat")
-	local sat = cnfSAT(theory, cnf, {}, 0)
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
 
 	profile.close("smt.implies sat")
 	if sat then
@@ -451,6 +461,10 @@ end
 --------------------------------------------------------------------------------
 
 local plaintheory = {assertion_t = "any"}
+
+function plaintheory:emptyMeta()
+	return false
+end
 
 -- Test theory
 function plaintheory:isSatisfiable(model)

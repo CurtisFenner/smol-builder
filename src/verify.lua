@@ -126,6 +126,11 @@ REGISTER_TYPE("Assertion", choiceType(
 
 		-- (self, constantName string) => Assertion
 		instantiate = "function",
+
+		-- A unique object per (lexically) unique forall
+		-- N.B.: When unique matches, these MAY be different foralls, as they
+		-- may be closed-over different bindings
+		unique = "object",
 	}
 ))
 
@@ -1113,26 +1118,16 @@ local function verifyStatement(statement, scope, semantics)
 			assertis(arbitrary, "VariableIR")
 
 			local subscope = scopeCopy(subscopePrime)
-			local inCode, inOut = statement.instantiate(arbitrary)
+			local inCode, instanceTruth = statement.instantiate(arbitrary)
 			verifyStatement(inCode, subscope, semantics)
 
 			-- Discover the newly learned facts in this hypothetical
 			local learnedPredicates, inNow = getPredicateSet(subscope, {}, "", #subscopePrime)
 
-			--print()
-			--print(string.rep("+ ", 40))
-			--print("instantiate with name", name)
-
-			--print()
-			--print("facts are")
 			local post = {}
 			for _, p in ipairs(learnedPredicates) do
-				--print("", verifyTheory:canonKey(p))
 				table.insert(post, p)
 			end
-
-			--print(string.rep("+ ", 40))
-			--print()
 
 			-- Return the conjunction
 			if #post == 0 then
@@ -1143,8 +1138,8 @@ local function verifyStatement(statement, scope, semantics)
 				u = andAssertion(u, post[i])
 			end
 
-			assertis(inOut, "VariableIR")
-			return u, inNow(variableAssertion(inOut)), arbitrary
+			assertis(instanceTruth, "VariableIR")
+			return u, inNow(variableAssertion(instanceTruth)), arbitrary
 		end
 
 		-- Create a forall expression
@@ -1153,6 +1148,7 @@ local function verifyStatement(statement, scope, semantics)
 			quantified = statement.quantified,
 			instantiate = instantiate,
 			location = statement.location,
+			unique = statement.unique,
 		})
 
 		return
@@ -1167,7 +1163,9 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	--print("== " .. func.name .. " " .. string.rep("=", 80 - 4 - #func.name))
+	local modifier = func.signature.modifier
+	local fullName = func.signature.container .. "." .. func.name
+	print("== " .. modifier .. " " .. fullName .. " " .. string.rep("=", 80))
 	--print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)

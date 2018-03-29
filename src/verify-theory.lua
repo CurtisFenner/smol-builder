@@ -327,56 +327,48 @@ local INT_ASSERTIONS = freeze {
 	[-1] = {tag = "int", value = -1},
 }
 
--- Learn additional clauses from the inclusion of `term` in `model`
--- (Added to support quantifiers)
--- model: the model so far
--- cnf: the remaining clauses to satisfy
--- term: the key just added to model
-function theory:additionalClauses(model, term, cnf)
-	assertis(term, "Assertion")
+-- RETURNS a list of clauses
+local function quantifierClauses(model, term, canon)
+	assert(term.tag == "forall")
 
-	if term.tag == "forall" then
-		assertis(model[term], "boolean")
-		if model[term] then
-			-- Find all terms of the specified sort
-			-- Instantiate for all interesting terms
+	if model[term] then
+		-- Find all terms of the specified sort
+		-- Instantiate for all interesting terms
 
-			local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
+		-- TODO: PERFORMANCE: filter by triggers, see
+		-- https://doi.org/10.1007/978-3-540-73595-3_12
+		local opportunities = {}
+		for _, x in spairs(canon.relevant) do
+			assertis(x, "Assertion")
 
-			-- Scan important constants
-			canon:scan(TRUE_ASSERTION)
-			canon:scan(FALSE_ASSERTION)
-			for _, v in spairs(INT_ASSERTIONS) do
-				canon:scan(v)
+			local tx = typeOfAssertion(x)
+			assertis(tx, "Type+")
+
+			if areTypesEqual(tx, term.quantified) then
+				table.insert(opportunities, x)
 			end
+		end
 
-			for v in pairs(model) do
-				canon:scan(v)
-			end
-			for _, clause in ipairs(cnf) do
-				for _, vt in ipairs(clause) do
-					canon:scan(vt[1])
-				end
-			end
+		-- Apply SIMPLIFY style relevance matching
+		local freshConstantName = newConst() .. "triggervar"
+		local templateConstraints, instantiationResult, boundVariable = term:instantiate(freshConstantName)
+		assertis(templateConstraints, "Assertion")
+		assertis(instantiationResult, "Assertion")
+		assertis(boundVariable, "VariableIR")
 
-			-- TODO: PERFORMANCE: filter by triggers, see
-			-- https://doi.org/10.1007/978-3-540-73595-3_12
-			local opportunities = {}
-			for _, x in spairs(canon.relevant) do
-				assertis(x, "Assertion")
+		-- (1) Find all potential trigger terms from templateConstraints/instantiationResult.
+		-- (2) Find those that are not equal to anything in the model
+		-- (3) For each instantiation opportunity, determine if any found in (2) become
+		--     equal to a model term after applying boundVariable = opportunity.
+		print("TODO: these three things")
 
-				local tx = typeOfAssertion(x)
-				assertis(tx, "Type+")
-
-				if areTypesEqual(tx, term.quantified) then
-					table.insert(opportunities, x)
-				end
-			end
-
-			local out = {}
-			for _, x in ipairs(opportunities) do
+		local out = {}
+		print("", "A forall can be instantiated as:")
+		for _, x in ipairs(opportunities) do
+			if x.tag == "variable" and x.variable.name:find "local" then
+				print("", "", showAssertion(x))
 				-- Instantiate an example of a forall instance
-				local constantName = newConst()
+				local constantName = newConst() .. "forall" .. tostring(term.unique)
 				local newTerm, res, var = term:instantiate(constantName)
 
 				-- x is the same as constant
@@ -386,18 +378,60 @@ function theory:additionalClauses(model, term, cnf)
 				table.insert(out, newTerm)
 				table.insert(out, res)
 			end
-			return out
-		else
-			-- Instantiate with an arbitrary new constant
-			-- (There exists not P(c))
-			local constantName = newConst()
-			local newTerm, res = term:instantiate(constantName)
+		end
+		return out
+	else
+		-- Instantiate with an arbitrary new constant
+		-- (There exists not P(c))
+		local constantName = newConst() .. "exists" .. tostring(term.unique)
+		local newTerm, res = term:instantiate(constantName)
 
-			-- Push the negative through for exists
-			return {newTerm, notAssertion(res)}
+		-- Push the negative through for exists
+		return {newTerm, notAssertion(res)}
+	end
+end
+
+-- RETURNS an empty map
+function theory:emptyMeta()
+	return {}
+end
+
+-- Learn additional clauses from the inclusion of `term` in `model`
+-- (Added to support quantifiers)
+-- model: the model so far
+-- cnf: the remaining clauses to satisfy
+-- term: the key just added to model
+function theory:additionalClauses(model, meta)
+	assert(meta)
+
+	-- Collect all in-scope/relevant constants
+	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
+	canon:scan(TRUE_ASSERTION)
+	canon:scan(FALSE_ASSERTION)
+	for _, v in spairs(INT_ASSERTIONS) do
+		canon:scan(v)
+	end
+	for v in pairs(model) do
+		canon:scan(v)
+	end
+
+	local newMeta = meta
+	local out = {}
+
+	for term in pairs(model) do
+		if term.tag == "forall" then
+			if not table.haskey(meta, term.unique) then
+				for _, c in ipairs(quantifierClauses(model, term, canon)) do
+					table.insert(out, c)
+				end
+				newMeta = table.with(newMeta, term.unique, true)
+			else
+				-- This quantifier has already been instantiated
+			end
 		end
 	end
-	return {}
+
+	return out, newMeta
 end
 
 -- RETURNS a string such that for x, y
@@ -690,11 +724,12 @@ function theory:isSatisfiable(modelInput)
 		end
 		profile.open "propagateConstants"
 		positiveEq = propagateConstants(canon, eq)
-		if not positiveEq then
-			return false
-		end
 		profile.close "propagateConstants"
 		profile.close("iteration x" .. nEq)
+		if not positiveEq then
+			profile.close "#union-find"
+			return false
+		end
 	end
 	profile.close "#union-find"
 
@@ -712,9 +747,7 @@ function theory:isSatisfiable(modelInput)
 	end
 	profile.close "#negative =="
 
-	-- 5) Check if the assertion is true
-	-- It may be equal to any true statement
-
+	-- 5) Check if the truth values themselves are inconsistent
 	if eq:query(falseAssertion, trueAssertion) then
 		return false
 	end

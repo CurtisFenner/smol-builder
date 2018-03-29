@@ -56,6 +56,7 @@ else
 end
 
 local SEP = arg[2] or "/"
+local remainingArguments = arg[3] or ""
 
 --------------------------------------------------------------------------------
 
@@ -200,6 +201,7 @@ local function compiler(directory, main)
 		arg[-1] .. " " .. path {"src", "compiler.lua"},
 		" --sources ", table.concat(sources, "    "),
 		" --main ", main,
+		" ", remainingArguments
 	}
 
 	local status = os.execute(command)

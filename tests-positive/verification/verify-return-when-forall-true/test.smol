@@ -1,0 +1,13 @@
+package test;
+
+class Test {
+
+	static foo() Boolean
+	ensures forall (n Int) return when true {
+		return true;
+	}
+
+	static main() Unit {
+
+	}
+}

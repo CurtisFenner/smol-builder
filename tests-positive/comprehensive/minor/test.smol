@@ -1,17 +1,34 @@
 package test;
 
+class Foo {
+	method bar(n Int) Boolean
+	ensures forall (other Int) return when true {
+		return true;
+	}
+
+	static make() Foo {
+		return new();
+	}
+}
+
 class Test {
 
-	static positive() Int
-	ensures 0 < return {
-		return 3;
+	static main() Unit {
+		var f Foo = Foo.make();
 	}
 
-	static main() Unit {
-		//assert Test.positive() < (Test.positive() + 1);
-		// assume forall (middle Int) 0 < (Test.positive() + 1) when (0 < middle).and(middle < (Test.positive() + 1))
-		var x Boolean = 0 < (Test.positive() + 1);
-		assert (0 < Test.positive()).and(Test.positive() < (Test.positive() + 1));
-		assert x;
-	}
+	// static positive() Int
+	// ensures 0 < return {
+	// 	return 3;
+	// }
+
+	// static main() Unit {
+	// 	//assert Test.positive() < (Test.positive() + 1);
+	// 	// assume forall (middle Int) 0 < (Test.positive() + 1) when (0 < middle).and(middle < (Test.positive() + 1))
+	// 	var p Int = Test.positive();
+	// 	//var x Boolean = 0 < (p + 1);
+	// 	//assert (0 < p).and(p < (p + 1));
+	// 	assert forall (m Int) (0 < m).and(m < p) => (0 < (p + 1));
+	// 	//assert x;
+	// }
 }

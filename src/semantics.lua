@@ -984,8 +984,7 @@ local function generateAssumeStatements(signature, info, environment)
 	end
 
 	if depth >= 1 then
-		print("Warning: Skipping ensures of " .. fullName .. " gives up some amount of completeness")
-		--print(show(info))
+		-- TODO: Skipping this ensure gives up some amount of completeness
 		return buildBlock {}
 	end
 
@@ -1876,7 +1875,7 @@ function compileExpression(pExpression, scope, environment)
 
 		local left, right = leftOut[1], rightOut[1]
 
-		-- Handle specific operators
+		-- Handle special operators
 		if pExpression.operator == "==" then
 			-- Check that the values are of the same type
 			if not areTypesEqual(left.type, right.type) then
@@ -1887,14 +1886,16 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 		end
-
-		local operatorAsMethodName = OPERATOR_ALIAS[pExpression.operator]
-		if not operatorAsMethodName then
+		
+		-- Check if the operator is known
+		if not table.haskey(OPERATOR_ALIAS, pExpression.operator) then
 			return Report.UNKNOWN_OPERATOR_USED {
 				operator = pExpression.operator,
 				location = pExpression.location,
 			}
 		end
+
+		local operatorAsMethodName = OPERATOR_ALIAS[pExpression.operator]		
 
 		-- Rewrite the operations as a method call
 		local callEvaluation, callOut = compileMethod(
@@ -1972,7 +1973,7 @@ function compileExpression(pExpression, scope, environment)
 		end
 
 		-- RETURNS StatementIR, VariableIR (how to execute for this target, and
-		-- what the result was)
+		-- what the boolean truth result was for this instantiation)
 		local function instantiate(target)
 			table.insert(scopeCopy, {[pExpression.variable.name] = target})
 			local code, predicates = compileExpression(
@@ -2065,6 +2066,7 @@ function compileExpression(pExpression, scope, environment)
 			quantified = variable1.type,
 			location = pExpression.location,
 			returns = "no",
+			unique = freeze {},
 		}
 		assertis(forall, "ForallSt")
 
