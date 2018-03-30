@@ -2040,7 +2040,7 @@ function compileExpression(pExpression, scope, environment)
 			-- Close the variable's scope
 			table.remove(scopeCopy)
 
-			return code, instantiatedResult
+			return buildBlock {localSt(instantiatedResult), code}, instantiatedResult
 		end
 
 		-- Generate the code once to verify that it is valid
@@ -3458,6 +3458,7 @@ local function semanticsSmol(sources, main)
 						purpose = "expression in assert statement",
 						expectedType = "Boolean",
 						expectedLocation = pStatement.expression.location,
+						location = pStatement.expression.location,
 						givenType = showType(valueOut[1].type),
 					}
 				end

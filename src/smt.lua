@@ -47,7 +47,6 @@ local function showClause(theory, c, assignment)
 		if not c[i][2] then
 			terms[i] = "~(" .. terms[i] .. ")"
 		end
-		terms[i] = terms[i] .. " " .. tostring(c[i][1])
 	end
 	return "[" .. table.concat(terms, " || ") .. "]"
 end
@@ -256,12 +255,9 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
 	assertis(order, listType(theory.assertion_t))
 	assert(#order == #table.keys(assignment))
-	--assert(not theory:isSatisfiable(assignment))
 
 	local core = {}
 	local reduced = assignment
-
-	local times = {}
 
 	local i = 1
 	local chunk = math.ceil(#order / 6)
@@ -275,11 +271,9 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 
 		local before = os.clock()
 		local sat = theory:isSatisfiable(without)
-		table.insert(times, os.clock() - before)
 		if not sat then
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
-			--io.write(("."):rep(chunk))
 			i = i + chunk
 			chunk = chunk * 2
 			reduced = without
@@ -290,16 +284,12 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 				-- Thus the ONLY term MUST be in the unsatisfiable core
 				table.insert(core, {order[i], not assignment[order[i]]})
 				i = i + 1
-				--io.write("*")
 			else
 				-- Reduce the number of cores being considered
 				chunk = 1
 			end
 		end
 	end
-	--print()
-	table.sort(times)
-	--print(unpack(times))
 	return core
 end
 
@@ -320,10 +310,7 @@ local function cnfSAT(theory, cnf, assignment, meta)
 	if #cnf == 0 then
 		-- Ask the theory if the assignment is consistent
 		profile.open("theory:isSatisfiable")
-		--print("?? >>> theory:isSatisfiable?")
-		print("#C", #table.keys(assignment))
 		local out = theory:isSatisfiable(assignment)
-		--print("?? <<< theory:isSatisfiable?")
 		profile.close("theory:isSatisfiable")
 
 		if not out then
@@ -334,13 +321,8 @@ local function cnfSAT(theory, cnf, assignment, meta)
 			table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
 
 			-- Ask the theory for a minimal explanation of why this does not
-			-- work in order to prune the SAT search space
-			--print("?? [[[ find core clause")
+			-- work in order to prune the CNF-SAT search space
 			local coreClause = unsatisfiableCoreClause(theory, assignment, keys)
-			--print("?? ]]] find core clause")
-
-			-- print("@@@ Unsat Core:")
-			-- print("", showCNF(theory, {coreClause}))
 			assert(1 <= #coreClause)
 
 			return false, {coreClause}
@@ -420,10 +402,8 @@ end
 local function isSatisfiable(theory, expression)
 	assert(theory)
 	assert(expression)
-	--print(string.rep("=", 80))
 	
 	local cnf = toCNF(theory, expression, true, {})
-	--print("#", cnfSize(cnf), "terms")
 	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
 	return sat
 end
@@ -448,10 +428,14 @@ local function implies(theory, givens, expression)
 	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
 	profile.close("smt.implies setup")
 
+	-- print("\n" .. string.rep("~", 80) .. "\n")
+	-- print(showCNF(theory, cnf))
+	-- print()
+
 	profile.open("smt.implies sat")
 	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
-
 	profile.close("smt.implies sat")
+
 	if sat then
 		return false, sat
 	end

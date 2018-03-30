@@ -1,13 +1,17 @@
 package test;
 
 class Test {
-	static oracle(x Boolean) Unit ensures x {
+	static oracle(x Boolean) Boolean
+	ensures x
+	ensures return {
 		if x.not() {
-			do Test.oracle(x);
+			return Test.oracle(x);
 		}
+		return x;
 	}
 
 	static main() Unit {
-		do Test.oracle(false);
+		// Assertions can only be total expressions
+		assert Test.oracle(false);
 	}
 }

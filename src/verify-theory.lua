@@ -365,8 +365,9 @@ local function quantifierClauses(model, term, canon)
 		local out = {}
 		print("", "A forall can be instantiated as:")
 		for _, x in ipairs(opportunities) do
-			if x.tag == "variable" and x.variable.name:find "local" then
-				print("", "", showAssertion(x))
+			-- TODO: this is a terrible heuristic
+			if (x.tag == "variable" and (x.variable.name:find "local" or not x.variable.name:find "[^a-zA-Z0-9']")) or x.tag == "static" or x.tag == "method" then
+				print("", "!", showAssertion(x))
 				-- Instantiate an example of a forall instance
 				local constantName = newConst() .. "forall" .. tostring(term.unique)
 				local newTerm, res, var = term:instantiate(constantName)
@@ -377,6 +378,8 @@ local function quantifierClauses(model, term, canon)
 				-- The predicate holds for `x`
 				table.insert(out, newTerm)
 				table.insert(out, res)
+			else
+				print("", "skip", showAssertion(x))
 			end
 		end
 		return out

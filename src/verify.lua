@@ -556,8 +556,6 @@ local function getPredicateSet(scope, assignments, path, skip)
 			local t = action.destination.type
 
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
-
-			--	.. "'" .. verifyTheory:canonKey(action.value):gsub("[^a-zA-Z0-9]+", "_")
 			local newVariable = freeze {
 				type = action.destination.type,
 				location = action.destination.location,
@@ -578,7 +576,6 @@ local function getPredicateSet(scope, assignments, path, skip)
 				definition = action.destination,
 			}
 
-			--assertis(p, "Assertion")
 			table.insert(predicates, p)
 		elseif action.tag == "predicate" then
 			table.insert(predicates, inNow(action.value))
@@ -611,9 +608,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 				-- Capture modified variables into a select operation
 				for variable, newValue in pairs(branchAssignments) do
 					local oldValue = assignments[variable]
-					if oldValue == nil then
-						oldValue = newValue
-					elseif newValue.value ~= oldValue.value then
+					if oldValue == nil or newValue.value ~= oldValue.value then
 						-- Create new dummy variable
 						local id = "merged'" .. variable .. "'" .. path .. "'" .. i
 						local merged = variableAssertion(table.with(newValue.definition, "name", id))
@@ -622,9 +617,12 @@ local function getPredicateSet(scope, assignments, path, skip)
 							definition = newValue.definition,
 						}
 
-						-- Given it old meaning when condition does not hold
-						local isOld = eqAssertion(merged, oldValue.value, oldValue.definition.type)
-						table.insert(predicates, impliesAssertion(notCondition, isOld))
+						if oldValue then
+							-- Given it old meaning when condition does not hold
+							-- (Leave undefined when there was no old value)
+							local isOld = eqAssertion(merged, oldValue.value, oldValue.definition.type)
+							table.insert(predicates, impliesAssertion(notCondition, isOld))
+						end
 
 						-- Give it new meaning when condition does hold
 						local isNew = eqAssertion(merged, newValue.value, newValue.definition.type)
@@ -656,7 +654,6 @@ local function mustModel(scope, target)
 	assertis(target, "Assertion")
 	local result = inNow(target)
 
-	--print("=?=> " .. verifyTheory:canonKey(result))
 	local tautology, counter = smt.implies(verifyTheory, predicates, result)
 
 	--print("<-", tautology)
@@ -1139,7 +1136,8 @@ local function verifyStatement(statement, scope, semantics)
 			end
 
 			assertis(instanceTruth, "VariableIR")
-			return u, inNow(variableAssertion(instanceTruth)), arbitrary
+			local finalInstantiationTruth = inNow(variableAssertion(instanceTruth), true)
+			return u, finalInstantiationTruth, arbitrary
 		end
 
 		-- Create a forall expression
@@ -1165,7 +1163,7 @@ local function verifyFunction(func, semantics)
 
 	local modifier = func.signature.modifier
 	local fullName = func.signature.container .. "." .. func.name
-	print("== " .. modifier .. " " .. fullName .. " " .. string.rep("=", 80))
+	--print("== " .. modifier .. " " .. fullName .. " " .. string.rep("=", 80))
 	--print(showStatement(func.body))
 
 	profile.open("verifyFunction " .. func.name)
