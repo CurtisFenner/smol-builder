@@ -356,18 +356,16 @@ local function quantifierClauses(model, term, canon)
 		assertis(instantiationResult, "Assertion")
 		assertis(boundVariable, "VariableIR")
 
+		-- TODO: https://doi.org/10.1007/978-3-540-73595-3_12
 		-- (1) Find all potential trigger terms from templateConstraints/instantiationResult.
 		-- (2) Find those that are not equal to anything in the model
 		-- (3) For each instantiation opportunity, determine if any found in (2) become
 		--     equal to a model term after applying boundVariable = opportunity.
-		print("TODO: these three things")
 
 		local out = {}
-		print("", "A forall can be instantiated as:")
 		for _, x in ipairs(opportunities) do
 			-- TODO: this is a terrible heuristic
 			if (x.tag == "variable" and (x.variable.name:find "local" or not x.variable.name:find "[^a-zA-Z0-9']")) or x.tag == "static" or x.tag == "method" then
-				print("", "!", showAssertion(x))
 				-- Instantiate an example of a forall instance
 				local constantName = newConst() .. "forall" .. tostring(term.unique)
 				local newTerm, res, var = term:instantiate(constantName)
@@ -378,8 +376,6 @@ local function quantifierClauses(model, term, canon)
 				-- The predicate holds for `x`
 				table.insert(out, newTerm)
 				table.insert(out, res)
-			else
-				print("", "skip", showAssertion(x))
 			end
 		end
 		return out

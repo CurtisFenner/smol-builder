@@ -66,6 +66,8 @@ end
 -- RETURNS a CNF formula, [][](term, boolean)
 -- the conjunction of CNFs a and b
 local function andCNF(a, b)
+	assertis(a, listType(listType(tupleType("any", "boolean"))))
+	assertis(b, listType(listType(tupleType("any", "boolean"))))
 	return table.concatted(a, b)
 end
 
@@ -187,7 +189,6 @@ end
 -- RETURNS false if the given cnf is unsatisfiable given the assignment
 local function simplifyCNF(theory, cnf, assignment)
 	profile.open "simplifyCNF"
-	assert(type(assignment) == "table")
 
 	local cs = {}
 	for _, clause in ipairs(cnf) do
@@ -248,9 +249,11 @@ local function cnfSize(cnf)
 	return count
 end
 
+local cnfSAT
+
 -- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
 -- according to the theory as a CNF clause
-local function unsatisfiableCoreClause(theory, assignment, order)
+local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	assertis(theory, "Theory")
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
 	assertis(order, listType(theory.assertion_t))
@@ -261,20 +264,30 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 
 	local i = 1
 	local chunk = math.ceil(#order / 6)
+	local d = ""
 	while i <= #order do
-		local without = reduced
+		local without = {}
+		for k, v in pairs(reduced) do
+			without[k] = v
+		end
 
 		-- Remove the first `chunk` elements
 		for j = i, math.min(#order, i + chunk - 1) do
-			without = table.with(without, order[j], nil)
+			without[order[j]] = nil
 		end
 
 		local before = os.clock()
-		local sat = theory:isSatisfiable(without)
+		-- TODO: this is far too slow.
+		-- Using cnfSAT instead of isSatisfiable allows us to learn things
+		-- about quantified statements, which are (typically) ignored by
+		-- the theory solver
+		local sat = cnfSAT(theory, {}, without, meta, false)
+		--local sat = theory:isSatisfiable(without)
 		if not sat then
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
 			i = i + chunk
+			d = d .. (("."):rep(chunk))
 			chunk = chunk * 2
 			reduced = without
 		else
@@ -284,6 +297,7 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 				-- Thus the ONLY term MUST be in the unsatisfiable core
 				table.insert(core, {order[i], not assignment[order[i]]})
 				i = i + 1
+				d = d ..("*")
 			else
 				-- Reduce the number of cores being considered
 				chunk = 1
@@ -293,13 +307,18 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 	return core
 end
 
+local asks = 0
+
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
--- RETURNS false, unsat core when no satisfaction is possible
+-- RETURNS false, unsat CNF core when no satisfaction is possible
 -- Does NOT modify assignment
-local function cnfSAT(theory, cnf, assignment, meta)
+-- findCores: Determines whether or not this should search for unsat. cores in
+--            bad models. When false, it does not do this search.
+function cnfSAT(theory, cnf, assignment, meta, findCores)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
+	assert(type(findCores) == "boolean")
 
 	cnf = simplifyCNF(theory, cnf, assignment)
 	if not cnf then
@@ -309,20 +328,29 @@ local function cnfSAT(theory, cnf, assignment, meta)
 	-- Find an assignment that the theory accepts
 	if #cnf == 0 then
 		-- Ask the theory if the assignment is consistent
+		asks = asks + 1
+
 		profile.open("theory:isSatisfiable")
 		local out = theory:isSatisfiable(assignment)
 		profile.close("theory:isSatisfiable")
 
 		if not out then
+			-- While this satisfies the SAT, the satisfaction doesn't work in
+			-- the theory.
+			if not findCores then
+				return false, {}
+			end
+
 			-- TODO: ideally, these would be in reverse order
 			local keys = table.keys(assignment)
 
 			-- Sort for determinism
 			table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
 
+
 			-- Ask the theory for a minimal explanation of why this does not
 			-- work in order to prune the CNF-SAT search space
-			local coreClause = unsatisfiableCoreClause(theory, assignment, keys)
+			local coreClause = unsatisfiableCoreClause(theory, assignment, keys, meta)
 			assert(1 <= #coreClause)
 
 			return false, {coreClause}
@@ -337,7 +365,18 @@ local function cnfSAT(theory, cnf, assignment, meta)
 				local addCNF = toCNF(theory, addition, true, {})
 				newCNF = andCNF(newCNF, addCNF)
 			end
-			local sat, subUnsatCore = cnfSAT(theory, newCNF, assignment, newMeta)
+			local sat, _ = cnfSAT(theory, newCNF, assignment, newMeta, findCores)
+
+			if not sat and findCores then
+				-- TODO: ideally, these would be in reverse order
+				local keys = table.keys(assignment)
+
+				-- Sort for determinism
+				table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
+				local core = unsatisfiableCoreClause(theory, assignment, keys, meta)
+				assert(#core >= 1)
+				return false, {core}
+			end
 
 			-- We cannot use subUnsatCore, because :additionalClauses makes NEW
 			-- terms.
@@ -372,7 +411,7 @@ local function cnfSAT(theory, cnf, assignment, meta)
 	local unsatCoreCNF = {}
 
 	if cnfPositive then
-		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, meta)
+		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, meta, findCores)
 		if out then
 			return out
 		end
@@ -391,7 +430,7 @@ local function cnfSAT(theory, cnf, assignment, meta)
 		return false, unsatCoreCNF
 	end
 
-	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, meta)
+	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, meta, findCores)
 	if out then
 		return out
 	end
@@ -404,7 +443,7 @@ local function isSatisfiable(theory, expression)
 	assert(expression)
 	
 	local cnf = toCNF(theory, expression, true, {})
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true)
 	return sat
 end
 
@@ -433,7 +472,7 @@ local function implies(theory, givens, expression)
 	-- print()
 
 	profile.open("smt.implies sat")
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true)
 	profile.close("smt.implies sat")
 
 	if sat then
@@ -446,39 +485,38 @@ end
 
 local plaintheory = {assertion_t = "any"}
 
-function plaintheory:emptyMeta()
-	return false
-end
-
 -- Test theory
 function plaintheory:isSatisfiable(model)
-	local anyGood = false
 	for x = 1, 4 do
 		for y = 1, 4 do
-			local good = true
+			local all = true
 			for k, v in pairs(model) do
 				assert(type(v) == "boolean")
-				if type(k) == "table" and k[1] == "f" then
+				if type(k) ~= "string" and k[1] == "f" then
 					local e = k[2]
 					e = e:gsub("x", tostring(x))
 					e = e:gsub("y", tostring(y))
 					local left, right = e:match("^(%d+)%s*==%s*(%d+)$")
 					assert(left, "wrong pattern in `" .. e .. "`")
 					if (left == right) ~= v then
-						good = false
+						all = false
 					end
 				end
 			end
-			anyGood = anyGood or good
+			if all then
+				return true
+			end
 		end
 	end
-	return anyGood
+	return false
 end
 
 function plaintheory:breakup(e, target)
 	if type(e) == "string" then
 		return false
 	elseif e[1] == "f" then
+		return false
+	elseif e[1] == "d" then
 		return false
 	end
 
@@ -520,8 +558,30 @@ function plaintheory:canonKey(e)
 	return "{" .. table.concat(list, ", ") .. "}"
 end
 
-function plaintheory:additionalClauses()
+function plaintheory:emptyMeta()
 	return {}
+end
+
+function plaintheory:additionalClauses(model, meta)
+	local newMeta = {}
+	for k, v in pairs(meta) do
+		newMeta[k] = v
+	end
+	
+	local out = {}
+	for key, value in pairs(model) do
+		if not meta[key] then
+			if type(key) == "table" and key[1] == "d" then
+				newMeta[key] = true
+				if value then
+					table.insert(out, key[2])
+				else
+					table.insert(out, {"not", key[2]})
+				end
+			end
+		end
+	end
+	return out, newMeta
 end
 
 plaintheory = freeze(plaintheory)
@@ -575,9 +635,11 @@ assert(not implies(
 	{"f", "y == 2"}
 ))
 
--- Performance test
-for N = 5, 15, 1 do
-	local begin = os.clock()
+-- Performance test (uses unsat cores)
+for N = 20, 20 do
+	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
+	asks = 0
+
 	local q = {"f", "x == 1"}
 	for i = 1, N do
 		local clause = {
@@ -590,6 +652,56 @@ for N = 5, 15, 1 do
 		local b = freeze {"f", table.remove(clause, math.random(#clause))}
 		local c = freeze {"f", table.remove(clause, math.random(#clause))}
 		local f = {"or", a, {"or", b, c}}
+		q = {"and", q, f}
+	end
+	assert(isSatisfiable(plaintheory, q))
+
+	--print("== N (simple, unsat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
+	asks = 0
+
+	local q = {"f", "x == 1"}
+	for i = 1, N do
+		local clause = {
+			"x == " .. math.random(6, 999),
+			"x == " .. math.random(6, 999),
+			"x " .. string.rep(" ", i + 1) .. " == 1"
+		}
+
+		if i == N - 1 then
+			clause[3] = "x == " .. math.random(6, 999)
+		end
+
+		local a = freeze {"f", table.remove(clause, math.random(#clause))}
+		local b = freeze {"f", table.remove(clause, math.random(#clause))}
+		local c = freeze {"f", table.remove(clause, math.random(#clause))}
+		local f = {"or", a, {"or", b, c}}
+		q = {"and", q, f}
+	end
+	assert(not isSatisfiable(plaintheory, q))
+end
+
+assert(isSatisfiable(plaintheory, {"d", {"f", "x == 1"}}))
+assert(not isSatisfiable(plaintheory, {"d", {"f", "x == 99"}}))
+assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}} }))
+assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}} }))
+
+-- Performance test (uses unsat cores for quantifiers)
+for N = 20, 20 do
+	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
+	asks = 0
+
+	local q = {"f", "x == 1"}
+	for i = 1, N do
+		local clause = {
+			"x == " .. math.random(6, 999),
+			"x == " .. math.random(6, 999),
+			"x " .. string.rep(" ", i + 1) .. " == 1"
+		}
+
+		local a = {"f", table.remove(clause, math.random(#clause))}
+		local b = {"f", table.remove(clause, math.random(#clause))}
+		local c = {"f", table.remove(clause, math.random(#clause))}
+		local f = {"or", {"d", a}, {"or", {"d", b}, {"d", c}}}
 		q = {"and", q, f}
 	end
 	assert(isSatisfiable(plaintheory, q))
