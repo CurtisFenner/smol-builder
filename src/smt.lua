@@ -259,21 +259,20 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	assertis(order, listType(theory.assertion_t))
 	assert(#order == #table.keys(assignment))
 
-	local core = {}
-	local reduced = assignment
+	-- Make a shallow copy, to slowly reduce
+	local reduced = {}
+	for k, v in pairs(assignment) do
+		reduced[k] = v
+	end
 
+	local core = {}
 	local i = 1
 	local chunk = math.ceil(#order / 6)
 	local d = ""
 	while i <= #order do
-		local without = {}
-		for k, v in pairs(reduced) do
-			without[k] = v
-		end
-
 		-- Remove the first `chunk` elements
 		for j = i, math.min(#order, i + chunk - 1) do
-			without[order[j]] = nil
+			reduced[order[j]] = nil
 		end
 
 		local before = os.clock()
@@ -281,15 +280,19 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 		-- Using cnfSAT instead of isSatisfiable allows us to learn things
 		-- about quantified statements, which are (typically) ignored by
 		-- the theory solver
-		local sat = cnfSAT(theory, {}, without, meta, false)
+		local sat = cnfSAT(theory, {}, reduced, meta, false, true)
 		if not sat then
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
 			i = i + chunk
 			d = d .. (("."):rep(chunk))
 			chunk = chunk * 2
-			reduced = without
 		else
+			-- Restore the first `chunk` elements
+			for j = i, math.min(#order, i + chunk - 1) do
+				reduced[order[j]] = assignment[order[j]]
+			end
+
 			-- At least some of [i ... i + chunk - 1] are part of the unsat
 			-- core, since it became satisifiable after lifting them
 			if chunk == 1 then
@@ -315,10 +318,13 @@ local theoryTime = 0
 -- Does NOT modify assignment
 -- findCores: Determines whether or not this should search for unsat. cores in
 --            bad models. When false, it does not do this search.
-function cnfSAT(theory, cnf, assignment, meta, findCores)
+-- noModify: When true, ensures that `assignment` is not modified
+-- MODIFIES assignment (when the assignment is satisfiable, and not noModify)
+function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
 	assert(type(findCores) == "boolean")
+	assert(type(noModify) == "boolean")
 
 	cnf = simplifyCNF(theory, cnf, assignment)
 	if not cnf then
@@ -328,9 +334,8 @@ function cnfSAT(theory, cnf, assignment, meta, findCores)
 	-- Find an assignment that the theory accepts
 	if #cnf == 0 then
 		-- Ask the theory if the assignment is consistent
-		asks = asks + 1
-
 		profile.open("theory:isSatisfiable")
+		asks = asks + 1
 		local beforeTime = os.clock()
 		local out = theory:isSatisfiable(assignment)
 		theoryTime = theoryTime + os.clock() - beforeTime
@@ -367,7 +372,7 @@ function cnfSAT(theory, cnf, assignment, meta, findCores)
 				local addCNF = toCNF(theory, addition, true, {})
 				newCNF = andCNF(newCNF, addCNF)
 			end
-			local sat, _ = cnfSAT(theory, newCNF, assignment, newMeta, findCores)
+			local sat, _ = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
 
 			if not sat and findCores then
 				-- TODO: ideally, these would be in reverse order
@@ -407,14 +412,21 @@ function cnfSAT(theory, cnf, assignment, meta, findCores)
 
 	-- Try each truth assignment of the first term in the first clause
 	local t1 = smallestClause[1][1]
-	local withPositive = copywith(assignment, t1, smallestClause[1][2])
-	local cnfPositive = simplifyCNF(theory, cnf, withPositive)
+	assert(assignment[t1] == nil, "simplfyCNF should prevent this")
+
+	-- Assignment is now positive
+	assignment[t1] = smallestClause[1][2]
+	local cnfPositive = simplifyCNF(theory, cnf, assignment)
 
 	local unsatCoreCNF = {}
 
 	if cnfPositive then
-		local out, betterCNF = cnfSAT(theory, cnfPositive, withPositive, meta, findCores)
+		local out, betterCNF = cnfSAT(theory, cnfPositive, assignment, meta, findCores, noModify)
 		if out then
+			if noModify then
+				-- Restore assignment
+				assignment[t1] = nil
+			end
 			return out
 		end
 		unsatCoreCNF = betterCNF
@@ -424,18 +436,25 @@ function cnfSAT(theory, cnf, assignment, meta, findCores)
 		-- according to simplifyCNF
 	end
 
-	-- Then it can only be satisfied with no
 	-- Add this to the set to prune more cases
-	local withNegative = copywith(assignment, t1, not smallestClause[1][2])
-	local cnfNegative = simplifyCNF(theory, cnf, withNegative)
+	-- Assignment is now negative
+	assignment[t1] = not smallestClause[1][2]
+	local cnfNegative = simplifyCNF(theory, cnf, assignment)
 	if not cnfNegative then
+		assignment[t1] = nil
 		return false, unsatCoreCNF
 	end
 
-	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, withNegative, meta, findCores)
+	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, assignment, meta, findCores, noModify)
 	if out then
+		if noModify then
+			-- Restore assignment
+			assignment[t1] = nil
+		end
 		return out
 	end
+
+	assignment[t1] = nil
 	return false, andCNF(unsatCoreCNF, moreUnsatCoreCNF)
 end
 
@@ -445,7 +464,7 @@ local function isSatisfiable(theory, expression)
 	assert(expression)
 	
 	local cnf = toCNF(theory, expression, true, {})
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true)
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true, false)
 	return sat
 end
 
@@ -474,7 +493,7 @@ local function implies(theory, givens, expression)
 	-- print()
 
 	profile.open("smt.implies sat")
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true)
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true, false)
 	profile.close("smt.implies sat")
 
 	if sat then
@@ -649,7 +668,7 @@ local m5 = {
 		{"f", "y == 2"},
 	}
 }
-assert(not not isSatisfiable(plaintheory, m5))
+assert(isSatisfiable(plaintheory, m5), "sat m5")
 
 assert(not implies(
 	plaintheory,
@@ -679,7 +698,7 @@ for N = 20, 20 do
 		local f = {"or", a, {"or", b, c}}
 		q = {"and", q, f}
 	end
-	assert(isSatisfiable(plaintheory, q))
+	assert(isSatisfiable(plaintheory, q), "must be sat")
 
 	--print("== N (simple, unsat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
