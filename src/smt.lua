@@ -282,7 +282,6 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 		-- about quantified statements, which are (typically) ignored by
 		-- the theory solver
 		local sat = cnfSAT(theory, {}, without, meta, false)
-		--local sat = theory:isSatisfiable(without)
 		if not sat then
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
@@ -308,6 +307,7 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 end
 
 local asks = 0
+local theoryTime = 0
 
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
@@ -331,7 +331,9 @@ function cnfSAT(theory, cnf, assignment, meta, findCores)
 		asks = asks + 1
 
 		profile.open("theory:isSatisfiable")
+		local beforeTime = os.clock()
 		local out = theory:isSatisfiable(assignment)
+		theoryTime = theoryTime + os.clock() - beforeTime
 		profile.close("theory:isSatisfiable")
 
 		if not out then
@@ -487,17 +489,34 @@ local plaintheory = {assertion_t = "any"}
 
 -- Test theory
 function plaintheory:isSatisfiable(model)
-	for x = 1, 4 do
-		for y = 1, 4 do
+	for x = 1, 2 do
+		for y = 1, 2 do
 			local all = true
 			for k, v in pairs(model) do
 				assert(type(v) == "boolean")
 				if type(k) ~= "string" and k[1] == "f" then
 					local e = k[2]
-					e = e:gsub("x", tostring(x))
-					e = e:gsub("y", tostring(y))
-					local left, right = e:match("^(%d+)%s*==%s*(%d+)$")
-					assert(left, "wrong pattern in `" .. e .. "`")
+					local left = e:match "^%S+"
+					local right = e:match "%S+$"
+					assert(left and right, "wrong pattern")
+
+					-- Plug in variables
+					if left == "x" then
+						left = x
+					elseif left == "y" then
+						left = y
+					else
+						left = tonumber(left)
+					end
+					if right == "x" then
+						right = x
+					elseif right == "y" then
+						right = y
+					else
+						right = tonumber(right)
+					end
+
+					-- Evaluate equality
 					if (left == right) ~= v then
 						all = false
 					end
@@ -585,6 +604,12 @@ function plaintheory:additionalClauses(model, meta)
 end
 
 plaintheory = freeze(plaintheory)
+
+-- Establish the domain of the theory
+assert(not isSatisfiable(plaintheory, {"f", "x == 0"}), "unsat x == 0")
+assert(isSatisfiable(plaintheory, {"f", "x == 1"}), "sat x == 1")
+assert(isSatisfiable(plaintheory, {"f", "x == 2"}), "sat x == 2")
+assert(not isSatisfiable(plaintheory, {"f", "x == 3"}), "unsat x == 3")
 
 local m1 = {"and", "x", "y"}
 assert(true == implies(plaintheory, {m1}, "x"))
@@ -689,6 +714,8 @@ assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f"
 for N = 20, 20 do
 	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
+	theoryTime = 0
+	local beforeTime = os.clock()
 
 	local q = {"f", "x == 1"}
 	for i = 1, N do
@@ -705,6 +732,9 @@ for N = 20, 20 do
 		q = {"and", q, f}
 	end
 	assert(isSatisfiable(plaintheory, q))
+	print(math.floor(theoryTime / asks * 1e6) .. "us / theory:isSatisfiable")
+	print(asks .. " invocations of theory:isSatisfiable")
+	print("Elapsed for N=" .. N .. " test: " .. os.clock() - beforeTime)
 end
 
 --------------------------------------------------------------------------------
