@@ -372,9 +372,21 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 				local addCNF = toCNF(theory, addition, true, {})
 				newCNF = andCNF(newCNF, addCNF)
 			end
-			local sat, _ = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
 
+			-- Identify which terms appear in which clauses
+			-- local termClauses = {}
+			-- for _, clause in ipairs(newCNF) do
+			-- 	for _, termtruth in ipairs(clause) do
+			-- 		local term, truth = termtruth[1], termtruth[2]
+			-- 		termClauses[term] = termClauses[term] or {}
+			-- 		table.insert(termClauses[term], clause)
+			-- 	end
+			-- end
+
+			local sat, newCore = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
 			if not sat and findCores then
+				-- print("ignoring:", showCNF(theory, newCore))
+				
 				-- TODO: ideally, these would be in reverse order
 				local keys = table.keys(assignment)
 
@@ -431,9 +443,6 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 		end
 		unsatCoreCNF = betterCNF
 		cnf = andCNF(cnf, betterCNF)
-	else
-		-- It's a contradiction for `t1` to be assigned `smallestClause[1][2]`
-		-- according to simplifyCNF
 	end
 
 	-- Add this to the set to prune more cases
@@ -680,9 +689,11 @@ assert(not implies(
 ))
 
 -- Performance test (uses unsat cores)
-for N = 20, 20 do
+for N = 50, 50 do
 	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
+	theoryTime = 0
+	local beforeTime = os.clock()
 
 	local q = {"f", "x == 1"}
 	for i = 1, N do
@@ -701,6 +712,10 @@ for N = 20, 20 do
 	assert(isSatisfiable(plaintheory, q), "must be sat")
 
 	--print("== N (simple, unsat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
+	print("NO QUANTIFIERS:")
+	print(math.floor(theoryTime / asks * 1e6) .. "us / theory:isSatisfiable")
+	print(asks .. " invocations of theory:isSatisfiable")
+	print("Elapsed for N=" .. N .. " test: " .. os.clock() - beforeTime)
 	asks = 0
 
 	local q = {"f", "x == 1"}
@@ -730,7 +745,7 @@ assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x
 assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}} }))
 
 -- Performance test (uses unsat cores for quantifiers)
-for N = 20, 20 do
+for N = 50, 50 do
 	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
 	theoryTime = 0
@@ -751,6 +766,8 @@ for N = 20, 20 do
 		q = {"and", q, f}
 	end
 	assert(isSatisfiable(plaintheory, q))
+
+	print("WITH QUANTIFIERS:")
 	print(math.floor(theoryTime / asks * 1e6) .. "us / theory:isSatisfiable")
 	print(asks .. " invocations of theory:isSatisfiable")
 	print("Elapsed for N=" .. N .. " test: " .. os.clock() - beforeTime)
