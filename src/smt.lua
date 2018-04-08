@@ -1,6 +1,7 @@
 -- A SMT Solver
 
 local profile = import "profile.lua"
+local ansi = import "ansi.lua"
 
 REGISTER_TYPE("Theory", recordType {
 	-- argument: (self, simpleModel)
@@ -48,7 +49,11 @@ local function showClause(theory, c, assignment)
 			terms[i] = "~(" .. terms[i] .. ")"
 		end
 	end
-	return "[" .. table.concat(terms, " || ") .. "]"
+	local cs = "[" .. table.concat(terms, " || ") .. "]"
+	if c.color then
+		return ansi[c.color](cs)
+	end
+	return cs
 end
 
 -- RETURNS a string representation of a CNF formula (for debugging)
@@ -195,7 +200,7 @@ local function simplifyCNF(theory, cnf, assignment)
 		assert(1 <= #clause)
 
 		-- Simplify a clause
-		local c = {}
+		local c = {color = clause.color}
 		local satisfied = false
 
 		-- Search the clause of terms with known truth assignments
@@ -265,7 +270,7 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 		reduced[k] = v
 	end
 
-	local core = {}
+	local core = {color = "red"}
 
 	-- i is the lowest index that we are still unsure about
 	local i = 1
@@ -347,7 +352,7 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 		profile.close("theory:isSatisfiable")
 
 		if not out then
-			-- While this satisfies the SAT, the satisfaction doesn't work in
+			-- While this satisfies the CNF, the satisfaction doesn't work in
 			-- the theory.
 			if not findCores then
 				return false, {}
@@ -377,7 +382,7 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 				newCNF = andCNF(newCNF, addCNF)
 			end
 
-			local sat, newCore = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
+			local sat, _ = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
 			if not sat and findCores then
 				-- TODO: ideally, these would be in reverse order
 				local keys = table.keys(assignment)
