@@ -252,7 +252,7 @@ end
 local cnfSAT
 
 -- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
--- according to the theory as a CNF clause
+-- according to the theory as a CNF
 local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	assertis(theory, "Theory")
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
@@ -266,9 +266,10 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	end
 
 	local core = {}
+
+	-- i is the lowest index that we are still unsure about
 	local i = 1
 	local chunk = math.ceil(#order / 6)
-	local d = ""
 	while i <= #order do
 		-- Remove the first `chunk` elements
 		for j = i, math.min(#order, i + chunk - 1) do
@@ -285,7 +286,6 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
 			i = i + chunk
-			d = d .. (("."):rep(chunk))
 			chunk = chunk * 2
 		else
 			-- Restore the first `chunk` elements
@@ -299,18 +299,22 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 				-- Thus the ONLY term MUST be in the unsatisfiable core
 				table.insert(core, {order[i], not assignment[order[i]]})
 				i = i + 1
-				d = d ..("*")
+
+				-- Optimistically increase chunk size
+				chunk = math.floor(1 + (#order - i) / 6)
 			else
 				-- Reduce the number of cores being considered
-				chunk = 1
+				chunk = math.ceil(chunk / 2)
 			end
 		end
 	end
-	return core
+
+	return {core}
 end
 
 local asks = 0
 local theoryTime = 0
+local internals = 0
 
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
@@ -327,6 +331,7 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 	assert(type(noModify) == "boolean")
 
 	cnf = simplifyCNF(theory, cnf, assignment)
+	internals = internals + 1
 	if not cnf then
 		return false, {}
 	end
@@ -358,9 +363,8 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 			-- Ask the theory for a minimal explanation of why this does not
 			-- work in order to prune the CNF-SAT search space
 			local coreClause = unsatisfiableCoreClause(theory, assignment, keys, meta)
-			assert(1 <= #coreClause)
 
-			return false, {coreClause}
+			return false, coreClause
 		end
 
 		-- Ask the theory if there are any extensions that can be made
@@ -373,28 +377,15 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 				newCNF = andCNF(newCNF, addCNF)
 			end
 
-			-- Identify which terms appear in which clauses
-			-- local termClauses = {}
-			-- for _, clause in ipairs(newCNF) do
-			-- 	for _, termtruth in ipairs(clause) do
-			-- 		local term, truth = termtruth[1], termtruth[2]
-			-- 		termClauses[term] = termClauses[term] or {}
-			-- 		table.insert(termClauses[term], clause)
-			-- 	end
-			-- end
-
 			local sat, newCore = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
 			if not sat and findCores then
-				-- print("ignoring:", showCNF(theory, newCore))
-				
 				-- TODO: ideally, these would be in reverse order
 				local keys = table.keys(assignment)
 
 				-- Sort for determinism
 				table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
 				local core = unsatisfiableCoreClause(theory, assignment, keys, meta)
-				assert(#core >= 1)
-				return false, {core}
+				return false, core
 			end
 
 			-- We cannot use subUnsatCore, because :additionalClauses makes NEW
@@ -692,6 +683,7 @@ assert(not implies(
 for N = 50, 50 do
 	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
+	internals = 0
 	theoryTime = 0
 	local beforeTime = os.clock()
 
@@ -712,10 +704,12 @@ for N = 50, 50 do
 	assert(isSatisfiable(plaintheory, q), "must be sat")
 
 	--print("== N (simple, unsat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
+	local afterTime = os.clock()
 	print("NO QUANTIFIERS:")
-	print(math.floor(theoryTime / asks * 1e6) .. "us / theory:isSatisfiable")
-	print(asks .. " invocations of theory:isSatisfiable")
-	print("Elapsed for N=" .. N .. " test: " .. os.clock() - beforeTime)
+	print(asks .. " invocations of theory:isSatisfiable (" .. math.floor(theoryTime / asks * 1e6) .. "us each)")
+	print(internals .. " invocations of cnfSAT (" .. math.floor((afterTime - theoryTime) / internals * 1e6) .. "us each)")
+	print("Elapsed for N=" .. N .. " test: " .. afterTime - beforeTime)
+	print()
 	asks = 0
 
 	local q = {"f", "x == 1"}
@@ -748,6 +742,7 @@ assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f"
 for N = 50, 50 do
 	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
+	internals = 0
 	theoryTime = 0
 	local beforeTime = os.clock()
 
@@ -755,7 +750,7 @@ for N = 50, 50 do
 	for i = 1, N do
 		local clause = {
 			"x == " .. math.random(6, 999),
-			"x == " .. math.random(6, 999),
+			"x " .. string.rep(" ", i + 1) .. " == 2",
 			"x " .. string.rep(" ", i + 1) .. " == 1"
 		}
 
@@ -763,14 +758,16 @@ for N = 50, 50 do
 		local b = {"f", table.remove(clause, math.random(#clause))}
 		local c = {"f", table.remove(clause, math.random(#clause))}
 		local f = {"or", {"d", a}, {"or", {"d", b}, {"d", c}}}
-		q = {"and", q, f}
+		q = {"and", q, {"d", f}}
 	end
 	assert(isSatisfiable(plaintheory, q))
 
+	local afterTime = os.clock()
 	print("WITH QUANTIFIERS:")
-	print(math.floor(theoryTime / asks * 1e6) .. "us / theory:isSatisfiable")
-	print(asks .. " invocations of theory:isSatisfiable")
-	print("Elapsed for N=" .. N .. " test: " .. os.clock() - beforeTime)
+	print(asks .. " invocations of theory:isSatisfiable (" .. math.floor(theoryTime / asks * 1e6) .. "us each)")
+	print(internals .. " invocations of cnfSAT (" .. math.floor((afterTime - theoryTime) / internals * 1e6) .. "us each)")
+	print("Elapsed for N=" .. N .. " test: " .. afterTime - beforeTime)
+	print()
 end
 
 --------------------------------------------------------------------------------
