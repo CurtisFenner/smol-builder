@@ -2094,18 +2094,6 @@ function compileExpression(pExpression, scope, environment)
 
 	error("TODO expression")
 end
-local _compileExpression = compileExpression
-local level = 0
-compileExpression = function(p, ...)
-	--local indent = string.rep("\t", level)
-	--print(show(p):gsub("\n", "\n" .. indent))
-	level = level + 1
-	profile.open("compileExpression tag=" .. p.tag)
-	local a, b = _compileExpression(p, ...)
-	profile.close("compileExpression tag=" .. p.tag)
-	level = level - 1
-	return a, b
-end
 
 local function typeFromDefinition(definition)
 	assertis(definition, choiceType("ClassIR", "UnionIR"))

@@ -155,19 +155,45 @@ function table.indexof(list, element)
 	return index
 end
 
--- RETURNS a function
-function table.bind(object, f)
-	return function(...)
-		return f(object, ...)
-	end
-end
-
 function table.rest(object, from)
 	local out = {}
 	for i = from, #object do
 		out[i - from + 1] = object[i]
 	end
 	return out
+end
+
+-- RETURNS the cartesian product of the lists
+function table.cartesian(lists)
+	assert(1 <= #lists)
+	local out = {}
+	local index = {}
+	for i = 1, #lists do
+		if #lists[i] == 0 then
+			return {}
+		end
+		index[i] = 1
+	end
+	while true do
+		local row = {}
+		for i = 1, #index do
+			row[i] = lists[i][index[i]]
+		end
+		table.insert(out, row)
+
+		-- Increment
+		for i = #index, 0, -1 do
+			if i == 0 then
+				return out
+			end
+			index[i] = index[i] + 1
+			if index[i] > #lists[i] then
+				index[i] = 1
+			else
+				break
+			end
+		end
+	end
 end
 
 local function ripairsit(list, i)
