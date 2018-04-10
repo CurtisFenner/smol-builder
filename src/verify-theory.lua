@@ -420,9 +420,7 @@ function theory:additionalClauses(model, meta)
 	for term in pairs(model) do
 		if term.tag == "forall" then
 			if not table.haskey(meta, term.unique) then
-				for _, c in ipairs(quantifierClauses(model, term, canon)) do
-					table.insert(out, c)
-				end
+				out[term] = quantifierClauses(model, term, canon)
 				newMeta = table.with(newMeta, term.unique, true)
 			else
 				-- This quantifier has already been instantiated

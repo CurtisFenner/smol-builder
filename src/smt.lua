@@ -27,6 +27,11 @@ REGISTER_TYPE("Theory", recordType {
 	additionalClauses = "function",
 })
 
+-- RETURNS a type
+local function CNFType(theory)
+	return listType(listType(tupleType(theory.assertion_t, "boolean")))
+end
+
 -- RETURNS a shallow copy of t such that return[k] is v
 local function copywith(t, k, v)
 	local r = {}
@@ -50,9 +55,6 @@ local function showClause(theory, c, assignment)
 		end
 	end
 	local cs = "[" .. table.concat(terms, " || ") .. "]"
-	if c.color then
-		return ansi[c.color](cs)
-	end
 	return cs
 end
 
@@ -200,7 +202,7 @@ local function simplifyCNF(theory, cnf, assignment)
 		assert(1 <= #clause)
 
 		-- Simplify a clause
-		local c = {color = clause.color}
+		local c = {}
 		local satisfied = false
 
 		-- Search the clause of terms with known truth assignments
@@ -270,7 +272,7 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 		reduced[k] = v
 	end
 
-	local core = {color = "red"}
+	local core = {}
 
 	-- i is the lowest index that we are still unsure about
 	local i = 1
@@ -315,6 +317,166 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	end
 
 	return {core}
+end
+
+-- RETURNS a CNF
+local function quantifierCore(theory, assignment, map, cnf)
+	assertis(theory, "Theory")
+	assertis(assignment, mapType(theory.assertion_t, "boolean"))
+	assertis(map, mapType(theory.assertion_t, CNFType(theory)))
+	assertis(cnf, CNFType(theory))
+
+	-- Associate extra terms with their quantifiers
+	local toQuantifier = {}
+	for quantifier, instantiatedCNF in pairs(map) do
+		assert(type(assignment[quantifier]) == "boolean")
+
+		for _, clause in ipairs(instantiatedCNF) do
+			for i, term in ipairs(clause) do
+				local key = theory:canonKey(term[1])
+				toQuantifier[key] = toQuantifier[key] or {}
+				table.insert(toQuantifier[key], {
+					quantifier = quantifier,
+					clause = clause,
+					truth = term[2],
+					i = i,
+				})
+			end
+		end
+	end
+
+	local patterning = {}
+
+	local output = {}
+	for _, must in ipairs(cnf) do
+		-- Determine the "pattern" in terms of free terms
+		local pattern = {}
+		local filler = {}
+		for _, t in ipairs(must) do
+			local key = theory:canonKey(t[1])
+			if not toQuantifier[key] then
+				table.insert(pattern, {key = key, t = t})
+			else
+				table.insert(filler, {key = key, t = t})
+			end
+		end
+
+		if #pattern == #must then
+			-- The theory (for some odd reason) made a free clause
+			table.insert(output, must)
+		else
+			-- The clause is not free
+			local patternIDs = {}
+			for i = 1, #pattern do
+				patternIDs[i] = pattern[i].key .. "::" .. tostring(pattern[i].t)
+			end
+			table.sort(patternIDs)
+			local patternID = table.concat(patternIDs, " ## ")
+			
+			local opposing = {}
+			for i = 1, #filler do
+				opposing[i] = {}
+				local key = filler[i].key
+				for _, triple in ipairs(toQuantifier[key]) do
+					if triple.truth == not filler[i].t[2] then
+						-- Opposes quantifier
+						table.insert(opposing[i], triple)
+					end
+				end
+			end
+			assert(#opposing == #filler)
+			assertis(opposing, listType(listType(recordType {
+				truth = "boolean",
+				i = "integer",
+				clause = listType(tupleType(theory.assertion_t, "boolean")),
+				quantifier = theory.assertion_t,
+			})))
+
+			for _, opposingTuple in ipairs(table.cartesian(opposing)) do
+				-- Check that each quantifier is distinct
+				-- TODO: what happens when two terms from the same quantifier
+				-- are mentioned?
+				local distinct = true
+				local indexForQuantifier = {}
+				local product = 1
+				for _, t in ipairs(opposingTuple) do
+					if indexForQuantifier[t.quantifier] then
+						distinct = false
+						break
+					end
+					indexForQuantifier[t.quantifier] = t.i
+					product = product * #t.clause
+				end
+				
+				if distinct then
+					local indexTuple = {}
+					local quantifierTuple = {}
+					for q, i in spairs(indexForQuantifier, tostring) do
+						table.insert(quantifierTuple, theory:canonKey(q))
+						table.insert(indexTuple, i)
+					end
+					local qKey = table.concat(quantifierTuple, " ## ")
+					local iKey = table.concat(indexTuple, ",")
+
+					-- Record this as progress toward completing some grid
+					if not patterning[patternID] then
+						-- The first mention of the pattern
+						patterning[patternID] = {
+							pattern = pattern,
+							instances = {},
+						}
+					end
+
+					-- Set up the pattern for this particular combination of
+					-- quantifier clauses
+					if not patterning[patternID].instances[qKey] then
+						patterning[patternID].instances[qKey] = {
+							limit = product,
+							count = 0,
+							map = {},
+						}
+					end
+					local p = patterning[patternID]
+					if not p.instances[qKey].map[iKey] then
+						p.instances[qKey].map[iKey] = true
+						p.instances[qKey].count = p.instances[qKey].count + 1
+						--print(qKey, "", iKey, "", p.instances[qKey].count .. "/" .. p.instances[qKey].limit)
+
+						-- Check if we have completed a matrix
+						if p.instances[qKey].limit == p.instances[qKey].count then
+							local newClause = {}
+							for i = 1, #pattern do
+								newClause[i] = pattern[i].t
+							end
+
+							-- Negate each quantifier
+							for q in spairs(indexForQuantifier, tostring) do
+								assertis(q, theory.assertion_t)
+								assertis(assignment[q], "boolean")
+								table.insert(newClause, {q, not assignment[q]})
+							end
+							table.insert(output, newClause)
+						end
+					end
+				end
+			end
+		end
+		assertis(patterning, mapType("string", recordType {
+			pattern = listType(recordType {
+				t = tupleType(theory.assertion_t, "boolean"),
+			}),
+			instances = recordType {},
+		}))
+	end
+
+	-- print(string.rep("-", 80))
+	-- print(ansi.blue("INPUT:"))
+	-- print(showCNF(theory, cnf))
+	-- print()
+	-- print(ansi.blue("OUTPUT:"))
+	-- print(showCNF(theory, output))
+
+	return output
 end
 
 local asks = 0
@@ -375,30 +537,32 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 		-- Ask the theory if there are any extensions that can be made
 		-- (e.g., from quantifierS) that may make the model unsatisfiable
 		local additional, newMeta = theory:additionalClauses(assignment, meta)
-		if #additional ~= 0 then
+		if next(additional) ~= nil then
+			-- Track which terms originate from which quantifiers
+			local expansionClauses = {}
 			local newCNF = {}
-			for _, addition in ipairs(additional) do
-				local addCNF = toCNF(theory, addition, true, {})
-				newCNF = andCNF(newCNF, addCNF)
+			for quantified, results in pairs(additional) do
+				expansionClauses[quantified] = {}
+				for _, result in ipairs(results) do
+					local addCNF = toCNF(theory, result, true, {})
+					for _, clause in ipairs(addCNF) do
+						table.insert(expansionClauses[quantified], clause)
+						table.insert(newCNF, clause)
+					end
+				end
 			end
 
-			local sat, _ = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
+			local sat, core = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
 			if not sat and findCores then
-				-- TODO: ideally, these would be in reverse order
-				local keys = table.keys(assignment)
-
-				-- Sort for determinism
-				table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
-				local core = unsatisfiableCoreClause(theory, assignment, keys, meta)
-				return false, core
+				-- The core may use NEW terms; if we return them, we could
+				-- INCREASE the size of the CNF, which would be
+				-- counterproductive.
+				-- Deduce which of these contradict assignments for the
+				-- quantifiers instead of the instantiations.
+				local quotientCore = quantifierCore(theory, assignment, expansionClauses, core)
+				return false, quotientCore
 			end
 
-			-- We cannot use subUnsatCore, because :additionalClauses makes NEW
-			-- terms.
-
-			-- TODO:
-			-- We should compute an unsat core in terms of the conflicts between
-			-- quantifier terms and other terms.
 			return sat, {}
 		end
 
@@ -617,9 +781,9 @@ function plaintheory:additionalClauses(model, meta)
 			if type(key) == "table" and key[1] == "d" then
 				newMeta[key] = true
 				if value then
-					table.insert(out, key[2])
+					out[key] = {key[2]}
 				else
-					table.insert(out, {"not", key[2]})
+					out[key] = {{"not", key[2]}}
 				end
 			end
 		end
