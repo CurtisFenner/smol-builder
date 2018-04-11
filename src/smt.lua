@@ -29,8 +29,188 @@ REGISTER_TYPE("Theory", recordType {
 
 -- RETURNS a type
 local function CNFType(theory)
-	return listType(listType(tupleType(theory.assertion_t, "boolean")))
+	return recordType {_theory = constantType(theory)}
 end
+
+--------------------------------------------------------------------------------
+
+local CNF = {}
+
+-- RETURNS a fresh CNF
+-- clauses: a [][](term, boolean)
+function CNF.new(theory, clauses)
+	-- Make enough room for the largest clause
+	local unsatisfiedClausesBySize = {}
+	local largest = 0
+	for _, clause in ipairs(clauses) do
+		largest = math.max(largest, #clause)
+	end
+	for i = 0, largest do
+		unsatisfiedClausesBySize[i] = {}
+	end
+
+	-- Index the clauses
+	local index = {}
+	local allClauses = {}
+	for _, rawClause in ipairs(clauses) do
+		assert(#rawClause > 0)
+
+		local free = {}
+		-- freeCount is the size of the free set
+		local freeCount = 0
+		local dropped = {}
+		local clause = {free = free, sat = {}, unsat = {}, satCount = 0}
+		for _, tuple in ipairs(rawClause) do
+			local key = theory:canonKey(tuple[1])
+			if dropped[key] then
+				-- Ignore: used in "a or ~a"
+			elseif free[key] ~= nil then
+				-- Redundant "a or a" or "a or ~a" cases
+				if free[key][2] ~= tuple[2] then
+					-- "a or ~a" case
+					dropped[key] = true
+					freeCount = freeCount - 1
+					free[key] = nil
+					assert(clause == table.remove(index[key]))
+				end
+			else
+				-- Add new term to the free set
+				free[key] = tuple
+				index[key] = index[key] or {}
+				table.insert(index[key], clause)
+				freeCount = freeCount + 1
+			end
+		end
+		clause.freeCount = freeCount
+		if clause.freeCount ~= 0 then
+			unsatisfiedClausesBySize[freeCount][clause] = true
+			table.insert(allClauses, clause)
+		end
+	end
+
+	local instance = {
+		_unsatisfiedClausesBySize = unsatisfiedClausesBySize,
+		_index = index,
+		_theory = theory,
+		_satisfiedCount = 0,
+		_contradictCount = 0,
+		_allClauses = allClauses,
+	}
+	return setmetatable(instance, {__index = CNF})
+end
+
+-- Finds an unassigned term and returns a preferred truth value for it
+-- RETURNS term, boolean
+function CNF:pickUnassigned()
+	for i = 1, #self._unsatisfiedClausesBySize do
+		local clause = next(self._unsatisfiedClausesBySize[i])
+		if clause then
+			local key = next(clause.free)
+			assert(type(key) == "string")
+			local tuple = clause.free[key]
+			return tuple[1], tuple[2]
+		end
+	end
+	error "All terms are assigned"
+end
+
+-- REQUIRES term is an unassigned term for this CNF
+-- MODIFIES this
+-- RETURNS nothing
+function CNF:assign(term, truth)
+	local key = self._theory:canonKey(term)
+	for _, clause in ipairs(self._index[key]) do
+		local tuple = clause.free[key]
+		assert(tuple and #tuple == 2)
+		assert(type(tuple[2]) == "boolean")
+		clause.free[key] = nil
+		if tuple[2] == truth then
+			clause.sat[key] = tuple
+			clause.satCount = clause.satCount + 1
+			if clause.satCount == 1 then
+				self._satisfiedCount = self._satisfiedCount + 1
+			end
+		else
+			clause.unsat[key] = tuple
+		end
+
+		-- Reduce free size
+		self._unsatisfiedClausesBySize[clause.freeCount][clause] = nil
+		clause.freeCount = clause.freeCount - 1
+
+		if clause.satCount == 0 then
+			if clause.freeCount == 0 then
+				-- May not be satisfied; remains referenced by index
+				self._contradictCount = self._contradictCount + 1
+			else
+				-- May still be satisfied
+				self._unsatisfiedClausesBySize[clause.freeCount][clause] = true
+			end
+		else
+			-- Already satisfied; remains referenced by index
+		end
+	end
+end
+
+-- REQUIRES term is assigned for this CNF
+-- MODIFIES this
+-- RETURNS nothing
+function CNF:unassign(term)
+	local key = self._theory:canonKey(term)
+	for _, clause in ipairs(self._index[key]) do
+		if clause.sat[key] then
+			-- This clause was satisfied (at least in part) by term
+			assert(1 <= clause.satCount)
+
+			clause.free[key] = clause.sat[key]
+			clause.freeCount = clause.freeCount + 1
+			clause.sat[key] = nil
+			clause.satCount = clause.satCount - 1
+			if clause.satCount == 0 then
+				-- This was the only satisfying term
+				self._unsatisfiedClausesBySize[clause.freeCount][clause] = true
+				self._satisfiedCount = self._satisfiedCount - 1
+			end
+		else
+			-- This term is not part of the satisfaction of clause
+			assert(clause.unsat[key])
+
+			clause.free[key] = clause.unsat[key]
+			clause.freeCount = clause.freeCount + 1
+			if clause.satCount == 0 and clause.freeCount == 1 then
+				-- This was fully false, but now might be satisfied
+				assert(1 <= self._contradictCount)
+				self._contradictCount = self._contradictCount - 1
+			end
+			
+			if clause.satCount == 0 then
+				self._unsatisfiedClausesBySize[clause.freeCount][clause] = true
+			end
+		end
+	end
+end
+
+-- RETURNS boolean
+function CNF:isTautology()
+	return #self._allClauses == self._satisfiedCount
+end
+
+-- RETURNS boolean
+function CNF:isContradiction()
+	return self._contradictCount ~= 0
+end
+
+-- RETURNS is decided, is tautology.
+function CNF:isDecided()
+	local isTautology = self:isTautology()
+	local isContradiction = self:isContradiction()
+	if isTautology or isContradiction then
+		return true, isTautology
+	end
+	return false
+end
+
+--------------------------------------------------------------------------------
 
 -- RETURNS a shallow copy of t such that return[k] is v
 local function copywith(t, k, v)
@@ -797,6 +977,46 @@ assert(isSatisfiable(plaintheory, {"f", "x == 1"}), "sat x == 1")
 assert(isSatisfiable(plaintheory, {"f", "x == 2"}), "sat x == 2")
 assert(not isSatisfiable(plaintheory, {"f", "x == 3"}), "unsat x == 3")
 
+do
+	-- Test CNF library
+	local problem = CNF.new(plaintheory, {
+		-- Tautology
+		{{"a", true}, {"a", false}},
+		{{"a", true}, {"b", true}, {"b", true}},
+		{{"x", true}, {"y", true}, {"z", false}, {"a", true}, {"b", false}},
+	})
+
+	assert(not problem:isDecided())
+	assert(not problem:isTautology())
+	assert(not problem:isContradiction())
+	local v1, prefer1 = problem:pickUnassigned()
+	assert(prefer1)
+	assert(v1 == "a" or v1 == "b")
+	problem:assign(v1, not prefer1)
+	assert(not problem:isDecided(), "must not yet be decided")
+	local v2, prefer2 = problem:pickUnassigned()
+	assert(v1 ~= v2)
+	assert(v2 == "a" or v2 == "b")
+	assert(prefer2 == true)
+	problem:assign(v2, not prefer2)
+	assert(problem:isDecided(), "must be decided")
+	assert(problem:isContradiction(), "must be contradiction")
+	assert(not problem:isTautology(), "must not be tautology")
+	problem:unassign(v2)
+	assert(not problem:isDecided(), "must no longer be decided")
+	assert(not problem:isContradiction(), "must no longer be contradiction")
+	assert(not problem:isTautology(), "must still not be tautology")
+	problem:unassign(v1)
+	assert(not problem:isDecided())
+	problem:assign("a", false)
+	problem:assign("b", true)
+	assert(not problem:isDecided())
+	problem:assign("z", false)
+	assert(problem:isDecided(), "problem is now decided")
+	assert(problem:isTautology(), "problem is now tautology")
+	assert(not problem:isContradiction(), "problem is not a contradiction")
+end
+
 local m1 = {"and", "x", "y"}
 assert(true == implies(plaintheory, {m1}, "x"))
 assert(true == implies(plaintheory, {m1}, "y"))
@@ -847,7 +1067,7 @@ assert(not implies(
 ))
 
 -- Performance test (uses unsat cores)
-for N = 50, 50 do
+for N = 50, 0 do
 	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
 	internals = 0
@@ -907,7 +1127,7 @@ assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x
 assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}))
 
 -- Performance test (uses unsat cores for quantifiers)
-for N = 50, 50 do
+for N = 50, 0 do
 	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
 	internals = 0
