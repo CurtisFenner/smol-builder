@@ -157,6 +157,7 @@ function CNF.new(theory, clauses, rawAssignment)
 	return instance
 end
 
+-- RETURNS a string representing this CNF, for debugging
 function CNF:show()
 	local cs = {}
 	for _, clause in ipairs(self._allClauses) do
@@ -169,6 +170,21 @@ function CNF:show()
 		end
 	end
 	return showCNF(self._theory, cs)
+end
+
+-- RETURNS the set of free terms in this
+function CNF:freeTermSet()
+	local out = {}
+	local added = {}
+	for _, clause in ipairs(self._allClauses) do
+		for _, t in pairs(clause.free) do
+			if not added[t[1]] then
+				added[t[1]] = true
+				table.insert(out, t[1])
+			end
+		end
+	end
+	return out
 end
 
 function CNF:validate()
@@ -558,11 +574,15 @@ end
 
 -- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
 -- according to the theory as a CNF
-local function unsatisfiableCoreClause(theory, assignment, order, meta)
+local function unsatisfiableCoreClause(theory, assignment, order)
 	assertis(theory, "Theory")
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
 	assertis(order, listType(theory.assertion_t))
 	assert(#order == #table.keys(assignment))
+
+	if theory:isSatisfiable(assignment) then
+		return {}
+	end
 
 	-- Make a shallow copy, to slowly reduce
 	local reduced = {}
@@ -571,6 +591,7 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	end
 
 	local core = {}
+	local coreIndex = {}
 
 	-- i is the lowest index that we are still unsure about
 	local i = 1
@@ -601,6 +622,7 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 			if chunk == 1 then
 				-- Thus the ONLY term MUST be in the unsatisfiable core
 				table.insert(core, {order[i], not assignment[order[i]]})
+				coreIndex[i] = true
 				i = i + 1
 
 				-- Optimistically increase chunk size
@@ -612,7 +634,17 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 		end
 	end
 
-	return {core}
+	local smallerAssignment = {}
+	local smallerOrder = {}
+	for i = 1, #order do
+		if not coreIndex[i] then
+			smallerAssignment[order[i]] = assignment[order[i]]
+			table.insert(smallerOrder, order[i])
+		end
+	end
+	local cores = unsatisfiableCoreClause(theory, smallerAssignment, smallerOrder)
+	table.insert(cores, core)
+	return cores
 end
 
 -- Collapses an unsat-core using instatiated terms to refer instead to only
@@ -773,8 +805,6 @@ local function quantifierCore(theory, assignment, map, cnf)
 	return output
 end
 
-local asks = 0
-local theoryTime = 0
 local internals = 0
 
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
@@ -788,21 +818,31 @@ local function cnfSAT(theory, cnf, assignment, meta, noModify)
 	assertis(cnf, CNFType(theory))
 	assert(type(noModify) == "boolean")
 
+	-- local allTerms = table.concatted(table.keys(assignment), cnf:freeTermSet())
+	-- table.sort(allTerms, function(a, b)
+	-- 	return theory:canonKey(a) < theory:canonKey(b)
+	-- end)
+	-- for i = 1, #allTerms do
+	-- 	if assignment[allTerms[i]] == nil then
+	-- 		io.write(".")
+	-- 	elseif assignment[allTerms[i]] then
+	-- 		io.write("1")
+	-- 	else
+	-- 		io.write("0")
+	-- 	end
+	-- end
+	-- print()
+
 	internals = internals + 1
 	if cnf:isContradiction() then
 		print("UNCOMMON")
 		return false
 	end
 
-	-- Find an assignment that the theory accepts
+
 	if cnf:isTautology() then
 		-- Ask the theory if the assignment is consistent
-		profile.open("theory:isSatisfiable")
-		asks = asks + 1
-		local beforeTime = os.clock()
 		local out = theory:isSatisfiable(assignment)
-		theoryTime = theoryTime + os.clock() - beforeTime
-		profile.close("theory:isSatisfiable")
 
 		if not out then
 			-- While this satisfies the CNF, the satisfaction doesn't work in
@@ -818,13 +858,17 @@ local function cnfSAT(theory, cnf, assignment, meta, noModify)
 
 			-- Ask the theory for a minimal explanation of why this does not
 			-- work in order to prune the CNF-SAT search space
-			local coreClauses = unsatisfiableCoreClause(theory, assignment, keys, meta)
+			local coreClauses = unsatisfiableCoreClause(theory, assignment, keys)
 			for _, coreClause in ipairs(coreClauses) do
 				cnf:addClause(coreClause)
 			end
+
 			return false
 		end
+	end
 
+	-- Find an assignment that the theory accepts
+	if cnf:isTautology() then
 		-- Ask the theory if there are any extensions that can be made
 		-- (e.g., from quantifierS) that may make the model unsatisfiable
 		local additional, newMeta = theory:additionalClauses(assignment, meta)
@@ -1175,9 +1219,7 @@ assert(not implies(
 -- Performance test (uses unsat cores)
 for N = 30, 200, 10 do
 	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
-	asks = 0
 	internals = 0
-	theoryTime = 0
 	local beforeTime = os.clock()
 
 	local q = {"f", "x == 1"}
@@ -1199,12 +1241,9 @@ for N = 30, 200, 10 do
 	--print("== N (simple, unsat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	local afterTime = os.clock()
 	print("NO QUANTIFIERS:")
-	print(asks .. " invocations of theory:isSatisfiable (" .. math.floor(theoryTime / asks * 1e6) .. "us each)")
-	print(internals .. " invocations of cnfSAT (" .. math.floor((afterTime - theoryTime) / internals * 1e6) .. "us each)")
-	print("Elapsed for N=" .. N .. " test: " .. afterTime - beforeTime)
-	print("\tElapsed in theory: " .. string.format("%.3f", theoryTime))
+	print(internals .. " invocations of cnfSAT (" .. math.floor(afterTime / internals * 1e6) .. "us each)")
+	print("N=" .. N .. " elapsed " .. afterTime - beforeTime)
 	print()
-	asks = 0
 
 	local q = {"f", "x == 1"}
 	for i = 1, N do
@@ -1235,9 +1274,7 @@ assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f"
 -- Performance test (uses unsat cores for quantifiers)
 for N = 50, 200, 10 do
 	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
-	asks = 0
 	internals = 0
-	theoryTime = 0
 	local beforeTime = os.clock()
 
 	local q = {"f", "x == 1"}
@@ -1258,9 +1295,8 @@ for N = 50, 200, 10 do
 
 	local afterTime = os.clock()
 	print("WITH QUANTIFIERS:")
-	print(asks .. " invocations of theory:isSatisfiable (" .. math.floor(theoryTime / asks * 1e6) .. "us each)")
-	print(internals .. " invocations of cnfSAT (" .. math.floor((afterTime - theoryTime) / internals * 1e6) .. "us each)")
-	print("Elapsed for N=" .. N .. " test: " .. afterTime - beforeTime)
+	print(internals .. " invocations of cnfSAT (" .. math.floor(afterTime / internals * 1e6) .. "us each)")
+	print("N=" .. N .. " elapsed " .. afterTime - beforeTime)
 	print()
 end
 
