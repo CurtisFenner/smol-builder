@@ -1,0 +1,44 @@
+forall => a
+	with negation ~a
+
+learn MUST a
+	learn NOTHING. ~forall does NOT imply ~a.
+
+learn MUST ~a.
+	learn ~forall.
+
+learn MUST x || ~a.    (~x => ~a)
+	learn x || ~forall
+
+--------------------------------------------------------------------------------
+
+F => a || b
+	with contrapositive (~a && ~b) => F
+
+learn MUST a || b
+	learn NOTHING. ~F does NOT imply ~(a || b).
+
+learn MUST ~a && ~b
+	learn ~F.
+
+learn MUST (x || ~a) && (x || ~b)     ==  x || (~a && ~b)
+	learn x || ~F
+
+--------------------------------------------------------------------------------
+
+F => a || b
+G => x || y
+
+learn MUST (~a || ~x) && (~a || ~y) && (~b || ~x) && (~b || ~y)
+	==    [~a || (~x && ~y)] && [~b || (~x && ~y)]
+	==    
+
+--------------------------------------------------------------------------------
+
+F => a || b
+
+learn MUST (x || ~a) && (x || y || ~b)
+	learn (x || y || ~F)
+
+learn MUST (x || ~a) && (y || ~b)
+	learn (x || y || ~F)

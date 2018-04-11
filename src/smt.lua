@@ -70,11 +70,12 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS a CNF formula, [][](term, boolean)
+-- RETURNS a CNF formula
 -- the conjunction of CNFs a and b
-local function andCNF(a, b)
-	assertis(a, listType(listType(tupleType("any", "boolean"))))
-	assertis(b, listType(listType(tupleType("any", "boolean"))))
+local function andCNF(theory, a, b)
+	assertis(a, CNFType(theory))
+	assertis(b, CNFType(theory))
+
 	return table.concatted(a, b)
 end
 
@@ -117,7 +118,7 @@ end
 
 -- a: a CNF description
 -- b: a CNF description
--- RETURNS a CNF description, [][](term, boolean)
+-- RETURNS a CNF description
 local function disjunctionOfCNF(theory, a, b)
 	local clauses = {}
 	for _, x in ipairs(a) do
@@ -256,8 +257,6 @@ local function cnfSize(cnf)
 	return count
 end
 
-local cnfSAT
-
 -- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
 -- according to the theory as a CNF
 local function unsatisfiableCoreClause(theory, assignment, order, meta)
@@ -284,11 +283,9 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 		end
 
 		local before = os.clock()
-		-- TODO: this is far too slow.
-		-- Using cnfSAT instead of isSatisfiable allows us to learn things
-		-- about quantified statements, which are (typically) ignored by
-		-- the theory solver
-		local sat = cnfSAT(theory, {}, reduced, meta, false, true)
+
+		-- Use the theory to determine if the model is unsatisfiable
+		local sat = theory:isSatisfiable(reduced)
 		if not sat then
 			-- Constraints [i ... i + chunk - 1] are not part of the
 			-- unsatisfiable core, as it remains unsatisfiable without those
@@ -319,6 +316,10 @@ local function unsatisfiableCoreClause(theory, assignment, order, meta)
 	return {core}
 end
 
+-- Collapses an unsat-core using instatiated terms to refer instead to only
+-- quantifiers.
+-- assignment: must assign a truth value to each quantifier in `map`
+-- map: maps each quantifier to a CNF that it implies
 -- RETURNS a CNF
 local function quantifierCore(theory, assignment, map, cnf)
 	assertis(theory, "Theory")
@@ -345,9 +346,8 @@ local function quantifierCore(theory, assignment, map, cnf)
 		end
 	end
 
-	local patterning = {}
-
 	local output = {}
+	local patterning = {}
 	for _, must in ipairs(cnf) do
 		-- Determine the "pattern" in terms of free terms
 		local pattern = {}
@@ -372,7 +372,7 @@ local function quantifierCore(theory, assignment, map, cnf)
 			end
 			table.sort(patternIDs)
 			local patternID = table.concat(patternIDs, " ## ")
-			
+
 			local opposing = {}
 			for i = 1, #filler do
 				opposing[i] = {}
@@ -407,7 +407,7 @@ local function quantifierCore(theory, assignment, map, cnf)
 					indexForQuantifier[t.quantifier] = t.i
 					product = product * #t.clause
 				end
-				
+
 				if distinct then
 					local indexTuple = {}
 					local quantifierTuple = {}
@@ -440,7 +440,6 @@ local function quantifierCore(theory, assignment, map, cnf)
 					if not p.instances[qKey].map[iKey] then
 						p.instances[qKey].map[iKey] = true
 						p.instances[qKey].count = p.instances[qKey].count + 1
-						--print(qKey, "", iKey, "", p.instances[qKey].count .. "/" .. p.instances[qKey].limit)
 
 						-- Check if we have completed a matrix
 						if p.instances[qKey].limit == p.instances[qKey].count then
@@ -467,14 +466,9 @@ local function quantifierCore(theory, assignment, map, cnf)
 			}),
 			instances = recordType {},
 		}))
-	end
 
-	-- print(string.rep("-", 80))
-	-- print(ansi.blue("INPUT:"))
-	-- print(showCNF(theory, cnf))
-	-- print()
-	-- print(ansi.blue("OUTPUT:"))
-	-- print(showCNF(theory, output))
+		-- TODO: combine partial matches into looser cores
+	end
 
 	return output
 end
@@ -491,7 +485,7 @@ local internals = 0
 --            bad models. When false, it does not do this search.
 -- noModify: When true, ensures that `assignment` is not modified
 -- MODIFIES assignment (when the assignment is satisfiable, and not noModify)
-function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
+local function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 	assert(type(assignment) == "table")
 	assert(type(cnf) == "table")
 	assert(type(findCores) == "boolean")
@@ -524,13 +518,13 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 			local keys = table.keys(assignment)
 
 			-- Sort for determinism
-			table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
-
+			table.sort(keys, function(a, b)
+				return theory:canonKey(a) < theory:canonKey(b)
+			end)
 
 			-- Ask the theory for a minimal explanation of why this does not
 			-- work in order to prune the CNF-SAT search space
 			local coreClause = unsatisfiableCoreClause(theory, assignment, keys, meta)
-
 			return false, coreClause
 		end
 
@@ -602,7 +596,7 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 			return out
 		end
 		unsatCoreCNF = betterCNF
-		cnf = andCNF(cnf, betterCNF)
+		cnf = andCNF(theory, cnf, betterCNF)
 	end
 
 	-- Add this to the set to prune more cases
@@ -624,14 +618,15 @@ function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 	end
 
 	assignment[t1] = nil
-	return false, andCNF(unsatCoreCNF, moreUnsatCoreCNF)
+	return false, andCNF(theory, unsatCoreCNF, moreUnsatCoreCNF)
 end
 
+-- Determine whether or not `expression` is satisfiable in the given `theory`.
 -- RETURNS false | satisfaction
 local function isSatisfiable(theory, expression)
 	assert(theory)
 	assert(expression)
-	
+
 	local cnf = toCNF(theory, expression, true, {})
 	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true, false)
 	return sat
@@ -639,10 +634,12 @@ end
 
 --------------------------------------------------------------------------------
 
+-- Determine whether or not `givens` together imply `expression` in the given
+-- `theory`.
 -- RETURNS false, counterexample | true
 local function implies(theory, givens, expression)
 	profile.open("smt.implies setup")
-	
+
 	-- Is the case where givens are true but expression false satisfiable?
 	local args = {}
 	local truths = {}
@@ -650,10 +647,10 @@ local function implies(theory, givens, expression)
 		table.insert(args, givens[i])
 		table.insert(truths, true)
 	end
-	
+
 	table.insert(args, expression)
 	table.insert(truths, false)
-	
+
 	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
 	profile.close("smt.implies setup")
 
@@ -673,6 +670,7 @@ end
 
 --------------------------------------------------------------------------------
 
+-- plaintheory is an implementation of a Theory used to test the SMT solver
 local plaintheory = {assertion_t = "any"}
 
 -- Test theory
@@ -774,7 +772,7 @@ function plaintheory:additionalClauses(model, meta)
 	for k, v in pairs(meta) do
 		newMeta[k] = v
 	end
-	
+
 	local out = {}
 	for key, value in pairs(model) do
 		if not meta[key] then
@@ -878,6 +876,7 @@ for N = 50, 50 do
 	print(asks .. " invocations of theory:isSatisfiable (" .. math.floor(theoryTime / asks * 1e6) .. "us each)")
 	print(internals .. " invocations of cnfSAT (" .. math.floor((afterTime - theoryTime) / internals * 1e6) .. "us each)")
 	print("Elapsed for N=" .. N .. " test: " .. afterTime - beforeTime)
+	print("\tElapsed in theory: " .. string.format("%.3f", theoryTime))
 	print()
 	asks = 0
 
@@ -904,8 +903,8 @@ end
 
 assert(isSatisfiable(plaintheory, {"d", {"f", "x == 1"}}))
 assert(not isSatisfiable(plaintheory, {"d", {"f", "x == 99"}}))
-assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}} }))
-assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}} }))
+assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}}}))
+assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}))
 
 -- Performance test (uses unsat cores for quantifiers)
 for N = 50, 50 do
