@@ -32,76 +32,170 @@ local function CNFType(theory)
 	return recordType {_theory = constantType(theory)}
 end
 
+-- RETURNS a string representation of a CNF clause (for debugging)
+local function showClause(theory, c, assignment)
+	assignment = assignment or {}
+	local terms = {}
+	for i = 1, #c do
+		assert(#c[i] == 2)
+		assertis(c[i][1], theory.assertion_t)
+		terms[i] = theory:canonKey(c[i][1])
+		if not c[i][2] then
+			terms[i] = "~(" .. terms[i] .. ")"
+		end
+	end
+	local cs = "[" .. table.concat(terms, " || ") .. "]"
+	return cs
+end
+
+-- RETURNS a string representation of a CNF formula (for debugging)
+local function showCNF(theory, n, assignment)
+	assignment = assignment or {}
+	local clauses = {}
+	for i = 1, #n do
+		clauses[i] = showClause(theory, n[i], assignment)
+	end
+	return "&& " .. table.concat(clauses, "\n&& ")
+end
+
 --------------------------------------------------------------------------------
 
 local CNF = {}
 
+-- PRIVATE
+-- RETURNS a prepared clause, a maximum number of free tokens
+local function cnfPrepareClause(theory, rawClause, index, assignment)
+	assert(#rawClause > 0)
+	assert(assignment)
+
+	-- freeCount is the size of the free set
+	local free = {}
+	local freeCount = 0
+	local dropped = {}
+	local clause = {free = free, sat = {}, unsat = {}, satCount = 0}
+	for _, tuple in ipairs(rawClause) do
+		local key = theory:canonKey(tuple[1])
+		if dropped[key] then
+			-- Ignore: used in "a or ~a"
+		elseif free[key] ~= nil then
+			-- Redundant "a or a" or "a or ~a" cases
+			if free[key][2] ~= tuple[2] then
+				-- "a or ~a" case
+				dropped[key] = true
+				freeCount = freeCount - 1
+				free[key] = nil
+				assert(clause == table.remove(index[key]))
+			end
+		else
+			-- Add new term to the free set
+			free[key] = tuple
+			index[key] = index[key] or {}
+			table.insert(index[key], clause)
+			freeCount = freeCount + 1
+		end
+	end
+	local maxCount = freeCount
+
+	-- Reclassify as necessary
+	for key, tuple in pairs(clause.free) do
+		if assignment[key] == tuple[2] then
+			-- Has been satisfied
+			freeCount = freeCount - 1
+			clause.sat[key] = clause.free[key]
+			clause.free[key] = nil
+			clause.satCount = clause.satCount + 1
+		elseif assignment[key] == not tuple[2] then
+			-- Has been contradicted
+			freeCount = freeCount - 1
+			clause.unsat[key] = clause.free[key]
+			clause.free[key] = nil
+		end
+	end
+	clause.freeCount = freeCount
+
+	return clause, maxCount
+end
+
 -- RETURNS a fresh CNF
 -- clauses: a [][](term, boolean)
-function CNF.new(theory, clauses)
+function CNF.new(theory, clauses, rawAssignment)
+	assert(rawAssignment)
+
 	-- Make enough room for the largest clause
 	local unsatisfiedClausesBySize = {}
 	local largest = 0
 	for _, clause in ipairs(clauses) do
 		largest = math.max(largest, #clause)
 	end
-	for i = 0, largest do
+	for i = 1, largest do
 		unsatisfiedClausesBySize[i] = {}
 	end
 
-	-- Index the clauses
-	local index = {}
-	local allClauses = {}
-	for _, rawClause in ipairs(clauses) do
-		assert(#rawClause > 0)
-
-		local free = {}
-		-- freeCount is the size of the free set
-		local freeCount = 0
-		local dropped = {}
-		local clause = {free = free, sat = {}, unsat = {}, satCount = 0}
-		for _, tuple in ipairs(rawClause) do
-			local key = theory:canonKey(tuple[1])
-			if dropped[key] then
-				-- Ignore: used in "a or ~a"
-			elseif free[key] ~= nil then
-				-- Redundant "a or a" or "a or ~a" cases
-				if free[key][2] ~= tuple[2] then
-					-- "a or ~a" case
-					dropped[key] = true
-					freeCount = freeCount - 1
-					free[key] = nil
-					assert(clause == table.remove(index[key]))
-				end
-			else
-				-- Add new term to the free set
-				free[key] = tuple
-				index[key] = index[key] or {}
-				table.insert(index[key], clause)
-				freeCount = freeCount + 1
-			end
-		end
-		clause.freeCount = freeCount
-		if clause.freeCount ~= 0 then
-			unsatisfiedClausesBySize[freeCount][clause] = true
-			table.insert(allClauses, clause)
-		end
+	-- Encode the assignment
+	local assignment = {}
+	for k, v in pairs(rawAssignment) do
+		assignment[theory:canonKey(k)] = v
 	end
-
+	
 	local instance = {
 		_unsatisfiedClausesBySize = unsatisfiedClausesBySize,
-		_index = index,
+		_index = {},
 		_theory = theory,
 		_satisfiedCount = 0,
 		_contradictCount = 0,
-		_allClauses = allClauses,
+		_allClauses = {},
+		_learned = {},
+		_assignment = assignment,
 	}
-	return setmetatable(instance, {__index = CNF})
+	setmetatable(instance, {__index = CNF})
+	
+	-- Index the clauses
+	for _, rawClause in ipairs(clauses) do
+		instance:addClause(rawClause)
+	end
+	instance._learned = {}
+	return instance
+end
+
+function CNF:show()
+	local cs = {}
+	for _, clause in ipairs(self._allClauses) do
+		local c = {}
+		for _, t in pairs(clause.free) do
+			table.insert(c, t)
+		end
+		if #c > 0 then
+			table.insert(cs, c)
+		end
+	end
+	return showCNF(self._theory, cs)
+end
+
+function CNF:validate()
+	do return end
+	for _, clause in ipairs(self._allClauses) do
+		assert(clause.freeCount == #table.keys(clause.free))
+		if clause.freeCount > 0 then
+			if clause.satCount == 0 then
+				assert(self._unsatisfiedClausesBySize[clause.freeCount][clause])
+			else
+				assert(not self._unsatisfiedClausesBySize[clause.freeCount][clause])
+			end
+		end
+		for i = 1, #self._unsatisfiedClausesBySize do
+			if self._unsatisfiedClausesBySize[i][clause] then
+				assert(i == clause.freeCount)
+			end
+		end
+	end
 end
 
 -- Finds an unassigned term and returns a preferred truth value for it
 -- RETURNS term, boolean
 function CNF:pickUnassigned()
+	self:validate()
+
+	assert(not self:isDecided())
 	for i = 1, #self._unsatisfiedClausesBySize do
 		local clause = next(self._unsatisfiedClausesBySize[i])
 		if clause then
@@ -118,7 +212,10 @@ end
 -- MODIFIES this
 -- RETURNS nothing
 function CNF:assign(term, truth)
+	self:validate()
+
 	local key = self._theory:canonKey(term)
+	self._assignment[key] = truth
 	for _, clause in ipairs(self._index[key]) do
 		local tuple = clause.free[key]
 		assert(tuple and #tuple == 2)
@@ -150,14 +247,25 @@ function CNF:assign(term, truth)
 			-- Already satisfied; remains referenced by index
 		end
 	end
+
+	self:validate()
 end
 
 -- REQUIRES term is assigned for this CNF
 -- MODIFIES this
 -- RETURNS nothing
 function CNF:unassign(term)
+	self:validate()
+
 	local key = self._theory:canonKey(term)
+	assert(self._assignment[key] ~= nil)
+	self._assignment[key] = nil
 	for _, clause in ipairs(self._index[key]) do
+
+		if clause.freeCount > 0 then
+			self._unsatisfiedClausesBySize[clause.freeCount][clause] = nil
+		end
+
 		if clause.sat[key] then
 			-- This clause was satisfied (at least in part) by term
 			assert(1 <= clause.satCount)
@@ -188,6 +296,8 @@ function CNF:unassign(term)
 			end
 		end
 	end
+
+	self:validate()
 end
 
 -- RETURNS boolean
@@ -210,6 +320,49 @@ function CNF:isDecided()
 	return false
 end
 
+function CNF:addClause(rawClause)
+	self:validate()
+
+	assert(1 <= #rawClause)
+
+	local clause, max = cnfPrepareClause(self._theory, rawClause, self._index, self._assignment)
+
+	if max == 0 then
+		-- It is a tautology and did not change anything
+		return
+	end
+
+	-- Grow as necessary
+	for i = #self._unsatisfiedClausesBySize + 1, max do
+		self._unsatisfiedClausesBySize[i] = {}
+	end
+
+	-- Add to appropriate place
+	if clause.satCount == 0 and clause.freeCount > 0 then
+		-- Not yet satisfied but still might be satisfiable
+		self._unsatisfiedClausesBySize[clause.freeCount][clause] = true
+	elseif clause.satCount > 0 then
+		-- Already satisfied under current assignment
+		self._satisfiedCount = self._satisfiedCount + 1
+	else
+		assert(clause.satCount == 0)
+		assert(clause.freeCount == 0)
+
+		-- Already contradicted by current assignment
+		self._contradictCount = self._contradictCount + 1
+	end
+
+	table.insert(self._learned, rawClause)
+	table.insert(self._allClauses, clause)
+
+	self:validate()
+end
+
+-- RETURNS a list of [](term, truth) raw clauses
+function CNF:learnedClauses()
+	return self._learned
+end
+
 --------------------------------------------------------------------------------
 
 -- RETURNS a shallow copy of t such that return[k] is v
@@ -222,42 +375,8 @@ local function copywith(t, k, v)
 	return r
 end
 
--- RETURNS a string representation of a CNF clause (for debugging)
-local function showClause(theory, c, assignment)
-	assignment = assignment or {}
-	local terms = {}
-	for i = 1, #c do
-		assert(#c[i] == 2)
-		assertis(c[i][1], theory.assertion_t)
-		terms[i] = theory:canonKey(c[i][1])
-		if not c[i][2] then
-			terms[i] = "~(" .. terms[i] .. ")"
-		end
-	end
-	local cs = "[" .. table.concat(terms, " || ") .. "]"
-	return cs
-end
-
--- RETURNS a string representation of a CNF formula (for debugging)
-local function showCNF(theory, n, assignment)
-	assignment = assignment or {}
-	local clauses = {}
-	for i = 1, #n do
-		clauses[i] = showClause(theory, n[i], assignment)
-	end
-	return "&& " .. table.concat(clauses, "\n&& ")
-end
 
 --------------------------------------------------------------------------------
-
--- RETURNS a CNF formula
--- the conjunction of CNFs a and b
-local function andCNF(theory, a, b)
-	assertis(a, CNFType(theory))
-	assertis(b, CNFType(theory))
-
-	return table.concatted(a, b)
-end
 
 -- clause: a CNF clause
 -- RETURNS a CNF clause, [](term, boolean)
@@ -503,9 +622,10 @@ end
 -- RETURNS a CNF
 local function quantifierCore(theory, assignment, map, cnf)
 	assertis(theory, "Theory")
+	local rawCNF = listType(listType(tupleType(theory.assertion_t, "boolean")))
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
-	assertis(map, mapType(theory.assertion_t, CNFType(theory)))
-	assertis(cnf, CNFType(theory))
+	assertis(map, mapType(theory.assertion_t, rawCNF))
+	assertis(cnf, rawCNF)
 
 	-- Associate extra terms with their quantifiers
 	local toQuantifier = {}
@@ -659,26 +779,23 @@ local internals = 0
 
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
--- RETURNS false, unsat CNF core when no satisfaction is possible
--- Does NOT modify assignment
--- findCores: Determines whether or not this should search for unsat. cores in
---            bad models. When false, it does not do this search.
+-- RETURNS false when no such satisfaction exists
 -- noModify: When true, ensures that `assignment` is not modified
 -- MODIFIES assignment (when the assignment is satisfiable, and not noModify)
-local function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
+-- MODIFIES cnf to strengthen its clauses
+local function cnfSAT(theory, cnf, assignment, meta, noModify)
 	assert(type(assignment) == "table")
-	assert(type(cnf) == "table")
-	assert(type(findCores) == "boolean")
+	assertis(cnf, CNFType(theory))
 	assert(type(noModify) == "boolean")
 
-	cnf = simplifyCNF(theory, cnf, assignment)
 	internals = internals + 1
-	if not cnf then
-		return false, {}
+	if cnf:isContradiction() then
+		print("UNCOMMON")
+		return false
 	end
 
 	-- Find an assignment that the theory accepts
-	if #cnf == 0 then
+	if cnf:isTautology() then
 		-- Ask the theory if the assignment is consistent
 		profile.open("theory:isSatisfiable")
 		asks = asks + 1
@@ -690,9 +807,6 @@ local function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 		if not out then
 			-- While this satisfies the CNF, the satisfaction doesn't work in
 			-- the theory.
-			if not findCores then
-				return false, {}
-			end
 
 			-- TODO: ideally, these would be in reverse order
 			local keys = table.keys(assignment)
@@ -704,8 +818,11 @@ local function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 
 			-- Ask the theory for a minimal explanation of why this does not
 			-- work in order to prune the CNF-SAT search space
-			local coreClause = unsatisfiableCoreClause(theory, assignment, keys, meta)
-			return false, coreClause
+			local coreClauses = unsatisfiableCoreClause(theory, assignment, keys, meta)
+			for _, coreClause in ipairs(coreClauses) do
+				cnf:addClause(coreClause)
+			end
+			return false
 		end
 
 		-- Ask the theory if there are any extensions that can be made
@@ -714,30 +831,35 @@ local function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 		if next(additional) ~= nil then
 			-- Track which terms originate from which quantifiers
 			local expansionClauses = {}
-			local newCNF = {}
+			local newClauses = {}
 			for quantified, results in pairs(additional) do
 				expansionClauses[quantified] = {}
 				for _, result in ipairs(results) do
 					local addCNF = toCNF(theory, result, true, {})
 					for _, clause in ipairs(addCNF) do
 						table.insert(expansionClauses[quantified], clause)
-						table.insert(newCNF, clause)
+						table.insert(newClauses, clause)
 					end
 				end
 			end
 
-			local sat, core = cnfSAT(theory, newCNF, assignment, newMeta, findCores, noModify)
-			if not sat and findCores then
+			local newCNF = CNF.new(theory, newClauses, assignment)
+			local sat = cnfSAT(theory, newCNF, assignment, newMeta, noModify)
+			if not sat then
 				-- The core may use NEW terms; if we return them, we could
 				-- INCREASE the size of the CNF, which would be
 				-- counterproductive.
 				-- Deduce which of these contradict assignments for the
 				-- quantifiers instead of the instantiations.
-				local quotientCore = quantifierCore(theory, assignment, expansionClauses, core)
-				return false, quotientCore
+				local core = newCNF:learnedClauses()
+				local coreClauses = quantifierCore(theory, assignment, expansionClauses, core)
+				for _, coreClause in ipairs(coreClauses) do
+					cnf:addClause(coreClause)
+				end
+				return false
 			end
 
-			return sat, {}
+			return sat
 		end
 
 		-- It could not have become unsatisfiable due to additional clauses
@@ -745,60 +867,46 @@ local function cnfSAT(theory, cnf, assignment, meta, findCores, noModify)
 		return assignment
 	end
 
-	-- Find the smallest clause
-	local smallestClauseIndex = 1
-	for i = 2, #cnf do
-		if #cnf[i] < #cnf[smallestClauseIndex] then
-			smallestClauseIndex = i
-		end
-	end
-
-	local smallestClause = cnf[smallestClauseIndex]
-	assert(#smallestClause >= 1)
-
 	-- Try each truth assignment of the first term in the first clause
-	local t1 = smallestClause[1][1]
-	assert(assignment[t1] == nil, "simplfyCNF should prevent this")
+	local term, prefer = cnf:pickUnassigned()
+	assert(assignment[term] == nil, "pickUnassigned should prevent this")
 
+	local before = #cnf:learnedClauses()
 	-- Assignment is now positive
-	assignment[t1] = smallestClause[1][2]
-	local cnfPositive = simplifyCNF(theory, cnf, assignment)
+	assignment[term] = prefer
+	cnf:assign(term, prefer)
 
-	local unsatCoreCNF = {}
-
-	if cnfPositive then
-		local out, betterCNF = cnfSAT(theory, cnfPositive, assignment, meta, findCores, noModify)
+	if not cnf:isContradiction() then
+		local out = cnfSAT(theory, cnf, assignment, meta, noModify)
 		if out then
 			if noModify then
 				-- Restore assignment
-				assignment[t1] = nil
+				assignment[term] = nil
+				cnf:unassign(term)
 			end
 			return out
 		end
-		unsatCoreCNF = betterCNF
-		cnf = andCNF(theory, cnf, betterCNF)
 	end
+	cnf:unassign(term)
 
 	-- Add this to the set to prune more cases
 	-- Assignment is now negative
-	assignment[t1] = not smallestClause[1][2]
-	local cnfNegative = simplifyCNF(theory, cnf, assignment)
-	if not cnfNegative then
-		assignment[t1] = nil
-		return false, unsatCoreCNF
-	end
-
-	local out, moreUnsatCoreCNF = cnfSAT(theory, cnfNegative, assignment, meta, findCores, noModify)
-	if out then
-		if noModify then
-			-- Restore assignment
-			assignment[t1] = nil
+	assignment[term] = not prefer
+	cnf:assign(term, not prefer)
+	if not cnf:isContradiction() then
+		local out = cnfSAT(theory, cnf, assignment, meta, noModify)
+		if out then
+			if noModify then
+				-- Restore assignment
+				assignment[term] = nil
+				cnf:unassign(term)
+			end
+			return out
 		end
-		return out
 	end
-
-	assignment[t1] = nil
-	return false, andCNF(theory, unsatCoreCNF, moreUnsatCoreCNF)
+	assignment[term] = nil
+	cnf:unassign(term)
+	return false
 end
 
 -- Determine whether or not `expression` is satisfiable in the given `theory`.
@@ -807,8 +915,9 @@ local function isSatisfiable(theory, expression)
 	assert(theory)
 	assert(expression)
 
-	local cnf = toCNF(theory, expression, true, {})
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true, false)
+	local clauses = toCNF(theory, expression, true, {})
+	local cnf = CNF.new(theory, clauses, {})
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), false)
 	return sat
 end
 
@@ -831,15 +940,12 @@ local function implies(theory, givens, expression)
 	table.insert(args, expression)
 	table.insert(truths, false)
 
-	local cnf = toCNFFromBreakup(theory, args, {truths}, {})
+	local clauses = toCNFFromBreakup(theory, args, {truths}, {})
 	profile.close("smt.implies setup")
 
-	-- print("\n" .. string.rep("~", 80) .. "\n")
-	-- print(showCNF(theory, cnf))
-	-- print()
-
 	profile.open("smt.implies sat")
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), true, false)
+	local cnf = CNF.new(theory, clauses, {})
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), false)
 	profile.close("smt.implies sat")
 
 	if sat then
@@ -984,7 +1090,7 @@ do
 		{{"a", true}, {"a", false}},
 		{{"a", true}, {"b", true}, {"b", true}},
 		{{"x", true}, {"y", true}, {"z", false}, {"a", true}, {"b", false}},
-	})
+	}, {})
 
 	assert(not problem:isDecided())
 	assert(not problem:isTautology())
@@ -1067,7 +1173,7 @@ assert(not implies(
 ))
 
 -- Performance test (uses unsat cores)
-for N = 50, 0 do
+for N = 30, 200, 10 do
 	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
 	internals = 0
@@ -1118,7 +1224,7 @@ for N = 50, 0 do
 		local f = {"or", a, {"or", b, c}}
 		q = {"and", q, f}
 	end
-	assert(not isSatisfiable(plaintheory, q))
+	--assert(not isSatisfiable(plaintheory, q))
 end
 
 assert(isSatisfiable(plaintheory, {"d", {"f", "x == 1"}}))
@@ -1127,7 +1233,7 @@ assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x
 assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}))
 
 -- Performance test (uses unsat cores for quantifiers)
-for N = 50, 0 do
+for N = 50, 200, 10 do
 	--print("== N (quant): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	asks = 0
 	internals = 0
