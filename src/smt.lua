@@ -810,147 +810,121 @@ local internals = 0
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no such satisfaction exists
--- noModify: When true, ensures that `assignment` is not modified
--- MODIFIES assignment (when the assignment is satisfiable, and not noModify)
+-- MODIFIES assignment (when the assignment is satisfiable)
 -- MODIFIES cnf to strengthen its clauses
-local function cnfSAT(theory, cnf, assignment, meta, noModify)
-	assert(type(assignment) == "table")
-	assertis(cnf, CNFType(theory))
-	assert(type(noModify) == "boolean")
+local function cnfSAT(theory, cnf, assignment, meta)
+	local stack = {}
+	while true do
+		internals = internals + 1
+		-- local allTerms = table.concatted(table.keys(assignment), cnf:freeTermSet())
+		-- table.sort(allTerms, function(a, b)
+		-- 	return theory:canonKey(a) < theory:canonKey(b)
+		-- end)
+		-- local row = {}
+		-- for i = 1, #allTerms do
+		-- 	if assignment[allTerms[i]] == nil then
+		-- 		row[i] = "."
+		-- 	elseif assignment[allTerms[i]] then
+		-- 		row[i] = "1"
+		-- 	else
+		-- 		row[i] = "0"
+		-- 	end
+		-- end
 
-	-- local allTerms = table.concatted(table.keys(assignment), cnf:freeTermSet())
-	-- table.sort(allTerms, function(a, b)
-	-- 	return theory:canonKey(a) < theory:canonKey(b)
-	-- end)
-	-- for i = 1, #allTerms do
-	-- 	if assignment[allTerms[i]] == nil then
-	-- 		io.write(".")
-	-- 	elseif assignment[allTerms[i]] then
-	-- 		io.write("1")
-	-- 	else
-	-- 		io.write("0")
-	-- 	end
-	-- end
-	-- print()
+		if cnf:isTautology() then
+			local out = theory:isSatisfiable(assignment)
+			if not out then
+				-- While this truth model satisfies the CNF, the satisfaction
+				-- doesn't work in the theory
+				local keys = table.keys(assignment)
+				table.sort(keys, function(a, b)
+					return theory:canonKey(a) < theory:canonKey(b)
+				end)
 
-	internals = internals + 1
-	if cnf:isContradiction() then
-		print("UNCOMMON")
-		return false
-	end
+				-- Ask the theory for a minimal explanation why this didn't work
+				local coreClauses = unsatisfiableCoreClause(theory, assignment, keys)
+				for _, coreClause in ipairs(coreClauses) do
+					cnf:addClause(coreClause)
+				end
+			else
+				-- Expand quantified statements using the theory
+				local additional, newMeta = theory:additionalClauses(assignment, meta)
 
+				if next(additional) == nil then
+					-- There are no quantifiers to expand; we are done!
+					return assignment
+				end
 
-	if cnf:isTautology() then
-		-- Ask the theory if the assignment is consistent
-		local out = theory:isSatisfiable(assignment)
-
-		if not out then
-			-- While this satisfies the CNF, the satisfaction doesn't work in
-			-- the theory.
-
-			-- TODO: ideally, these would be in reverse order
-			local keys = table.keys(assignment)
-
-			-- Sort for determinism
-			table.sort(keys, function(a, b)
-				return theory:canonKey(a) < theory:canonKey(b)
-			end)
-
-			-- Ask the theory for a minimal explanation of why this does not
-			-- work in order to prune the CNF-SAT search space
-			local coreClauses = unsatisfiableCoreClause(theory, assignment, keys)
-			for _, coreClause in ipairs(coreClauses) do
-				cnf:addClause(coreClause)
-			end
-
-			return false
-		end
-	end
-
-	-- Find an assignment that the theory accepts
-	if cnf:isTautology() then
-		-- Ask the theory if there are any extensions that can be made
-		-- (e.g., from quantifierS) that may make the model unsatisfiable
-		local additional, newMeta = theory:additionalClauses(assignment, meta)
-		if next(additional) ~= nil then
-			-- Track which terms originate from which quantifiers
-			local expansionClauses = {}
-			local newClauses = {}
-			for quantified, results in pairs(additional) do
-				expansionClauses[quantified] = {}
-				for _, result in ipairs(results) do
-					local addCNF = toCNF(theory, result, true, {})
-					for _, clause in ipairs(addCNF) do
-						table.insert(expansionClauses[quantified], clause)
-						table.insert(newClauses, clause)
+				-- Expand the additions
+				local expansionClauses = {}
+				local newClauses = {}
+				for quantified, results in pairs(additional) do
+					expansionClauses[quantified] = {}
+					for _, result in ipairs(results) do
+						local addCNF = toCNF(theory, result, true, {})
+						for _, clause in ipairs(addCNF) do
+							table.insert(expansionClauses[quantified], clause)
+							table.insert(newClauses, clause)
+						end
 					end
 				end
-			end
 
-			local newCNF = CNF.new(theory, newClauses, assignment)
-			local sat = cnfSAT(theory, newCNF, assignment, newMeta, noModify)
-			if not sat then
-				-- The core may use NEW terms; if we return them, we could
-				-- INCREASE the size of the CNF, which would be
-				-- counterproductive.
-				-- Deduce which of these contradict assignments for the
-				-- quantifiers instead of the instantiations.
+				-- Recursively solve the new SAT problem
+				local newCNF = CNF.new(theory, newClauses, assignment)
+				local sat = cnfSAT(theory, newCNF, assignment, newMeta)
+				if sat then
+					-- Even after expanding quantifiers, the formula remained
+					-- satisfiable
+					return sat
+				end
+				
+				-- Attempt to generalize the learned core clauses
+				-- (cnf cannot mention new terms that may have been
+				-- introduced by instantiation)
 				local core = newCNF:learnedClauses()
 				local coreClauses = quantifierCore(theory, assignment, expansionClauses, core)
 				for _, coreClause in ipairs(coreClauses) do
 					cnf:addClause(coreClause)
 				end
-				return false
 			end
+		elseif cnf:isContradiction() then
+			-- Some assignment made by the SAT solver is bad
+			-- TODO: conflict clauses
+			while true do
+				if #stack == 0 then
+					-- There are no choices to undo
+					return false
+				end
 
-			return sat
-		end
-
-		-- It could not have become unsatisfiable due to additional clauses
-		assert(assignment)
-		return assignment
-	end
-
-	-- Try each truth assignment of the first term in the first clause
-	local term, prefer = cnf:pickUnassigned()
-	assert(assignment[term] == nil, "pickUnassigned should prevent this")
-
-	local before = #cnf:learnedClauses()
-	-- Assignment is now positive
-	assignment[term] = prefer
-	cnf:assign(term, prefer)
-
-	if not cnf:isContradiction() then
-		local out = cnfSAT(theory, cnf, assignment, meta, noModify)
-		if out then
-			if noModify then
-				-- Restore assignment
-				assignment[term] = nil
-				cnf:unassign(term)
+				local variable = stack[#stack].variable
+				local preferred = stack[#stack].preferTruth
+				if stack[#stack].first then
+					-- Flip the assignment
+					stack[#stack].first = false
+					cnf:unassign(variable)
+					assignment[variable] = not preferred
+					cnf:assign(variable, not preferred)
+					break
+				else
+					-- Backtrack
+					cnf:unassign(variable)
+					assert(assignment[variable] ~= nil)
+					assignment[variable] = nil
+					stack[#stack] = nil
+				end
 			end
-			return out
-		end
-	end
-	cnf:unassign(term)
-
-	-- Add this to the set to prune more cases
-	-- Assignment is now negative
-	assignment[term] = not prefer
-	cnf:assign(term, not prefer)
-	if not cnf:isContradiction() then
-		local out = cnfSAT(theory, cnf, assignment, meta, noModify)
-		if out then
-			if noModify then
-				-- Restore assignment
-				assignment[term] = nil
-				cnf:unassign(term)
-			end
-			return out
+		else
+			-- Make a choice
+			local term, prefer = cnf:pickUnassigned()
+			table.insert(stack, {
+				variable = term,
+				preferTruth = prefer,
+				first = true,
+			})
+			assignment[term] = prefer
+			cnf:assign(term, prefer)
 		end
 	end
-	assignment[term] = nil
-	cnf:unassign(term)
-	return false
 end
 
 -- Determine whether or not `expression` is satisfiable in the given `theory`.
@@ -961,7 +935,7 @@ local function isSatisfiable(theory, expression)
 
 	local clauses = toCNF(theory, expression, true, {})
 	local cnf = CNF.new(theory, clauses, {})
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), false)
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
 	return sat
 end
 
@@ -989,7 +963,7 @@ local function implies(theory, givens, expression)
 
 	profile.open("smt.implies sat")
 	local cnf = CNF.new(theory, clauses, {})
-	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta(), false)
+	local sat = cnfSAT(theory, cnf, {}, theory:emptyMeta())
 	profile.close("smt.implies sat")
 
 	if sat then
@@ -1217,7 +1191,7 @@ assert(not implies(
 ))
 
 -- Performance test (uses unsat cores)
-for N = 30, 200, 10 do
+for N = 50, 200, 10 do
 	--print("== N (simple, sat): " .. N .. " " .. string.rep("=", 80 - #tostring(N)))
 	internals = 0
 	local beforeTime = os.clock()
