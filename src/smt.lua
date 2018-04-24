@@ -100,7 +100,7 @@ function CNF.new(theory, clauses, rawAssignment)
 	for i = 1, largest do
 		unsatisfiedClausesBySize[i] = {}
 	end
-	
+
 	local instance = {
 		_unsatisfiedClausesBySize = unsatisfiedClausesBySize,
 		_index = {},
@@ -165,7 +165,9 @@ end
 -- RETURNS nothing
 -- For debugging
 function CNF:validate()
-	do return end
+	do
+		return
+	end
 	for _, clause in ipairs(self._allClauses) do
 		assert(clause.freeCount == #table.keys(clause.free))
 		if clause.freeCount > 0 then
@@ -289,7 +291,7 @@ function CNF:unassign(term)
 				assert(1 <= self._contradictCount)
 				self._contradictCount = self._contradictCount - 1
 			end
-			
+
 			if clause.satCount == 0 then
 				self._unsatisfiedClausesBySize[clause.freeCount][clause] = true
 			end
@@ -407,7 +409,8 @@ local toCNF
 local function toCNFFromBreakup(theory, terms, assignments, normalization)
 	assertis(theory, "Theory")
 	assertis(terms, listType(theory.assertion_t))
-	assertis(assignments, listType(listType(choiceType("boolean", constantType "*"))))
+	local maybeBool = choiceType("boolean", constantType "*")
+	assertis(assignments, listType(listType(maybeBool)))
 	assert(#assignments >= 1)
 
 	local options = {}
@@ -458,21 +461,6 @@ function toCNF(theory, bigTerm, target, normalization)
 end
 
 --------------------------------------------------------------------------------
-
--- RETURNS the number of unique variables in the CNF formula
-local function cnfSize(cnf)
-	local terms = {}
-	for _, clause in ipairs(cnf) do
-		for _, tpair in ipairs(clause) do
-			terms[tpair[1]] = true
-		end
-	end
-	local count = 0
-	for k in pairs(terms) do
-		count = count + 1
-	end
-	return count
-end
 
 -- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
 -- according to the theory as a CNF
@@ -544,7 +532,11 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 			table.insert(smallerOrder, order[i])
 		end
 	end
-	local cores = unsatisfiableCoreClause(theory, smallerAssignment, smallerOrder)
+	local cores = unsatisfiableCoreClause(
+		theory,
+		smallerAssignment,
+		smallerOrder
+	)
 	table.insert(cores, core)
 	return cores
 end
@@ -726,13 +718,20 @@ local function cnfSAT(theory, cnf, meta)
 				end)
 
 				-- Ask the theory for a minimal explanation why this didn't work
-				local coreClauses = unsatisfiableCoreClause(theory, currentAssignment, keys)
+				local coreClauses = unsatisfiableCoreClause(
+					theory,
+					currentAssignment,
+					keys
+				)
 				for _, coreClause in ipairs(coreClauses) do
 					cnf:addClause(coreClause)
 				end
 			else
 				-- Expand quantified statements using the theory
-				local additional, newMeta = theory:additionalClauses(currentAssignment, meta)
+				local additional, newMeta = theory:additionalClauses(
+					currentAssignment,
+					meta
+				)
 
 				if next(additional) == nil then
 					-- There are no quantifiers to expand; we are done!
@@ -766,7 +765,12 @@ local function cnfSAT(theory, cnf, meta)
 				-- (cnf cannot mention new terms that may have been
 				-- introduced by instantiation)
 				local core = newCNF:learnedClauses()
-				local coreClauses = quantifierCore(theory, currentAssignment, expansionClauses, core)
+				local coreClauses = quantifierCore(
+					theory,
+					currentAssignment,
+					expansionClauses,
+					core
+				)
 				for _, coreClause in ipairs(coreClauses) do
 					cnf:addClause(coreClause)
 				end
@@ -807,6 +811,8 @@ local function cnfSAT(theory, cnf, meta)
 	end
 end
 
+--------------------------------------------------------------------------------
+
 -- Determine whether or not `expression` is satisfiable in the given `theory`.
 -- RETURNS false | satisfaction
 local function isSatisfiable(theory, expression)
@@ -818,8 +824,6 @@ local function isSatisfiable(theory, expression)
 	local sat = cnfSAT(theory, cnf, theory:emptyMeta())
 	return sat
 end
-
---------------------------------------------------------------------------------
 
 -- Determine whether or not `givens` together imply `expression` in the given
 -- `theory`.
@@ -983,12 +987,16 @@ assert(not isSatisfiable(plaintheory, {"f", "x == 3"}), "unsat x == 3")
 
 do
 	-- Test CNF library
-	local problem = CNF.new(plaintheory, {
-		-- Tautology
-		{{"a", true}, {"a", false}},
-		{{"a", true}, {"b", true}, {"b", true}},
-		{{"x", true}, {"y", true}, {"z", false}, {"a", true}, {"b", false}},
-	}, {})
+	local problem = CNF.new(
+		plaintheory,
+		{
+			-- Tautology
+			{{"a", true}, {"a", false}},
+			{{"a", true}, {"b", true}, {"b", true}},
+			{{"x", true}, {"y", true}, {"z", false}, {"a", true}, {"b", false}},
+		},
+		{}
+	)
 
 	assert(not problem:isDecided())
 	assert(not problem:isTautology())
@@ -1072,7 +1080,6 @@ assert(not implies(
 
 -- Performance test (uses unsat cores)
 for N = 50, 200, 10 do
-
 	local q = {"f", "x == 1"}
 	for i = 1, N do
 		local clause = {
@@ -1107,17 +1114,23 @@ for N = 50, 200, 10 do
 		local f = {"or", a, {"or", b, c}}
 		q = {"and", q, f}
 	end
+
 	--assert(not isSatisfiable(plaintheory, q))
 end
 
 assert(isSatisfiable(plaintheory, {"d", {"f", "x == 1"}}))
 assert(not isSatisfiable(plaintheory, {"d", {"f", "x == 99"}}))
-assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}}}))
-assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}))
+assert(isSatisfiable(
+	plaintheory,
+	{"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}}}
+))
+assert(not isSatisfiable(
+	plaintheory,
+	{"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}
+))
 
 -- Performance test (uses unsat cores for quantifiers)
 for N = 50, 200, 10 do
-
 	local q = {"f", "x == 1"}
 	for i = 1, N do
 		local clause = {
