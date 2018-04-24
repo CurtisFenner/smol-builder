@@ -414,14 +414,18 @@ function theory:additionalClauses(model, meta)
 		canon:scan(v)
 	end
 
-	local newMeta = meta
+	local newMeta = {}
+	for k, v in pairs(meta) do
+		newMeta[k] = v
+	end
+
 	local out = {}
 
 	for term in pairs(model) do
 		if term.tag == "forall" then
-			if not table.haskey(meta, term.unique) then
+			if not newMeta[term.unique] then
 				out[term] = quantifierClauses(model, term, canon)
-				newMeta = table.with(newMeta, term.unique, true)
+				newMeta[term.unique] = true
 			else
 				-- This quantifier has already been instantiated
 			end
@@ -630,6 +634,9 @@ local function propagateConstants(canon, eq)
 	return eqs
 end
 
+-- RETURNS whether or not the given model is satisfiable in a quantifier free
+-- theory of uninterpreted functions
+-- as a part of the 'theory' interface for the SMT solver
 function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
 
@@ -645,22 +652,18 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	-- 1) Generate a list of relevant subexpressions
-	profile.open "#canonicalization"
 	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
 	local trueAssertion = canon:scan(TRUE_ASSERTION)
 	local falseAssertion = canon:scan(FALSE_ASSERTION)
 
 	local simple = {}
 	for key, value in pairs(unquantifiedModel) do
-		assertis(key, "Assertion")
-
 		local object = canon:scan(key)
 
 		-- After canonicalizing, two expressions with different truth
 		-- assignments could be in the map
 		if simple[object] ~= nil and simple[object] ~= value then
 			-- This model is inconsistent
-			profile.close "#canonicalization"
 			return false
 		end
 		simple[object] = value
@@ -668,10 +671,6 @@ function theory:isSatisfiable(modelInput)
 	assertis(simple, mapType("Assertion", "boolean"))
 	assertis(canon.relevant, mapType("string", "Assertion"))
 	assertis(canon.referencedBy, mapType("Assertion", listType("Assertion")))
-
-	profile.close "#canonicalization"
-
-	profile.open "#scan for equality"
 
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
@@ -693,10 +692,7 @@ function theory:isSatisfiable(modelInput)
 			table.insert(positiveEq, {falseAssertion, assertion})
 		end
 	end
-
 	table.insert(negativeEq, {falseAssertion, trueAssertion})
-
-	profile.close "#scan for equality"
 
 	-- 3) Use each positive == assertion to join representatives
 	local eq = UnionFind.new()
@@ -712,25 +708,16 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	-- Union find
-	profile.open "#union-find"
 	while #positiveEq > 0 do
 		local nEq = #positiveEq
-		profile.open("iteration x" .. nEq)
 		for _, bin in ipairs(positiveEq) do
 			union(canon, eq, bin[1], bin[2])
 		end
-		profile.open "propagateConstants"
 		positiveEq = propagateConstants(canon, eq)
-		profile.close "propagateConstants"
-		profile.close("iteration x" .. nEq)
 		if not positiveEq then
-			profile.close "#union-find"
 			return false
 		end
 	end
-	profile.close "#union-find"
-
-	profile.open "#negative =="
 
 	-- 4) Use each negative == assertion to separate groups
 	for _, bin in ipairs(negativeEq) do
@@ -738,26 +725,11 @@ function theory:isSatisfiable(modelInput)
 
 		if eq:query(a, b) then
 			-- This model is inconsistent
-			profile.close "#negative =="
 			return false
 		end
 	end
-	profile.close "#negative =="
-
-	-- 5) Check if the truth values themselves are inconsistent
-	if eq:query(falseAssertion, trueAssertion) then
-		return false
-	end
 
 	return true
-end
-local old = theory.inModel
-theory.inModel = function(...)
-	profile.open "#vt inModel"
-	local before = os.clock()
-	local out = old(...)
-	profile.close "#vt inModel"
-	return out
 end
 
 function theory:breakup(assertion, target)
