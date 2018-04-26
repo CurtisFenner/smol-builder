@@ -66,9 +66,6 @@ REGISTER_TYPE("FnAssertion", recordType {
 	arguments = listType "Assertion",
 	signature = "Signature",
 	index = "integer",
-
-	-- TODO: remove this
-	base = constantType(nil)
 })
 
 REGISTER_TYPE("Assertion", choiceType(
@@ -146,9 +143,9 @@ local function assertionExprString(a, grouped)
 		end
 		if a.signature.modifier == "method" then
 			local base = table.remove(arguments, 1)
-			return base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
+			return base .. "." .. a.signature.memberName .. "(" .. table.concat(arguments, ", ") .. ")"
 		else
-			return a.signature.container .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
+			return a.signature.longName .. "(" .. table.concat(arguments, ", ") .. ")"
 		end
 	elseif a.tag == "variable" then
 		local result = variableDescription(a.variable)
@@ -189,7 +186,7 @@ local function andAssertion(a, b)
 	local p = freeze {
 		tag = "fn",
 		arguments = {a, b},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "and"),
+		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "and"),
 		index = 1,
 	}
 	assertis(p, "FnAssertion")
@@ -209,7 +206,7 @@ local function impliesAssertion(a, b)
 	local p = freeze {
 		tag = "fn",
 		arguments = {a, b},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "implies"),
+		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "implies"),
 		index = 1,
 	}
 	assertis(p, "FnAssertion")
@@ -1124,8 +1121,8 @@ local function verifyFunction(func, semantics)
 	assertis(semantics, "Semantics")
 	assert(func.body)
 
-	local modifier = func.signature.modifier
-	local fullName = func.signature.container .. "." .. func.name
+	--local modifier = func.signature.modifier
+	--local fullName = func.signature.longName
 	--print("== " .. modifier .. " " .. fullName .. " " .. string.rep("=", 80))
 	--print(showStatement(func.body))
 

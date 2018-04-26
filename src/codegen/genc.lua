@@ -10,23 +10,23 @@ local BUILTIN_NAME_MAP = {
 
 -- RETURNS a string
 local function luaizeName(name)
+	assert(not name:find "%.")
 	return name:gsub(":", "_"):gsub("#", "hash")
 end
 
 -- RETURNS a string
-local function staticFunctionName(name, definition)
-	assert(definition:find("[A-Z]"))
-	return "smol_static_" .. luaizeName(definition) .. "_" .. luaizeName(name)
+local function staticFunctionName(longName)
+	assert(longName, "string")
+	assert(longName:find ":", "expected longName `" .. longName .. "` to have a `:`")
+	return "smol_static_" .. luaizeName(longName)
 end
 
 -- RETURNS a string
-local function methodFunctionName(name, definition)
-	assertis(name, "string")
-	assertis(definition, "string")
-	assert(definition:match(":") or BUILTIN_NAME_MAP[definition])
-	assert(definition:find("[A-Z]"))
+local function methodFunctionName(longName)
+	assertis(longName, "string")
+	assert(longName:find ":")
 
-	return "smol_method_" .. luaizeName(definition) .. "_" .. luaizeName(name)
+	return "smol_method_" .. luaizeName(longName)
 end
 
 -- RETURNS a string
@@ -59,7 +59,7 @@ local TAG_FIELD = "tag"
 -- RETURNS a string representing a C identifier for a Smol variable or parameter
 local function localName(name)
 	assertis(name, "string")
-	assert(not name:find(":"))
+	name = name:gsub(":", "_")
 
 	return "smol_local_" .. name
 end
@@ -389,7 +389,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("}")
 		return
 	elseif statement.tag == "static-call" then
-		comment("... = " .. showType(statement.baseType) .. "." .. statement.signature.name .. "(...);")
+		comment("... = " .. statement.signature.longName .. "(...);")
 		-- Collect value arguments
 		local argumentNames = {}
 		for _, argument in ipairs(statement.arguments) do
@@ -406,15 +406,14 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 
 		-- Emit code
-		local invocation = staticFunctionName(statement.signature.name, statement.baseType.name)
+		local invocation = staticFunctionName(statement.signature.longName)
 		local arguments = table.concat(argumentNames, ", ")
 
 		local class = table.findwith(semantics.classes, "name", statement.baseType.name)
 		local union = table.findwith(semantics.unions, "name", statement.baseType.name)
 		local definition = class or union
 		assert(definition)
-		local signature = table.findwith(definition.signatures, "name", statement.signature.name)
-		assert(signature)
+		local signature = statement.signature
 
 		local types = {}
 		for _, r in ipairs(signature.returnTypes) do
@@ -431,8 +430,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 		return
 	elseif statement.tag == "method-call" then
-		local nameOfMethod = statement.signature.name
-		comment("... = " .. statement.baseInstance.name .. "." .. nameOfMethod .. "(...);")
+		comment("... = " .. statement.signature.longName .. "(...);")
 
 		-- Collect C arguments
 		local argumentNames = {}
@@ -453,8 +451,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local builtin = table.findwith(semantics.builtins, "name", baseName)
 		local definition = class or union or builtin
 		assert(definition)
-		local signature = table.findwith(definition.signatures, "name", nameOfMethod)
-		assert(signature)
+		local signature = statement.signature
 
 		-- Get the C return-type of the function (which may not be the same
 		-- as the definitions because of generics)
@@ -466,7 +463,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local tmp = "tmp" .. UID()
 
 		local tuple = preTupleName(destinationTypes)
-		local invocation = methodFunctionName(nameOfMethod, baseName) .. "(" .. arguments .. ")"
+		local invocation = methodFunctionName(signature.longName) .. "(" .. arguments .. ")"
 		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
 		for i, destination in ipairs(statement.destinations) do
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
@@ -478,7 +475,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		emit("\t" .. localName(statement.base.name) .. "->" .. classFieldName(statement.name) .. ";")
 		return
 	elseif statement.tag == "generic-static-call" then
-		comment("... = " .. "... ." .. statement.signature.name .. "(...);")
+		comment("... = " .. "... ." .. statement.signature.longName .. "(...);")
 
 		-- Collect explicit arguments
 		local argumentValues = {}
@@ -494,8 +491,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
 		assert(interface)
-		local signature = table.findwith(interface.signatures, "name", statement.signature.name)
-		assert(signature)
+		local signature = statement.signature
 
 		local destinationTypes = {}
 		for _, returnType in ipairs(signature.returnTypes) do
@@ -504,7 +500,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local tuple = preTupleName(destinationTypes)
 
 		local constraint = cConstraint(statement.constraint, semantics)
-		local member = interfaceMember(statement.signature.name)
+		local member = interfaceMember(statement.signature.memberName)
 		local invocation = "CLOSURE_CALL(" .. constraint .. "->" .. member .. ", " .. arguments .. ")"
 		local tmp = "tmp" .. UID()
 		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
@@ -515,8 +511,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		end
 		return
 	elseif statement.tag == "generic-method-call" then
-		local nameOfMethod = statement.signature.name
-		comment("... = " .. statement.baseInstance.name .. "." .. nameOfMethod .. "(...);")
+		comment("... = " .. statement.signature.longName .. "(...);")
 		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
 
 		-- Collect the arguments
@@ -534,12 +529,11 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
 		assert(interface)
-		local signature = table.findwith(interface.signatures, "name", nameOfMethod)
-		assert(signature)
+		local signature = statement.signature
 
 		local tmp = "_tmp" .. UID()
 		local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-		emit(outType .. " " .. tmp .. " = CLOSURE_CALL(" .. cConstraint(statement.constraint, semantics) .. "->" .. interfaceMember(nameOfMethod) .. ", " .. arguments .. ");")
+		emit(outType .. " " .. tmp .. " = CLOSURE_CALL(" .. cConstraint(statement.constraint, semantics) .. "->" .. interfaceMember(signature.memberName) .. ", " .. arguments .. ");")
 		for i, destination in ipairs(statement.destinations) do
 			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
 		end
@@ -738,7 +732,7 @@ struct _smol_Int {
 		table.insert(code, "struct _" .. structName .. " {")
 		for _, signature in ipairs(interface.signatures) do
 			local returns = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-			local name = interfaceMember(signature.name)
+			local name = interfaceMember(signature.memberName)
 			local parameters = {}
 			if signature.modifier == "method" then
 				table.insert(parameters, "void* /*this*/")
@@ -851,6 +845,8 @@ struct _smol_Int {
 			for _, signature in ipairs(interface.signatures) do
 				table.insert(code, "// wrapper for impl")
 
+				local implementingSignature = table.findwith(definition.signatures, "memberName", signature.memberName)
+
 				-- Collect the constraints
 				local constraints = {}
 				for i, generic in ipairs(definition.generics) do
@@ -862,8 +858,8 @@ struct _smol_Int {
 				local dataTupleType = demandTuple(constraints) .. "*"
 
 				-- Get the out type from the interface
-				local wrapperName = cWrapperName(signature.name, definition.name, interface.name)
-				wrapped[signature.name] = wrapperName
+				local wrapperName = cWrapperName(signature.memberName, definition.name, interface.name)
+				wrapped[signature.memberName] = wrapperName
 				local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
 				local cParameters = {"void* data_general"}
 
@@ -909,15 +905,15 @@ struct _smol_Int {
 
 				local implName
 				if signature.modifier == "static" then
-					implName = staticFunctionName(signature.name, definition.name)
+					implName = staticFunctionName(implementingSignature.longName)
 				else
-					implName = methodFunctionName(signature.name, definition.name)
+					implName = methodFunctionName(implementingSignature.longName)
 				end
 
 				local invocation = implName .. "(" .. table.concat(arguments, ", ") .. ")"
 
 				-- May need to convert tuple types
-				local func = table.findwith(definition.signatures, "name", signature.name)
+				local func = table.findwith(definition.signatures, "memberName", signature.memberName)
 				local defOut = cTypeTuple(func.returnTypes, demandTuple, structScope)
 				local intOut = cTypeTuple(signature.returnTypes, demandTuple, structScope)
 				table.insert(code, "\t" .. defOut .. " concrete_out = " .. invocation .. ";")
@@ -925,7 +921,7 @@ struct _smol_Int {
 				for i = 1, #signature.returnTypes do
 					table.insert(code, "\tout._" .. i .. " = concrete_out._" .. i .. ";")
 				end
-				table.insert(code, "return out;")
+				table.insert(code, "\treturn out;")
 				table.insert(code, "}")
 			end
 
@@ -942,9 +938,9 @@ struct _smol_Int {
 
 			table.insert(code, "\t" .. outValueType .. "* out = ALLOCATE(" .. outValueType .. ");")
 			for _, signature in ipairs(interface.signatures) do
-				table.insert(code, "\tout->" .. interfaceMember(signature.name) .. ".data = closed;")
-				local func = wrapped[signature.name]
-				table.insert(code, "\tout->" .. interfaceMember(signature.name) .. ".func = " .. func .. ";")
+				table.insert(code, "\tout->" .. interfaceMember(signature.memberName) .. ".data = closed;")
+				local func = wrapped[signature.memberName]
+				table.insert(code, "\tout->" .. interfaceMember(signature.memberName) .. ".func = " .. func .. ";")
 			end
 
 			table.insert(code, "\treturn out;")
@@ -965,11 +961,11 @@ struct _smol_Int {
 			local cFunctionName
 			local cParameters
 			if signature.modifier == "static" then
-				cFunctionName = staticFunctionName(signature.name, builtin.name)
+				cFunctionName = staticFunctionName(signature.longName)
 				cParameters = {}
 			else
 				assert(signature.modifier == "method")
-				cFunctionName = methodFunctionName(signature.name, builtin.name)
+				cFunctionName = methodFunctionName(signature.longName)
 				cParameters = {"smol_" .. builtin.name .. "* " .. C_THIS_LOCAL}
 			end
 
@@ -998,11 +994,11 @@ struct _smol_Int {
 		local cFunctionName
 		local cParameters
 		if func.signature.modifier == "static" then
-			cFunctionName = staticFunctionName(func.name, func.definitionName)
+			cFunctionName = staticFunctionName(func.signature.longName)
 			cParameters = {}
 		else
 			assert(func.signature.modifier == "method")
-			cFunctionName = methodFunctionName(func.name, func.definitionName)
+			cFunctionName = methodFunctionName(func.signature.longName)
 			cParameters = {thisType .. " " .. C_THIS_LOCAL}
 		end
 
@@ -1311,7 +1307,7 @@ tuple1_1_smol_String_ptr smol_static_core_ASCII_formatInt(smol_Int* smol_local_v
 	-- Generate the main function
 	table.insert(code, "// Main " .. semantics.main)
 	table.insert(code, "int main(int argv, char** argc) {")
-	table.insert(code, "\t" .. staticFunctionName("main", semantics.main) .. "();")
+	table.insert(code, "\t" .. staticFunctionName(semantics.main .. ":main") .. "();")
 	table.insert(code, "\treturn 0;")
 	table.insert(code, "}")
 

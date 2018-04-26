@@ -438,7 +438,7 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 	local matches = {}
 	for ci, constraint in ipairs(parameter.constraints) do
 		local interface = interfaceDefinitionFromConstraint(constraint.interface, allDefinitions)
-		local signature = table.findwith(interface.signatures, "name", name)
+		local signature = table.findwith(interface.signatures, "memberName", name)
 		if signature then
 			local constraintIR = {
 				tag = "parameter-constraint",
@@ -498,16 +498,13 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 		}
 	end
 
-	local methodFullName = method.interface.name .. "." .. method.signature.name
-	local out = table.with(method, "fullName", methodFullName)
-	assertis(out, recordType {
+	assertis(method, recordType {
 		interface = "InterfaceIR",
 		signature = "Signature",
 		constraint = "InterfaceType+",
 		constraintIR = "ConstraintIR",
-		fullName = "string",
 	})
-	return out
+	return method
 end
 
 -- generics: the generics IN SCOPE, not the generics of interface/implementer.
@@ -825,9 +822,9 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 	return buildProof(out)
 end
 
-local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "not")
-local OR_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "or")
-local AND_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "name", "and")
+local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "memberName", "not")
+local OR_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "memberName", "or")
+local AND_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "memberName", "and")
 
 local function parened(s)
 	assertis(s, "string")
@@ -846,13 +843,13 @@ local function irMethod(location, signature, base, arguments)
 	
 	assert(#signature.returnTypes == 1)
 
-	local result = generateVariable(signature.name .. "_result", signature.returnTypes[1], location)
+	local result = generateVariable(signature.longName .. "_result", signature.returnTypes[1], location)
 	local d1 = variableDescription(base)
 	local ds = {}
 	for i = 1, #arguments do
 		ds[i] = variableDescription(arguments[i])
 	end
-	local description = parened(d1) .. "." .. signature.name .. "(" .. table.concat(ds, ", ") .. ")"
+	local description = parened(d1) .. "." .. signature.memberName .. "(" .. table.concat(ds, ", ") .. ")"
 	result = table.with(result, "description", description)
 	local method = freeze {
 		tag = "method-call",
@@ -977,7 +974,7 @@ local function generateAssumeStatements(signature, info, environment)
 		return buildBlock {}
 	end
 
-	local fullName = signature.container .. ":" .. signature.name
+	local fullName = signature.longName
 	local depth = 0
 	if table.haskey(environment.ignoreEnsures, fullName) then
 		depth = environment.ignoreEnsures[fullName]
@@ -1037,7 +1034,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 
 		local substituter = getSubstituterFromInterface(method.constraint, baseInstance.type, allDefinitions)
 
-		local methodFullName = method.fullName
+		local methodFullName = method.signature.longName
 
 		-- Verify the correct number of arguments is provided
 		if #arguments ~= #method.signature.parameters then
@@ -1126,13 +1123,8 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	local substituter = getSubstituterFromConcreteType(baseInstance.type, allDefinitions)
 
 	-- Find the definition of the method being invoked
-	local method = table.findwith(baseDefinition.signatures, "name", methodName)
-	local alternatives = table.map(
-		function(x)
-			return x.name
-		end,
-		baseDefinition.signatures
-	)
+	local method = table.findwith(baseDefinition.signatures, "memberName", methodName)
+	local alternatives = table.map(table.getter "memberName", baseDefinition.signatures)
 	if not method then
 		Report.NO_SUCH_METHOD {
 			type = showType(baseInstance.type),
@@ -1144,7 +1136,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	end
 	assertis(method, "Signature")
 
-	local methodFullName = baseDefinition.name .. "." .. methodName
+	local methodFullName = method.longName
 	if not method or method.modifier ~= "method" then
 		Report.NO_SUCH_METHOD {
 			modifier = "method",
@@ -1180,7 +1172,6 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	end
 
 	-- Verify the bang matches
-	assertis(method, "Signature")
 	if not method.bang ~= not bang then
 		Report.BANG_MISMATCH {
 			modifier = method.modifier,
@@ -1192,7 +1183,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		}
 	elseif method.bang and not containingSignature.bang then
 		Report.BANG_NOT_ALLOWED {
-			context = containingSignature.modifier .. " `" .. containingDefinition.name .. "." .. containingSignature.name .. "`",
+			context = containingSignature.modifier .. " `" .. containingSignature.longName .. "`",
 			location = location,
 		}
 	end
@@ -1201,7 +1192,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	local evaluation = {}
 	local destinations = {}
 	for _, returnType in ipairs(method.returnTypes) do
-		local destination = generateVariable(method.name .. "_result", substituter(returnType), location)
+		local destination = generateVariable(method.longName .. "_result", substituter(returnType), location)
 		table.insert(destinations, destination)
 		table.insert(evaluation, localSt(destination))
 	end
@@ -1271,7 +1262,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 		-- Map type variables to the type-values used for this instantiation
 		local substituter = getSubstituterFromInterface(static.constraint, t, allDefinitions)
 
-		local fullName = static.fullName
+		local fullName = static.signature.longName
 
 		-- Check the number of parameters
 		if #argumentSources ~= #static.signature.parameters then
@@ -1366,10 +1357,10 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	-- Map type variables to the type-values used for this instantiation
 	local substituter = getSubstituterFromConcreteType(t, allDefinitions)
 
-	local method = table.findwith(baseDefinition.signatures, "name", funcName)
+	local method = table.findwith(baseDefinition.signatures, "memberName", funcName)
 
 	if not method or method.modifier ~= "static" then
-		local alternatives = table.map(table.getter "name", baseDefinition.signatures)
+		local alternatives = table.map(table.getter "memberName", baseDefinition.signatures)
 		Report.NO_SUCH_METHOD {
 			modifier = "static",
 			type = showType(t),
@@ -1431,7 +1422,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 			location = location,
 		}
 	elseif method.bang and not containingSignature.bang then
-		local fullName = containerType.name .. "." .. containingSignature.name
+		local fullName = containingSignature.longName
 		Report.BANG_NOT_ALLOWED {
 			context = containingSignature.modifier .. " " .. fullName,
 			location = location,
@@ -1442,7 +1433,7 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	local evaluation = {}
 	local outs = {}
 	for _, returnType in ipairs(method.returnTypes) do
-		local returnVariable = generateVariable(method.name .. "_result", substituter(returnType), location)
+		local returnVariable = generateVariable(method.longName .. "_result", substituter(returnType), location)
 		table.insert(outs, returnVariable)
 		table.insert(evaluation, localSt(returnVariable))
 	end
@@ -2372,7 +2363,7 @@ local function semanticsSmol(sources, main)
 			return freeze {
 				foreign = foreign,
 				modifier = signature.modifier.keyword,
-				name = signature.name,
+				memberName = signature.name,
 				returnTypes = freeze(table.map(resolveType, signature.returnTypes, scope)),
 				parameters = freeze(table.map(
 					function(p)
@@ -2503,7 +2494,7 @@ local function semanticsSmol(sources, main)
 				signature = table.with(signature, "body", method.body)
 				signature = table.with(signature, "resolveType", resolveType)
 				signature = table.with(signature, "resolveInterface", resolveInterface)
-				signature = table.with(signature, "container", structName)
+				signature = table.with(signature, "longName", structName .. ":" .. signature.memberName)
 				table.insert(signatures, signature)
 			end
 
@@ -2543,7 +2534,7 @@ local function semanticsSmol(sources, main)
 			local signatures = table.map(
 				function(raw)
 					local compiled = compiledSignature(raw, generics, false)
-					return table.with(compiled, "container", fullName)
+					return table.with(compiled, "longName", fullName .. ":" .. compiled.memberName)
 				end,
 				definition.signatures
 			)
@@ -2607,7 +2598,7 @@ local function semanticsSmol(sources, main)
 			-- Check that each signature matches
 			for _, iSignature in ipairs(interface.signatures) do
 				-- Search for a method/static with the same name, if any
-				local cSignature = table.findwith(class.signatures, "name", iSignature.name)
+				local cSignature = table.findwith(class.signatures, "memberName", iSignature.memberName)
 				if not cSignature then
 					Report.INTERFACE_REQUIRES_MEMBER {
 						class = class.name,
@@ -2684,7 +2675,7 @@ local function semanticsSmol(sources, main)
 							classType = showType(cType),
 							interfaceType = showType(iType),
 							index = k,
-							member = cSignature.name,
+							member = cSignature.memberName,
 						}
 					end
 				end
@@ -2931,7 +2922,7 @@ local function semanticsSmol(sources, main)
 
 				local sub = table.with(environment, "returnOuts", returnOuts)
 
-				local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.name
+				local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.longName
 				local verify = generatePreconditionVerify(
 					ensures,
 					containingSignature,
@@ -3093,7 +3084,7 @@ local function semanticsSmol(sources, main)
 				}
 				table.insert(evaluation, returnSt)
 
-				local fullName = containingSignature.container .. "." .. containingSignature.name
+				local fullName = containingSignature.longName
 
 				-- Check return types
 				assert(#sources == #containingSignature.returnTypes)
@@ -3585,7 +3576,7 @@ local function semanticsSmol(sources, main)
 				if returns ~= "Unit" then
 					-- But only for unit functions
 					Report.FUNCTION_DOESNT_RETURN {
-						name = containingSignature.container .. ":" .. containingSignature.name,
+						name = containingSignature.longName,
 						modifier = containingSignature.modifier,
 						location = containingSignature.body.location,
 						returns = returns,
@@ -3616,7 +3607,7 @@ local function semanticsSmol(sources, main)
 		end
 
 		return freeze {
-			name = containingSignature.name,
+			name = containingSignature.memberName,
 			definitionName = definition.name,
 
 			-- Function's generics exclude those on the `this` instance
@@ -3671,7 +3662,7 @@ local function semanticsSmol(sources, main)
 				name = main,
 			}
 		end
-		local mainStatic = table.findwith(mainClass.signatures, "name", "main")
+		local mainStatic = table.findwith(mainClass.signatures, "memberName", "main")
 		if not mainStatic or mainStatic.modifier ~= "static" then
 			Report.NO_MAIN_STATIC {
 				name = main,

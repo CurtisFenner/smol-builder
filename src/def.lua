@@ -84,11 +84,12 @@ REGISTER_TYPE("FunctionIR", recordType {
 })
 
 REGISTER_TYPE("Signature", recordType {
-	name = "string",
+	memberName = "string",
+	longName = "string",
+
 	parameters = listType "VariableIR",
 	returnTypes = listType "Type+",
 	modifier = choiceType(constantType "static", constantType "method"),
-	container = "string",
 	foreign = "boolean",
 	bang = "boolean",
 	requiresAST = listType "ASTExpression",

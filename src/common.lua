@@ -181,11 +181,12 @@ local BOOLEAN_DEF = freeze {
 	tag = "builtin",
 	signatures = {
 		{
-			name = "eq",
+			memberName = "eq",
+			longName = "Boolean:eq",
+
 			parameters = {dummy("other", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Boolean",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -199,11 +200,12 @@ local BOOLEAN_DEF = freeze {
 			end,
 		},
 		{
-			name = "and",
+			memberName = "and",
+			longName = "Boolean:and",
+
 			parameters = {dummy("right", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Boolean",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -217,11 +219,12 @@ local BOOLEAN_DEF = freeze {
 			end,
 		},
 		{
-			name = "or",
+			memberName = "or",
+			longName = "Boolean:or",
+
 			parameters = {dummy("right", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Boolean",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -235,11 +238,12 @@ local BOOLEAN_DEF = freeze {
 			end,
 		},
 		{
-			name = "implies",
+			memberName = "implies",
+			longName = "Boolean:implies",
+
 			parameters = {dummy("right", BOOLEAN_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Boolean",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -253,11 +257,12 @@ local BOOLEAN_DEF = freeze {
 			end,
 		},
 		{
-			name = "not",
+			memberName = "not",
+			longName = "Boolean:not",
+
 			parameters = {},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Boolean",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -279,11 +284,12 @@ local INT_DEF = freeze {
 	tag = "builtin",
 	signatures = {
 		{
-			name = "isPositive",
+			memberName = "isPositive",
+			longName = "Int:isPositive",
+
 			parameters = {},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -294,11 +300,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "negate",
+			memberName = "negate",
+			longName = "Int:negate",
+
 			parameters = {},
 			returnTypes = {INT_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -309,11 +316,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "lessThan",
+			memberName = "lessThan",
+			longName = "Int:lessThan",
+
 			parameters = {dummy("right", INT_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {
@@ -333,11 +341,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "eq",
+			memberName = "eq",
+			longName = "Int:eq",
+
 			parameters = {dummy("right", INT_TYPE)},
 			returnTypes = {BOOLEAN_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -348,11 +357,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "quotient",
+			memberName = "quotient",
+			longName = "Int:quotient",
+
 			parameters = {dummy("right", INT_TYPE)},
 			returnTypes = {INT_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -363,11 +373,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "product",
+			memberName = "product",
+			longName = "Int:product",
+
 			parameters = {dummy("right", INT_TYPE)},
 			returnTypes = {INT_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -378,11 +389,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "sum",
+			memberName = "sum",
+			longName = "Int:sum",
+
 			parameters = {dummy("right", INT_TYPE)},
 			returnTypes = {INT_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {
@@ -395,11 +407,12 @@ local INT_DEF = freeze {
 			end,
 		},
 		{
-			name = "difference",
+			memberName = "difference",
+			longName = "Int:difference",
+
 			parameters = {dummy("right", INT_TYPE)},
 			returnTypes = {INT_TYPE},
 			modifier = "method",
-			container = "Int",
 			foreign = true,
 			bang = false,
 			ensuresAST = {},
@@ -419,11 +432,12 @@ local BUILTIN_DEFINITIONS = freeze {
 		tag = "builtin",
 		signatures = {
 			{
-				name = "concatenate",
+				memberName = "concatenate",
+				longName = "String:concatenate",
+
 				parameters = {dummy("right", STRING_TYPE)},
 				returnTypes = {STRING_TYPE},
 				modifier = "method",
-				container = "String",
 				foreign = true,
 				bang = false,
 				ensuresAST = {},
@@ -434,11 +448,12 @@ local BUILTIN_DEFINITIONS = freeze {
 				end,
 			},
 			{
-				name = "eq",
+				memberName = "eq",
+				longName = "String:eq",
+
 				parameters = {dummy("right", STRING_TYPE)},
 				returnTypes = {BOOLEAN_TYPE},
 				modifier = "method",
-				container = "String",
 				foreign = true,
 				bang = false,
 				ensuresAST = {},
@@ -493,17 +508,18 @@ local function makeEqSignature(t)
 	assertis(t, "Type+")
 
 	if t.name == "Boolean" then
-		return table.findwith(BOOLEAN_DEF.signatures, "name", "eq")
+		return table.findwith(BOOLEAN_DEF.signatures, "memberName", "eq")
 	end
 
 	local unknown = freeze {begins = "???", ends = "???"}
 
 	local eqSignature = freeze {
-		name = "eq",
+		memberName = "eq",
+		longName = showType(t) .. ":eq",
+
 		parameters = {dummy("left", t), dummy("right", t)},
 		returnTypes = {BOOLEAN_TYPE},
 		modifier = "method",
-		container = showType(t),
 		bang = false,
 		foreign = true,
 		ensuresAST = {},

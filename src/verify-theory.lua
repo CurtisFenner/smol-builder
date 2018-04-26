@@ -33,7 +33,7 @@ local function notAssertion(a)
 	return freeze {
 		tag = "fn",
 		arguments = {a},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "not"),
+		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "not"),
 		index = 1,
 	}
 end
@@ -134,12 +134,12 @@ local function showAssertion(assertion)
 		fields = table.concat(fields, " ")
 		return "(new-class " .. assertion.type .. " " .. fields .. ")"
 	elseif assertion.tag == "fn" then
-		local fn = assertion.signature.container .. ":" .. assertion.signature.name
 		local arguments = {}
 		for _, v in ipairs(assertion.arguments) do
 			table.insert(arguments, showAssertion(v))
 		end
 		arguments = table.concat(arguments, " ")
+		local fn = assertion.signature.longName
 		return "(fn " .. fn .. " [" .. arguments .. "])"
 	elseif assertion.tag == "int" then
 		return "(int " .. tostring(assertion.value) .. ")"
@@ -192,7 +192,7 @@ local function evaluateConstantAssertion(e, lowerConstant)
 		return e.value
 	elseif e.tag == "fn" then
 		local signature = e.signature
-		if e.signature.name == "eq" and #e.arguments == 2 then
+		if e.signature.memberName == "eq" and #e.arguments == 2 then
 			if showAssertion(e.arguments[1]) == showAssertion(e.arguments[2]) then
 				return true
 			end
@@ -425,7 +425,7 @@ end
 local function approximateStructure(x)
 	assertis(x, "Assertion")
 	if x.tag == "fn" then
-		return "fn-" .. x.signature.container .. ":" .. x.signature.name
+		return "fn-" .. x.signature.longName
 	elseif x.tag == "field" then
 		return "field-" .. x.fieldName
 	else
@@ -439,10 +439,7 @@ local function isSignatureEqual(a, b)
 	assertis(a, "Signature")
 	assertis(b, "Signature")
 
-	assertis(a.name, "string")
-	assertis(a.container, "string")
-
-	return a.name == b.name and a.container == b.container
+	return a.longName == b.longName
 end
 
 -- RETURNS true when assertions x, y are equivalent due to being
@@ -645,7 +642,7 @@ function theory:isSatisfiable(modelInput)
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
 	for assertion, truth in spairs(simple, showAssertion) do
-		if assertion.tag == "fn" and assertion.signature.name == "eq" then
+		if assertion.tag == "fn" and assertion.signature.memberName == "eq" then
 			assert(#assertion.arguments == 2)
 			local left = canon:scan(assertion.arguments[1])
 			local right = canon:scan(assertion.arguments[2])
