@@ -374,22 +374,6 @@ end
 
 --------------------------------------------------------------------------------
 
--- a: a CNF clause (a disjunction)
--- b: a CNF clause (a disjunction)
--- RETURNS a CNF clause, [](term, boolean)
-local function disjunctionOfClause(theory, a, b)
-	local clause = {}
-	for _, x in ipairs(a) do
-		table.insert(clause, x)
-	end
-	for _, y in ipairs(b) do
-		table.insert(clause, y)
-	end
-
-	-- TODO: simplification
-	return clause
-end
-
 -- a: a CNF description
 -- b: a CNF description
 -- RETURNS a CNF description
@@ -397,8 +381,14 @@ local function disjunctionOfCNF(theory, a, b)
 	local clauses = {}
 	for _, x in ipairs(a) do
 		for _, y in ipairs(b) do
-			local v = disjunctionOfClause(theory, x, y)
-			table.insert(clauses, v)
+			local disjunction = {}
+			for _, t in ipairs(x) do
+				table.insert(disjunction, t)
+			end
+			for _, t in ipairs(y) do
+				table.insert(disjunction, t)
+			end
+			table.insert(clauses, disjunction)
 		end
 	end
 	return clauses
@@ -706,13 +696,36 @@ end
 local function cnfSAT(theory, cnf, meta)
 	local stack = {}
 	while true do
+		if false then
+			-- Debug printing
+			local assignment = cnf:getAssignment()
+			local keys = table.keys(assignment)
+			for _, t in ipairs(cnf:freeTermSet()) do
+				table.insert(keys, t)
+			end
+			table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
+			local description = {}
+			for i = 1, #keys do
+				if assignment[keys[i]] == nil then
+					description[i] = "."
+				elseif assignment[keys[i]] then
+					description[i] = "#"
+				else
+					description[i] = "@"
+				end
+			end
+			print(table.concat(description))
+		end
+
 		if cnf:isTautology() then
 			local currentAssignment = cnf:getAssignment()
-			local out = theory:isSatisfiable(currentAssignment)
+			local out, conflicting = theory:isSatisfiable(currentAssignment)
 			if not out then
+				assert(conflicting)
+
 				-- While this truth model satisfies the CNF, the satisfaction
 				-- doesn't work in the theory
-				local keys = table.keys(currentAssignment)
+				local keys = table.keys(conflicting)
 				table.sort(keys, function(a, b)
 					return theory:canonKey(a) < theory:canonKey(b)
 				end)
@@ -720,7 +733,7 @@ local function cnfSAT(theory, cnf, meta)
 				-- Ask the theory for a minimal explanation why this didn't work
 				local coreClauses = unsatisfiableCoreClause(
 					theory,
-					currentAssignment,
+					conflicting,
 					keys
 				)
 				for _, coreClause in ipairs(coreClauses) do
@@ -760,6 +773,13 @@ local function cnfSAT(theory, cnf, meta)
 					-- satisfiable
 					return sat
 				end
+
+				-- Reject the current assignment in its entirety
+				local notCurrent = {}
+				for k, v in pairs(currentAssignment) do
+					table.insert(notCurrent, {k, not v})
+				end
+				cnf:addClause(notCurrent)
 
 				-- Attempt to generalize the learned core clauses
 				-- (cnf cannot mention new terms that may have been
@@ -901,7 +921,7 @@ function plaintheory:isSatisfiable(model)
 			end
 		end
 	end
-	return false
+	return false, model
 end
 
 function plaintheory:breakup(e, target)
@@ -1079,7 +1099,7 @@ assert(not implies(
 ))
 
 -- Performance test (uses unsat cores)
-for N = 50, 200, 10 do
+for N = 50, 0, 10 do
 	local q = {"f", "x == 1"}
 	for i = 1, N do
 		local clause = {
@@ -1130,7 +1150,7 @@ assert(not isSatisfiable(
 ))
 
 -- Performance test (uses unsat cores for quantifiers)
-for N = 50, 200, 10 do
+for N = 50, 0, 10 do
 	local q = {"f", "x == 1"}
 	for i = 1, N do
 		local clause = {

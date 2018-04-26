@@ -533,12 +533,10 @@ local function typeOfAssertion(assertion)
 		return assertion.type
 	elseif assertion.tag == "unit" then
 		return UNIT_TYPE
-	elseif assertion.tag == "method" then
+	elseif assertion.tag == "fn" then
 		return assertion.signature.returnTypes[assertion.index]
 	elseif assertion.tag == "field" then
 		return assertion.definition.type
-	elseif assertion.tag == "static" then
-		return assertion.signature.returnTypes[assertion.index]
 	elseif assertion.tag == "variable" then
 		return assertion.variable.type
 	elseif assertion.tag == "isa" then

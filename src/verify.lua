@@ -54,22 +54,21 @@ REGISTER_TYPE("Action", choiceType(
 	}
 ))
 
-REGISTER_TYPE("MethodAssertion", recordType {
-	tag = constantType "method",
-	base = "Assertion",
-	arguments = listType "Assertion",
-	signature = "Signature",
-	index = "integer",
-
-	-- XXX: delete this
-	methodName = "nil",
-})
-
 REGISTER_TYPE("FieldAssertion", recordType {
 	tag = constantType "field",
 	base = "Assertion",
 	fieldName = "string",
 	definition = "VariableIR",
+})
+
+REGISTER_TYPE("FnAssertion", recordType {
+	tag = constantType "fn",
+	arguments = listType "Assertion",
+	signature = "Signature",
+	index = "integer",
+
+	-- TODO: remove this
+	base = constantType(nil)
 })
 
 REGISTER_TYPE("Assertion", choiceType(
@@ -93,17 +92,7 @@ REGISTER_TYPE("Assertion", choiceType(
 		tag = constantType "unit",
 	},
 	"FieldAssertion",
-	"MethodAssertion",
-	recordType {
-		tag = constantType "static",
-		base = "string",
-		arguments = listType "Assertion",
-		signature = "Signature",
-		index = "integer",
-
-		-- XXX: delete this
-		staticName = "nil",
-	},
+	"FnAssertion",
 	recordType {
 		tag = constantType "variable",
 		variable = "VariableIR",
@@ -150,30 +139,17 @@ local function assertionExprString(a, grouped)
 	elseif a.tag == "field" then
 		local base = assertionExprString(a.base)
 		return base .. "." .. a.fieldName
-	elseif a.tag == "method" then
-		local base = assertionExprString(a.base, true)
+	elseif a.tag == "fn" then
 		local arguments = {}
 		for _, v in ipairs(a.arguments) do
 			table.insert(arguments, assertionExprString(v))
 		end
-
-		-- Search for aliasing operator
-		local operatorName = table.indexof(common.OPERATOR_ALIAS, a.signature.name)
-		if operatorName and #arguments == 1 then
-			local inner = base .. " " .. operatorName .. " " .. assertionExprString(a.arguments[1])
-			if grouped then
-				return "(" .. inner .. ")"
-			end
-			return inner
+		if a.signature.modifier == "method" then
+			local base = table.remove(arguments, 1)
+			return base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
+		else
+			return a.signature.container .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
 		end
-
-		return base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
-	elseif a.tag == "static" then
-		local arguments = {}
-		for _, v in ipairs(a.arguments) do
-			table.insert(arguments, assertionExprString(v))
-		end
-		return a.base .. "." .. a.signature.name .. "(" .. table.concat(arguments, ", ") .. ")"
 	elseif a.tag == "variable" then
 		local result = variableDescription(a.variable)
 		if grouped and result:find "%s" then
@@ -211,13 +187,12 @@ local function andAssertion(a, b)
 	}
 
 	local p = freeze {
-		tag = "method",
-		base = a,
-		arguments = {b},
+		tag = "fn",
+		arguments = {a, b},
 		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "and"),
 		index = 1,
 	}
-	assertis(p, "MethodAssertion")
+	assertis(p, "FnAssertion")
 	return p
 end
 
@@ -232,13 +207,12 @@ local function impliesAssertion(a, b)
 	}
 
 	local p = freeze {
-		tag = "method",
-		base = a,
-		arguments = {b},
+		tag = "fn",
+		arguments = {a, b},
 		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "implies"),
 		index = 1,
 	}
-	assertis(p, "MethodAssertion")
+	assertis(p, "FnAssertion")
 	return p
 end
 
@@ -267,17 +241,9 @@ local function assertionReplaced(expression, map)
 			return expression
 		end
 		return table.with(expression, "base", subBase)
-	elseif tag == "method" then
-		-- base + arguments
-		local newBase = assertionReplaced(expression.base, map)
-		if expression.base ~= newBase then
-			expression = table.with(expression, "base", newBase)
-		end
-
-		-- Do not return! Fall through for common handling of method/static
 	end
 
-	assert(tag == "method" or tag == "static")
+	assert(tag == "fn")
 
 	local anyDifferent = false
 	local newArguments = {}
@@ -697,26 +663,23 @@ local function resultAssertion(statement, index)
 	if statement.tag == "method-call" or statement.tag == "generic-method-call" then
 		assertis(index, "integer")
 
-		return freeze {
-			tag = "method",
-			base = variableAssertion(statement.baseInstance),
-			arguments = table.map(variableAssertion, statement.arguments),
+		local arguments = {}
+		table.insert(arguments, variableAssertion(statement.baseInstance))
+		for _, argument in ipairs(statement.arguments) do
+			table.insert(arguments, variableAssertion(argument))
+		end
 
+		return freeze {
+			tag = "fn",
+			arguments = freeze(arguments),
 			signature = statement.signature,
 			index = index,
 		}
 	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
 		assertis(index, "integer")
 
-		local base
-		if statement.tag == "static-call" then
-			base = showType(statement.baseType)
-		else
-			base = showInterfaceType(statement.constraint.interface)
-		end
 		return freeze {
-			tag = "static",
-			base = base,
+			tag = "fn",
 			arguments = table.map(variableAssertion, statement.arguments),
 			signature = statement.signature,
 			index = index,
@@ -726,7 +689,7 @@ local function resultAssertion(statement, index)
 end
 
 -- RETURNS an Assertion
-local function fieldAssertion(scope, statement)
+local function fieldAssertion(statement)
 	assertis(statement, "FieldSt")
 
 	return freeze {
@@ -738,7 +701,7 @@ local function fieldAssertion(scope, statement)
 end
 
 -- RETURNS an Assertion
-local function variantAssertion(scope, statement)
+local function variantAssertion(statement)
 	assertis(statement, "VariantSt")
 
 	return freeze {
@@ -890,12 +853,12 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, VALUE_UNIT)
 		return
 	elseif statement.tag == "field" then
-		local assertion = fieldAssertion(scope, statement)
+		local assertion = fieldAssertion(statement)
 		assignRaw(scope, statement.destination, assertion)
 		return
 	elseif statement.tag == "variant" then
 		-- TODO: verify isa
-		local assertion = variantAssertion(scope, statement)
+		local assertion = variantAssertion(statement)
 		assignRaw(scope, statement.destination, assertion)
 		return
 	elseif statement.tag == "int" then
@@ -939,16 +902,16 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, instance)
 
 		for fieldName, value in pairs(statement.fields) do
-			local fieldAssertion = freeze {
+			local assertion = freeze {
 				tag = "field",
 				base = instance,
 				fieldName = fieldName,
 				definition = statement.memberDefinitions[fieldName],
 			}
-			assertis(fieldAssertion, "Assertion")
+			assertis(assertion, "Assertion")
 			assertis(value, "VariableIR")
 			local t = value.type
-			local eq = eqAssertion(fieldAssertion, variableAssertion(value), t)
+			local eq = eqAssertion(assertion, variableAssertion(value), t)
 			assertis(eq, "Assertion")
 			addPredicate(scope, eq)
 		end

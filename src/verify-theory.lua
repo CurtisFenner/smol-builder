@@ -31,14 +31,13 @@ local function notAssertion(a)
 	assertis(a, "Assertion")
 
 	return freeze {
-		tag = "method",
-		base = a,
-		arguments = {},
-
+		tag = "fn",
+		arguments = {a},
 		signature = table.findwith(BOOLEAN_DEF.signatures, "name", "not"),
 		index = 1,
 	}
 end
+notAssertion = memoized(1, notAssertion)
 
 -- RETURNS an Assertion representing a == b
 local function eqAssertion(a, b, t)
@@ -47,15 +46,15 @@ local function eqAssertion(a, b, t)
 	assertis(t, "Type+")
 
 	local p = freeze {
-		tag = "method",
-		base = a,
-		arguments = {b},
+		tag = "fn",
+		arguments = {a, b},
 		signature = makeEqSignature(t),
 		index = 1,
 	}
-	assertis(p, "MethodAssertion")
+	assertis(p, "FnAssertion")
 	return p
 end
+eqAssertion = memoized(3, eqAssertion)
 
 -- RETURNS an Assertion
 local function variableAssertion(variable)
@@ -66,6 +65,47 @@ local function variableAssertion(variable)
 		variable = variable,
 	}
 end
+variableAssertion = memoized(1, variableAssertion)
+
+-- RETURNS an Assertion
+local function constantAssertion(constant)
+	if type(constant) == "number" then
+		-- Assert that constant is finite and an integer
+		assert(constant % 1 == 0)
+
+		return freeze {
+			tag = "int",
+			value = constant,
+		}
+	elseif type(constant) == "string" then
+		return freeze {
+			tag = "string",
+			value = constant,
+		}
+	elseif type(constant) == "boolean" then
+		return freeze {
+			tag = "boolean",
+			value = constant,
+		}
+	end
+	error("Unknown constant type value")
+end
+constantAssertion = memoized(1, constantAssertion)
+
+-- RETURNS an Assertion
+local function fnAssertion(signature, arguments, index)
+	assertis(signature, "Signature")
+	assertis(arguments, listType("Assertion"))
+	assertis(index, "integer")
+
+	return freeze {
+		tag = "fn",
+		signature = signature,
+		arguments = arguments,
+		index = index,
+	}
+end
+fnAssertion = memoized(4, fnAssertion)
 
 --------------------------------------------------------------------------------
 
@@ -93,20 +133,14 @@ local function showAssertion(assertion)
 		table.sort(fields)
 		fields = table.concat(fields, " ")
 		return "(new-class " .. assertion.type .. " " .. fields .. ")"
-	elseif assertion.tag == "static" then
+	elseif assertion.tag == "fn" then
+		local fn = assertion.signature.container .. ":" .. assertion.signature.name
 		local arguments = {}
 		for _, v in ipairs(assertion.arguments) do
 			table.insert(arguments, showAssertion(v))
 		end
 		arguments = table.concat(arguments, " ")
-		return "(method " .. assertion.signature.name .. " " .. assertion.base .. " [" .. arguments .. "])"
-	elseif assertion.tag == "method" then
-		local arguments = {}
-		for _, v in ipairs(assertion.arguments) do
-			table.insert(arguments, showAssertion(v))
-		end
-		arguments = table.concat(arguments, " ")
-		return "(method " .. assertion.signature.name .. " " .. showAssertion(assertion.base) .. " [" .. arguments .. "])"
+		return "(fn " .. fn .. " [" .. arguments .. "])"
 	elseif assertion.tag == "int" then
 		return "(int " .. tostring(assertion.value) .. ")"
 	elseif assertion.tag == "boolean" then
@@ -134,11 +168,6 @@ function theory:canonKey(e)
 	return showAssertion(e)
 end
 
-theory.falseAssertion = freeze {
-	tag = "boolean",
-	value = false,
-}
-
 local TERMINAL_TAG = {
 	["unit"] = true,
 	["this"] = true,
@@ -161,16 +190,15 @@ local function evaluateConstantAssertion(e, lowerConstant)
 		return e.value
 	elseif e.tag == "boolean" then
 		return e.value
-	elseif e.tag == "method" then
+	elseif e.tag == "fn" then
 		local signature = e.signature
-		if e.signature.name == "eq" and #e.arguments == 1 then
-			if showAssertion(e.base) == showAssertion(e.arguments[1]) then
+		if e.signature.name == "eq" and #e.arguments == 2 then
+			if showAssertion(e.arguments[1]) == showAssertion(e.arguments[2]) then
 				return true
 			end
 		end
 
-		local left = lowerConstant(e.base)
-		if left == nil then
+		if signature.eval == false then
 			return nil
 		end
 
@@ -182,41 +210,12 @@ local function evaluateConstantAssertion(e, lowerConstant)
 			end
 		end
 
-		if signature.eval == false then
-			return nil
-		end
-
-		return signature.eval(left, unpack(arguments))
+		return signature.eval(unpack(arguments))
 	end
 
 	-- No static representation is possible
 	return nil
 end
-
--- RETURNS an Assertion
-local function boxConstant(constant)
-	if type(constant) == "number" then
-		-- Assert that constant is finite and an integer
-		assert(constant % 1 == 0)
-
-		return freeze {
-			tag = "int",
-			value = constant,
-		}
-	elseif type(constant) == "string" then
-		return freeze {
-			tag = "string",
-			value = constant,
-		}
-	elseif type(constant) == "boolean" then
-		return freeze {
-			tag = "boolean",
-			value = constant,
-		}
-	end
-	error("Unknown constant type value")
-end
-boxConstant = memoized(1, boxConstant)
 
 local m_scan
 
@@ -248,29 +247,14 @@ function m_scan(self, object)
 
 	if TERMINAL_TAG[object.tag] then
 		self.relevant[shown] = object
-	elseif object.tag == "static" then
-		local canon = freeze {
-			tag = "static",
-			base = object.base,
-			arguments = scanned(self, object.arguments),
-			signature = object.signature,
-			index = object.index,
-		}
+	elseif object.tag == "fn" then
+		local canon = fnAssertion(
+			object.signature,
+			scanned(self, object.arguments),
+			object.index
+		)
 		self.relevant[shown] = canon
 		for _, argument in ipairs(canon.arguments) do
-			ref(argument)
-		end
-	elseif object.tag == "method" then
-		local canon = freeze {
-			tag = "method",
-			base = self:scan(object.base),
-			arguments = scanned(self, object.arguments),
-			signature = object.signature,
-			index = object.index,
-		}
-		self.relevant[shown] = canon
-		ref(canon.base)
-		for _, argument in ipairs(canon) do
 			ref(argument)
 		end
 	elseif object.tag == "field" then
@@ -365,7 +349,7 @@ local function quantifierClauses(model, term, canon)
 		local out = {}
 		for _, x in ipairs(opportunities) do
 			-- TODO: this is a terrible heuristic
-			if (x.tag == "variable" and (x.variable.name:find "local" or not x.variable.name:find "[^a-zA-Z0-9']")) or x.tag == "static" or x.tag == "method" then
+			if (x.tag == "variable" and (x.variable.name:find "local" or not x.variable.name:find "[^a-zA-Z0-9']")) or x.tag == "fn" then
 				-- Instantiate an example of a forall instance
 				local constantName = newConst() .. "forall" .. tostring(term.unique)
 				local newTerm, res, var = term:instantiate(constantName)
@@ -440,10 +424,8 @@ end
 -- then x, y have different structure and thus childrenSame(x, y) is false
 local function approximateStructure(x)
 	assertis(x, "Assertion")
-	if x.tag == "method" then
-		return "method-" .. x.signature.name
-	elseif x.tag == "static" then
-		return "static-" .. x.signature.name
+	if x.tag == "fn" then
+		return "fn-" .. x.signature.container .. ":" .. x.signature.name
 	elseif x.tag == "field" then
 		return "field-" .. x.fieldName
 	else
@@ -479,26 +461,13 @@ local function childrenSame(eq, x, y)
 		-- Terminal elements that aren't in the same representative group
 		-- cannot be shown to be equal here
 		return false
-	elseif x.tag == "method" then
+	elseif x.tag == "fn" then
 		if not isSignatureEqual(x.signature, y.signature) then
-			return false
-		elseif not eq:query(x.base, y.base) then
 			return false
 		end
 
 		-- The same method name on the same base type must be the same
 		-- signature
-		assert(#x.arguments == #y.arguments)
-		for i in ipairs(x.arguments) do
-			if not eq:query(x.arguments[i], y.arguments[i]) then
-				return false
-			end
-		end
-		return true
-	elseif x.tag == "static" then
-		if not isSignatureEqual(x.signature, y.signature) then
-			return false
-		end
 		assert(#x.arguments == #y.arguments)
 		for i in ipairs(x.arguments) do
 			if not eq:query(x.arguments[i], y.arguments[i]) then
@@ -617,7 +586,7 @@ local function propagateConstants(canon, eq)
 			return value
 		end)
 		if constant ~= nil then
-			local boxed = canon:scan(boxConstant(constant))
+			local boxed = canon:scan(constantAssertion(constant))
 
 			-- Insert representative, so that it can be used in UF
 			eq:tryinit(boxed)
@@ -664,7 +633,8 @@ function theory:isSatisfiable(modelInput)
 		-- assignments could be in the map
 		if simple[object] ~= nil and simple[object] ~= value then
 			-- This model is inconsistent
-			return false
+			-- TODO: be more specific
+			return false, modelInput
 		end
 		simple[object] = value
 	end
@@ -675,10 +645,10 @@ function theory:isSatisfiable(modelInput)
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
 	for assertion, truth in spairs(simple, showAssertion) do
-		if assertion.tag == "method" and assertion.signature.name == "eq" then
-			assert(#assertion.arguments == 1)
-			local left = canon:scan(assertion.base)
-			local right = canon:scan(assertion.arguments[1])
+		if assertion.tag == "fn" and assertion.signature.name == "eq" then
+			assert(#assertion.arguments == 2)
+			local left = canon:scan(assertion.arguments[1])
+			local right = canon:scan(assertion.arguments[2])
 			if truth then
 				table.insert(positiveEq, {left, right})
 			else
@@ -715,7 +685,8 @@ function theory:isSatisfiable(modelInput)
 		end
 		positiveEq = propagateConstants(canon, eq)
 		if not positiveEq then
-			return false
+			-- TODO: be more specific
+			return false, modelInput
 		end
 	end
 
@@ -725,7 +696,8 @@ function theory:isSatisfiable(modelInput)
 
 		if eq:query(a, b) then
 			-- This model is inconsistent
-			return false
+			-- TODO: be more specific
+			return false, modelInput
 		end
 	end
 
@@ -735,7 +707,7 @@ end
 function theory:breakup(assertion, target)
 	assertis(assertion, "Assertion")
 
-	if assertion.tag == "method" then
+	if assertion.tag == "fn" then
 		local signature = assertion.signature
 		assertis(signature, "Signature")
 
@@ -744,7 +716,7 @@ function theory:breakup(assertion, target)
 			return false
 		end
 
-		local values = {assertion.base}
+		local values = {}
 		for _, argument in ipairs(assertion.arguments) do
 			table.insert(values, argument)
 		end
