@@ -39,8 +39,6 @@ local idCount = 0
 local function generateLocalID(hint)
 	idCount = idCount + 1
 	local indicator = string.char(string.byte "A" + (idCount - 1) % 26)
-
-	--indicator = ""
 	return "_local" .. indicator .. tostring(idCount) .. "_" .. tostring(hint)
 end
 

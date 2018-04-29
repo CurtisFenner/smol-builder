@@ -33,6 +33,8 @@ local typeOfAssertion = common.typeOfAssertion
 local excerpt = common.excerpt
 local variableDescription = common.variableDescription
 
+local assertionExprString = common.assertionExprString
+
 --------------------------------------------------------------------------------
 
 REGISTER_TYPE("Action", choiceType(
@@ -119,59 +121,6 @@ REGISTER_TYPE("Assertion", choiceType(
 		unique = "object",
 	}
 ))
-
--- RETURNS a string (as executable Smol code)
-local function assertionExprString(a, grouped)
-	assertis(a, "Assertion")
-	if a.tag == "int" then
-		return tostring(a.value)
-	elseif a.tag == "string" then
-		return tostring(a.value)
-	elseif a.tag == "boolean" then
-		return tostring(a.value)
-	elseif a.tag == "this" then
-		return "this"
-	elseif a.tag == "unit" then
-		return "unit"
-	elseif a.tag == "field" then
-		local base = assertionExprString(a.base)
-		return base .. "." .. a.fieldName
-	elseif a.tag == "fn" then
-		local arguments = {}
-		for _, v in ipairs(a.arguments) do
-			table.insert(arguments, assertionExprString(v))
-		end
-		if a.signature.modifier == "method" then
-			local base = table.remove(arguments, 1)
-			return base .. "." .. a.signature.memberName .. "(" .. table.concat(arguments, ", ") .. ")"
-		else
-			return a.signature.longName .. "(" .. table.concat(arguments, ", ") .. ")"
-		end
-	elseif a.tag == "variable" then
-		local result = variableDescription(a.variable)
-		if grouped and result:find "%s" then
-			return "(" .. result .. ")"
-		end
-		return result
-	elseif a.tag == "isa" then
-		local inner = assertionExprString(a.base, true) .. " is " .. a.variant
-		if grouped then
-			return "(" .. inner .. ")"
-		end
-		return inner
-	elseif a.tag == "variant" then
-		local base = assertionExprString(a.base)
-		return base .. "." .. a.variantName
-	elseif a.tag == "forall" then
-		local inner = excerpt(a.location)
-		if grouped then
-			return "(" .. inner .. ")"
-		end
-		return inner
-	end
-
-	error("unhandled `" .. a.tag .. "`")
-end
 
 -- RETURNS an Assertion representing a && b
 local function andAssertion(a, b)

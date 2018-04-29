@@ -514,21 +514,7 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 		end
 	end
 
-	local smallerAssignment = {}
-	local smallerOrder = {}
-	for i = 1, #order do
-		if not coreIndex[i] then
-			smallerAssignment[order[i]] = assignment[order[i]]
-			table.insert(smallerOrder, order[i])
-		end
-	end
-	local cores = unsatisfiableCoreClause(
-		theory,
-		smallerAssignment,
-		smallerOrder
-	)
-	table.insert(cores, core)
-	return cores
+	return {core}
 end
 
 -- Collapses an unsat-core using instatiated terms to refer instead to only
@@ -722,6 +708,7 @@ local function cnfSAT(theory, cnf, meta)
 			local out, conflicting = theory:isSatisfiable(currentAssignment)
 			if not out then
 				assert(conflicting)
+				assert(not theory:isSatisfiable(conflicting))
 
 				-- While this truth model satisfies the CNF, the satisfaction
 				-- doesn't work in the theory
