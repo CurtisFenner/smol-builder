@@ -13,5 +13,6 @@ class Test {
 	static main() Unit {
 		// Assertions can only be total expressions
 		assert Test.oracle(false);
+		assert false;
 	}
 }

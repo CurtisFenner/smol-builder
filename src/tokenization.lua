@@ -209,7 +209,7 @@ local function lexSmol(source, filename)
 			local escaped = false
 			for i = 2, #source do
 				local c = source:sub(i, i)
-				if c == "\n" then
+				if c == "\n" or c == "\r" then
 					location.ends = advanceCursor(source:sub(1, i - 1))
 					quit("The compiler found an unfinished string literal ", location)
 				end

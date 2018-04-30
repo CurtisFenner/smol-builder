@@ -1,3 +1,16 @@
+# The Smol Programming Language and Documentation
+
+**[A full description of Smol can be found here.](docs/smol.md)**
+
+I have been designing Smol since approximately Spring of 2017.
+My mission is to create a programming language that rigidly enforces the
+conventions that I have found to be helpful
+in designing maintainable software. These conventions include
+* Statically checked functional correctness
+* Explicitness
+* Immutability
+* Totally defined behavior
+
 # The Smol Compiler, `smolc`
 
 **`smolc`** is a highly-portable compiler for the toy programming language I
@@ -25,6 +38,8 @@ class Main {
 		// Invoke a static action on the core:Out type.
 		// The `!` indicates that the function is not pure.
 		do core:Out.println!("Hello world!");
+
+		// Statically checked assertions can be embedded in your code
 		assert 1 + 2 == 3;
 	}
 }
@@ -104,18 +119,6 @@ https://marketplace.visualstudio.com/items?itemName=curtisfenner.smolcomp.
 
 This extension provides syntax highlighting and red-underlining of errors.
 Configure it by pointing it to the `src/compiler.lua` file in the cloned folder.
-
-# The Smol Programming Language
-
-I have been designing Smol since approximately Spring of 2017.
-My mission is to create a programming language that rigidly enforces the
-conventions that I have found to be helpful
-in designing maintainable software. These conventions include
-* Statically checked annotations
-* Explicitness
-* Immutability
-* Familiarity
-* Totally defined behavior
 
 ## Author
 
