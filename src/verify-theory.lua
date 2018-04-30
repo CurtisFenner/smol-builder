@@ -177,12 +177,12 @@ local TERMINAL_TAG = {
 	["string"] = true,
 }
 
--- RETURNS a description of the value of an assertion
--- a Lua boolean, number, string
--- RETURNS nil when the value is not known at compile time
-local function evaluateConstantAssertion(e, lowerConstant)
+-- RETURNS a Lua value for types representable as literals that is suitable,
+-- e.g., in the .eval of a Signature
+-- RETURNS nil when the Assertion has no statically determinable literal
+-- evaluation
+local function isLiteralAssertion(e)
 	assertis(e, "Assertion")
-	assertis(lowerConstant, "function")
 
 	if e.tag == "int" then
 		return e.value
@@ -190,30 +190,8 @@ local function evaluateConstantAssertion(e, lowerConstant)
 		return e.value
 	elseif e.tag == "boolean" then
 		return e.value
-	elseif e.tag == "fn" then
-		local signature = e.signature
-		if e.signature.memberName == "eq" and #e.arguments == 2 then
-			if showAssertion(e.arguments[1]) == showAssertion(e.arguments[2]) then
-				return true
-			end
-		end
-
-		if signature.eval == false then
-			return nil
-		end
-
-		local arguments = {}
-		for i, a in ipairs(e.arguments) do
-			arguments[i] = lowerConstant(a)
-			if arguments[i] == nil then
-				return nil
-			end
-		end
-
-		return signature.eval(unpack(arguments))
 	end
 
-	-- No static representation is possible
 	return nil
 end
 
@@ -419,21 +397,6 @@ function theory:additionalClauses(model, meta)
 	return out, newMeta
 end
 
--- RETURNS a string such that for x, y
--- if approximateStructure(x) ~= approximateStructure(y)
--- then x, y have different structure and thus childrenSame(x, y) is false
-local function approximateStructure(x)
-	assertis(x, "Assertion")
-	if x.tag == "fn" then
-		return "fn-" .. x.signature.longName
-	elseif x.tag == "field" then
-		return "field-" .. x.fieldName
-	else
-		return x.tag
-	end
-end
-approximateStructure = memoized(1, approximateStructure)
-
 -- RETURNS a list of raw reasons when assertions x, y are equivalent due to
 -- being equal functions of equal arguments
 -- RETURNS false when they are not equal
@@ -546,6 +509,45 @@ local function union(canon, eq, bin)
 	end
 end
 
+-- RETURNS a Lua constant, reason when the function can be evaluated statically
+-- RETURNS nil otherwise
+local function fnLiteralEvaluation(expression, eq)
+	assertis(expression, "Assertion")
+	assert(expression.tag == "fn")
+
+	if not expression.signature.eval then
+		return nil
+	end
+
+	-- Attempt to evaluate each argument to a constant
+	local argumentLiterals = {}
+	local reasons = {}
+	for i, argument in ipairs(expression.arguments) do
+		-- Evaluate each argument, stopping if a contradiction is reached
+		for _, equivalent in ipairs(eq:classOf(argument)) do
+			local literal = isLiteralAssertion(equivalent)
+			if literal ~= nil then
+				table.insert(argumentLiterals, literal)
+
+				for _, set in ipairs(eq:reasonEq(argument, equivalent)) do
+					for _, reason in ipairs(set) do
+						table.insert(reasons, reason)
+					end
+				end
+				break
+			end
+		end
+
+		if argumentLiterals[i] == nil then
+			-- This argument literal could not be evaluated
+			return nil
+		end
+	end
+
+	-- All the arguments were successfully evaluated
+	return expression.signature.eval(unpack(argumentLiterals)), reasons
+end
+
 -- RETURNS whether or not the given model is satisfiable in a quantifier free
 -- theory of uninterpreted functions
 -- as a part of the 'theory' interface for the SMT solver
@@ -642,20 +644,38 @@ function theory:isSatisfiable(modelInput)
 		eq:init(expression)
 	end
 
-	local byStructure = {}
-	for _, x in spairs(canon.relevant) do
-		local s = approximateStructure(x)
-		byStructure[s] = byStructure[s] or {}
-		table.insert(byStructure[s], x)
-	end
-
 	-- Union find
 	while #positiveEq > 0 do
 		local nEq = #positiveEq
 		for _, bin in ipairs(positiveEq) do
 			union(canon, eq, bin)
 		end
+
 		positiveEq = {}
+
+		-- Evaluate constant functions
+		for _, expression in pairs(canon.relevant) do
+			if expression.tag == "fn" then
+				local literal, reasons = fnLiteralEvaluation(expression, eq)
+				if literal ~= nil then
+					local literalExpression = constantAssertion(literal)
+					eq:tryinit(literalExpression)
+					canon:scan(literalExpression)
+
+					for _, reason in ipairs(reasons) do
+						assert(modelInput[reason] ~= nil)
+					end
+
+					if not eq:query(literalExpression, expression) then
+						table.insert(positiveEq, {
+							left = expression,
+							right = literalExpression,
+							raws = reasons,
+						})
+					end
+				end
+			end
+		end
 	end
 
 	-- 4) Use each negative == assertion to separate groups
@@ -664,8 +684,6 @@ function theory:isSatisfiable(modelInput)
 		local a, b = bin.left, bin.right
 
 		if eq:query(a, b) then
-			local began = os.clock()
-
 			-- This model is inconsistent; explain the contradiction
 			local limited = {}
 			for _, a in ipairs(bin.raws) do
@@ -678,23 +696,33 @@ function theory:isSatisfiable(modelInput)
 			end
 
 			assert(1 <= #limited)
+			table.insert(rejects, limited)
+		end
+	end
 
-			local restricted = {}
-			for _, key in ipairs(limited) do
-				assert(modelInput[key] ~= nil)
-				restricted[key] = modelInput[key]
+	-- 5) Check that constants don't disagree
+	for _, expression in pairs(canon.relevant) do
+		local literal = isLiteralAssertion(expression)
+		if literal ~= nil then
+			for _, equivalent in ipairs(eq:classOf(expression)) do
+				local otherLiteral = isLiteralAssertion(equivalent)
+				if otherLiteral ~= nil and otherLiteral ~= literal then
+					table.insert(rejects, table.concatted(unpack(eq:reasonEq(expression, equivalent))))
+				end
 			end
-
-			table.insert(rejects, {
-				elapsed = os.clock() - began,
-				model = restricted,
-				size = #table.keys(restricted),
-			})
 		end
 	end
 
 	if #rejects ~= 0 then
-		return false, rejects[1].model
+		local best = rejects[1]
+
+		local restricted = {}
+		for _, key in ipairs(best) do
+			assert(modelInput[key] ~= nil)
+			restricted[key] = modelInput[key]
+		end
+
+		return false, restricted
 	end
 
 	return true
@@ -729,10 +757,6 @@ function theory:breakup(assertion, target)
 end
 
 --------------------------------------------------------------------------------
-
--- Tests
-
-theory.evaluateConstantAssertion = evaluateConstantAssertion
 
 theory = freeze(theory)
 assertis(theory, "Theory")
