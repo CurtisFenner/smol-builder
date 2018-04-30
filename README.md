@@ -2,7 +2,7 @@
 
 **[A full description of Smol can be found here.](docs/smol.md)**
 
-I have been designing Smol since approximately Spring of 2017.
+I have been designing Smol since Spring of 2017.
 My mission is to create a programming language that rigidly enforces the
 conventions that I have found to be helpful
 in designing maintainable software. These conventions include
@@ -49,9 +49,10 @@ class Main {
 
 These instructions explain what you need to run `smolc` and the compiler tests.
 
-First, install Lua 5.1. Lua 5.2 and Lua 5.3 are **not** supported at this time.
-Lua may already be installed on your machine! `$ lua -v` will print the
+First, install Lua 5.1. Lua may already be installed on your machine! `$ lua -v` will print the
 installed version.
+
+Lua 5.2 and Lua 5.3 are **not** supported at this time.
 
 Next, clone this repository.
 
