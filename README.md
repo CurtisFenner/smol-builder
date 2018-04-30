@@ -1,9 +1,9 @@
 # The Smol Compiler, `smolc`
 
-**`smolc`** is a highly-portable compiler for the toy programming language I call
-Smol that emits standard-conforming ISO C99.
-**Smol** is a pure, statically-typed, procedural programming language that includes
-classes, interfaces, tagged unions, and generics.
+**`smolc`** is a highly-portable compiler for the toy programming language I
+call Smol that emits standard-conforming ISO C99.
+**Smol** is a pure, statically-typed, procedural programming language that
+includes classes, interfaces, tagged unions, and generics.
 
 Smol also includes a **verification framework** that allows assertions to be
 checked *statically* with *zero runtime cost*. This analysis is mostly sound;
@@ -25,6 +25,7 @@ class Main {
 		// Invoke a static action on the core:Out type.
 		// The `!` indicates that the function is not pure.
 		do core:Out.println!("Hello world!");
+		assert 1 + 2 == 3;
 	}
 }
 ```
@@ -34,6 +35,8 @@ class Main {
 These instructions explain what you need to run `smolc` and the compiler tests.
 
 First, install Lua 5.1. Lua 5.2 and Lua 5.3 are **not** supported at this time.
+Lua may already be installed on your machine! `$ lua -v` will print the
+installed version.
 
 Next, clone this repository.
 
@@ -69,14 +72,14 @@ $
 
 ## Running the Smol compiler tests
 
-While the compiler itself is intended to be very portable, the tests are **not**
-currently as portable.
+While the compiler itself is intended to be very portable, the tests are not
+*quite* as portable.
 
 You need to have `ls` available in your path (Cygwin/MinGW will work on Windows)
 and your installation of Lua 5.1 must support `io.popen`
 (most installations of Lua support `io.popen` by default).
 
-You also must have a version of `gcc` installed that supports C99.
+You also must have a version of `gcc` installed that supports (pedantic) C99.
 
 To run all the tests, run the following from the smol-builder directory:
 
