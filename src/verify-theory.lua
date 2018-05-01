@@ -195,19 +195,19 @@ local function isLiteralAssertion(e)
 	return nil
 end
 
-local m_scan
+local function m_ref(self, object, child)
+	local sChild = showAssertion(child)
+	local sObject = showAssertion(object)
+	assert(sChild ~= sObject)
+	assert(self.relevant[sChild], "child already in map")
 
-local function scanned(self, children)
-	local out = {}
-	for i = 1, #children do
-		out[i] = m_scan(self, children[i])
-	end
-	return out
+	self.referencedBy[child] = self.referencedBy[child] or {}
+	table.insert(self.referencedBy[child], self.relevant[sObject])
 end
 
 -- Canonicalizes objects so that syntactically equivalent subtrees become the
 -- same reference
-function m_scan(self, object)
+local function m_scan(self, object)
 	assertis(object, "Assertion")
 
 	local shown = showAssertion(object)
@@ -215,25 +215,21 @@ function m_scan(self, object)
 		return self.relevant[shown]
 	end
 
-	local function ref(child)
-		local s = showAssertion(child)
-		assert(s ~= shown)
-		assert(self.relevant[s], "child in map")
-		self.referencedBy[child] = self.referencedBy[child] or {}
-		table.insert(self.referencedBy[child], self.relevant[shown])
-	end
-
 	if TERMINAL_TAG[object.tag] then
 		self.relevant[shown] = object
 	elseif object.tag == "fn" then
+		local arguments = {}
+		for _, argument in ipairs(object.arguments) do
+			table.insert(arguments, m_scan(self, argument))
+		end
 		local canon = fnAssertion(
 			object.signature,
-			scanned(self, object.arguments),
+			arguments,
 			object.index
 		)
 		self.relevant[shown] = canon
-		for _, argument in ipairs(canon.arguments) do
-			ref(argument)
+		for _, argument in ipairs(arguments) do
+			m_ref(self, canon, argument)
 		end
 	elseif object.tag == "field" then
 		local canon = freeze {
@@ -243,7 +239,7 @@ function m_scan(self, object)
 			definition = object.definition,
 		}
 		self.relevant[shown] = canon
-		ref(canon.base)
+		m_ref(self, canon, canon.base)
 	elseif object.tag == "variant" then
 		local canon = freeze {
 			tag = "variant",
@@ -252,7 +248,7 @@ function m_scan(self, object)
 			definition = object.definition,
 		}
 		self.relevant[shown] = canon
-		ref(canon.base)
+		m_ref(self, canon, canon.base)
 	elseif object.tag == "isa" then
 		local canon = freeze {
 			tag = "isa",
@@ -260,7 +256,7 @@ function m_scan(self, object)
 			variant = object.variant,
 		}
 		self.relevant[shown] = canon
-		ref(canon.base)
+		m_ref(self, canon, canon.base)
 	elseif object.tag == "forall" then
 		-- Comparing by object identity is OK
 		self.relevant[shown] = object
