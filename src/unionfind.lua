@@ -31,7 +31,7 @@ end
 
 function UnionFind:_root(e)
 	local parent = self._representatives[e]
-	assert(parent ~= nil, "`" .. tostring(e) .. "` has not yet been init()'d")
+	assert(parent ~= nil, "e has not yet been init()'d")
 
 	if parent == e then
 		return parent

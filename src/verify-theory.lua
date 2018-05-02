@@ -1,4 +1,5 @@
 local profile = import "profile.lua"
+local Stopwatch = import "stopwatch.lua"
 
 local theory = {
 	assertion_t = "Assertion",
@@ -39,7 +40,7 @@ local function notAssertion(a)
 end
 notAssertion = memoized(1, notAssertion)
 
--- RETURNS an Assertion representing a == b
+-- RETURNS a FnAssertion representing a == b
 local function eqAssertion(a, b, t)
 	assertis(a, "Assertion")
 	assertis(b, "Assertion")
@@ -51,7 +52,6 @@ local function eqAssertion(a, b, t)
 		signature = makeEqSignature(t),
 		index = 1,
 	}
-	assertis(p, "FnAssertion")
 	return p
 end
 eqAssertion = memoized(3, eqAssertion)
@@ -205,6 +205,8 @@ local function m_ref(self, object, child)
 	table.insert(self.referencedBy[child], self.relevant[sObject])
 end
 
+local globalCanon = {}
+
 -- Canonicalizes objects so that syntactically equivalent subtrees become the
 -- same reference
 local function m_scan(self, object)
@@ -213,6 +215,29 @@ local function m_scan(self, object)
 	local shown = showAssertion(object)
 	if self.relevant[shown] then
 		return self.relevant[shown]
+	end
+
+	local pre = globalCanon[shown]
+	if pre ~= nil then
+		self.relevant[shown] = pre
+
+		if TERMINAL_TAG[pre.tag] then
+			-- Do nothing
+		elseif pre.tag == "fn" then
+			for _, argument in ipairs(pre.arguments) do
+				assert(argument == m_scan(self, argument))
+				m_ref(self, pre, argument)
+			end
+		elseif pre.tag == "field" or pre.tag == "variant" or pre.tag == "isa" then
+			assert(pre.base == m_scan(self, pre.base))
+			m_ref(self, pre, pre.base)
+		elseif pre.tag == "forall" then
+			-- Do nothing
+		else
+			error("unhandled tag " .. pre.tag)
+		end
+
+		return pre
 	end
 
 	if TERMINAL_TAG[object.tag] then
@@ -264,6 +289,7 @@ local function m_scan(self, object)
 
 	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
 	showSkip[self.relevant[shown]] = shown
+	globalCanon[shown] = self.relevant[shown]
 	return self.relevant[shown]
 end
 
@@ -393,116 +419,26 @@ function theory:additionalClauses(model, meta)
 	return out, newMeta
 end
 
--- RETURNS a list of raw reasons when assertions x, y are equivalent due to
--- being equal functions of equal arguments
--- RETURNS false when they are not equal
-local function childrenSame(eq, x, y)
-	assert(eq)
-	assertis(x, "Assertion")
-	assertis(y, "Assertion")
-	assert(not eq:query(x, y))
+-- RETURNS false when the tag is terminal
+-- RETURNS a string identifying the structure, a list of sub-assertions
+local function recursiveStructure(e)
+	assertis(e, "Assertion")
 
-	if x.tag ~= y.tag then
-		-- Elements that are structurally different cannot be shown
-		-- to be the same here
+	if TERMINAL_TAG[e.tag] or e.tag == "forall" then
 		return false
-	elseif TERMINAL_TAG[x.tag] then
-		-- Terminal elements that aren't in the same representative group
-		-- cannot be shown to be equal here
-		return false
-	elseif x.tag == "fn" then
-		if x.signature.longName ~= y.signature.longName then
+	elseif e.tag == "field" then
+		return "field-" .. e.fieldName, {e.base}
+	elseif e.tag == "variant" then
+		return "variant-" .. e.variantName, {e.base}
+	elseif e.tag == "isa" then
+		return "isa-" .. e.variant, {e.base}
+	elseif e.tag == "fn" then
+		if #e.arguments == 0 then
 			return false
 		end
-
-		-- The same method name on the same base type must be the same
-		-- signature
-		assert(#x.arguments == #y.arguments)
-		for i in ipairs(x.arguments) do
-			if not eq:query(x.arguments[i], y.arguments[i]) then
-				return false
-			end
-		end
-
-		-- The reason these functions are equal is that their arguments are
-		-- equal: explain why their arguments are equal
-		local reasonSets = {}
-		for i in ipairs(x.arguments) do
-			for _, s in ipairs(eq:reasonEq(x.arguments[i], y.arguments[i])) do
-				table.insert(reasonSets, s)
-			end
-		end
-		return table.concatted(unpack(reasonSets))
-	elseif x.tag == "field" then
-		if x.fieldName ~= y.fieldName then
-			return false
-		end
-		if not eq:query(x.base, y.base) then
-			return false
-		end
-		return table.concatted(unpack(eq:reasonEq(x.base, y.base)))
-	elseif x.tag == "isa" then
-		if x.variant ~= y.variant then
-			return false
-		end
-		if not eq:query(x.base, y.base) then
-			return false
-		end
-		return table.concatted(unpack(eq:reasonEq(x.base, y.base)))
-	elseif x.tag == "variant" then
-		if x.variantName ~= y.variantName then
-			return false
-		end
-		if not eq:query(x.base, y.base) then
-			return false
-		end
-		return table.concatted(unpack(eq:reasonEq(x.base, y.base)))
+		return "fn-" .. e.signature.longName, e.arguments
 	end
-	error("TODO childrenSame for tag `" .. x.tag .. "`")
-end
-
--- RETURNS a set (map from Assertion to true)
-local function thoseReferencingAny(canon, list)
-	assertis(list, listType "Assertion")
-
-	local out = {}
-	for _, element in pairs(list) do
-		local references = canon.referencedBy[element]
-		if references then
-			for i = 1, #references do
-				out[references[i]] = true
-			end
-		end
-	end
-	return out
-end
-
--- RETURNS nothing
-local function union(canon, eq, bin)
-	assertis(bin, recordType {
-		left = "Assertion",
-		right = "Assertion",
-		raws = listType "Assertion",
-	})
-
-	if not eq:query(bin.left, bin.right) then
-		local thoseThatReferenceA = thoseReferencingAny(canon, eq:classOf(bin.left))
-		local thoseThatReferenceB = thoseReferencingAny(canon, eq:classOf(bin.right))
-		eq:union(bin.left, bin.right, bin.raws)
-
-		-- Union all functions of equal arguments
-		for x in pairs(thoseThatReferenceA) do
-			for y in pairs(thoseThatReferenceB) do
-				if not eq:query(x, y) then
-					local reasonsSame = childrenSame(eq, x, y)
-					if reasonsSame then
-						local reasons = table.concatted(reasonsSame, bin.raws)
-						eq:union(x, y, reasons)
-					end
-				end
-			end
-		end
-	end
+	error("unknown Assertion tag `" .. e.tag .. "`")
 end
 
 -- RETURNS a Lua constant, reason when the function can be evaluated statically
@@ -550,6 +486,8 @@ end
 function theory:isSatisfiable(modelInput)
 	assertis(modelInput, mapType("Assertion", "boolean"))
 
+	local watch = Stopwatch.new(string.format("theory(%d)", #table.keys(modelInput)), 0.1)
+
 	local unquantifiedModel = {}
 	for key, value in pairs(modelInput) do
 		if key.tag == "forall" then
@@ -567,24 +505,29 @@ function theory:isSatisfiable(modelInput)
 	local falseAssertion = canon:scan(FALSE_ASSERTION)
 
 	local simple = {}
-	for key, truth in pairs(unquantifiedModel) do
-		local object = canon:scan(key)
 
-		-- After canonicalizing, two expressions with different truth
-		-- assignments could be in the map
-		if simple[object] ~= nil and simple[object].truth ~= truth then
-			-- This model is inconsistent
-			-- TODO: be more specific
-			return false, {
-				[key] = truth,
-				[simple[object].raw] = simple[object].truth,
+	watch:clock("canon", function()
+		for key, truth in pairs(unquantifiedModel) do
+			local object = canon:scan(key)
+
+			-- After canonicalizing, two expressions with different truth
+			-- assignments could be in the map
+			if simple[object] ~= nil and simple[object].truth ~= truth then
+				-- This model is inconsistent
+				-- TODO: be more specific
+				watch:finish()
+				return false, {
+					[key] = truth,
+					[simple[object].raw] = simple[object].truth,
+				}
+			end
+			simple[object] = {
+				truth = truth,
+				raw = key,
 			}
 		end
-		simple[object] = {
-			truth = truth,
-			raw = key,
-		}
-	end
+	end)
+
 	assertis(simple, mapType("Assertion", recordType {
 		raw = "Assertion",
 		truth = "boolean",
@@ -594,40 +537,44 @@ function theory:isSatisfiable(modelInput)
 
 	-- 2) Find all positive == assertions
 	local positiveEq, negativeEq = {}, {}
-	for assertion, about in spairs(simple, showAssertion) do
-		if assertion.tag == "fn" and assertion.signature.memberName == "eq" then
-			assert(#assertion.arguments == 2)
-			local left = canon:scan(assertion.arguments[1])
-			local right = canon:scan(assertion.arguments[2])
+
+	watch:clock("separate eq", function()
+		for assertion, about in spairs(simple, showAssertion) do
+			if assertion.tag == "fn" and assertion.signature.memberName == "eq" then
+				assert(#assertion.arguments == 2)
+				local left = canon:scan(assertion.arguments[1])
+				local right = canon:scan(assertion.arguments[2])
+				if about.truth then
+					table.insert(positiveEq, {
+						left = left,
+						right = right,
+						raws = {about.raw},
+					})
+				else
+					table.insert(negativeEq, {
+						left = left,
+						right = right,
+						raws = {about.raw},
+					})
+				end
+			end
+
 			if about.truth then
 				table.insert(positiveEq, {
-					left = left,
-					right = right,
+					left = trueAssertion,
+					right = assertion,
 					raws = {about.raw},
 				})
 			else
-				table.insert(negativeEq, {
-					left = left,
-					right = right,
+				table.insert(positiveEq, {
+					left = falseAssertion,
+					right = assertion,
 					raws = {about.raw},
 				})
 			end
 		end
+	end)
 
-		if about.truth then
-			table.insert(positiveEq, {
-				left = trueAssertion,
-				right = assertion,
-				raws = {about.raw},
-			})
-		else
-			table.insert(positiveEq, {
-				left = falseAssertion,
-				right = assertion,
-				raws = {about.raw},
-			})
-		end
-	end
 	table.insert(negativeEq, {
 		left = falseAssertion,
 		right = trueAssertion,
@@ -641,60 +588,108 @@ function theory:isSatisfiable(modelInput)
 	end
 
 	-- Union find
+	local it = 0
 	while #positiveEq > 0 do
-		local nEq = #positiveEq
-		for _, bin in ipairs(positiveEq) do
-			union(canon, eq, bin)
-		end
+		it = it + 1
+
+		watch:clock("union(" .. #positiveEq .. ")", function()
+			for _, bin in ipairs(positiveEq) do
+				eq:union(bin.left, bin.right, bin.raws)
+			end
+		end)
 
 		positiveEq = {}
 
-		-- Evaluate constant functions
-		for _, expression in pairs(canon.relevant) do
-			if expression.tag == "fn" then
-				local literal, reasons = fnLiteralEvaluation(expression, eq)
-				if literal ~= nil then
-					local literalExpression = constantAssertion(literal)
-					eq:tryinit(literalExpression)
-					canon:scan(literalExpression)
-
-					for _, reason in ipairs(reasons) do
-						assert(modelInput[reason] ~= nil)
+		watch:clock("function unioning", function()
+			local byStructure = {}
+			for _, expression in pairs(canon.relevant) do
+				local id, subs = recursiveStructure(expression)
+				if id then
+					assert(#subs >= 1)
+					-- A recursive expression
+					local keyStrings = {id}
+					for _, sub in ipairs(subs) do
+						table.insert(keyStrings, tostring(eq:classOf(sub)))
 					end
 
-					if not eq:query(literalExpression, expression) then
-						table.insert(positiveEq, {
-							left = expression,
-							right = literalExpression,
-							raws = reasons,
-						})
+					local key = table.concat(keyStrings, ", ")
+					local other = byStructure[key]
+					if other then
+						if not eq:query(expression, other) then
+							-- Functions of equal arguments are equal
+							local _, otherSubs = recursiveStructure(other)
+							assert(#otherSubs == #subs)
+							local reasons = {}
+							for i in ipairs(subs) do
+								for _, set in ipairs(eq:reasonEq(subs[i], otherSubs[i])) do
+									for _, reason in ipairs(set) do
+										table.insert(reasons, reason)
+									end
+								end
+							end
+							table.insert(positiveEq, {
+								left = other,
+								right = expression,
+								raws = reasons,
+							})
+						end
+					else
+						byStructure[key] = expression
 					end
 				end
 			end
-		end
+		end)
+
+		-- Evaluate constant functions
+		watch:clock("constant eval", function()
+			for _, expression in pairs(canon.relevant) do
+				if expression.tag == "fn" then
+					local literal, reasons = fnLiteralEvaluation(expression, eq)
+					if literal ~= nil then
+						local literalExpression = constantAssertion(literal)
+						literalExpression = canon:scan(literalExpression)
+						eq:tryinit(literalExpression)
+
+						for _, reason in ipairs(reasons) do
+							assert(modelInput[reason] ~= nil)
+						end
+
+						if not eq:query(literalExpression, expression) then
+							table.insert(positiveEq, {
+								left = expression,
+								right = literalExpression,
+								raws = reasons,
+							})
+						end
+					end
+				end
+			end
+		end)
 	end
 
 	-- 4) Use each negative == assertion to separate groups
 	local rejects = {}
-	for _, bin in ipairs(negativeEq) do
-		local a, b = bin.left, bin.right
+	watch:clock("!=", function()
+		for _, bin in ipairs(negativeEq) do
+			local a, b = bin.left, bin.right
 
-		if eq:query(a, b) then
-			-- This model is inconsistent; explain the contradiction
-			local limited = {}
-			for _, a in ipairs(bin.raws) do
-				table.insert(limited, a)
-			end
-			for _, s in ipairs(eq:reasonEq(a, b)) do
-				for _, a in ipairs(s) do
+			if eq:query(a, b) then
+				-- This model is inconsistent; explain the contradiction
+				local limited = {}
+				for _, a in ipairs(bin.raws) do
 					table.insert(limited, a)
 				end
-			end
+				for _, s in ipairs(eq:reasonEq(a, b)) do
+					for _, a in ipairs(s) do
+						table.insert(limited, a)
+					end
+				end
 
-			assert(1 <= #limited)
-			table.insert(rejects, limited)
+				assert(1 <= #limited)
+				table.insert(rejects, limited)
+			end
 		end
-	end
+	end)
 
 	-- 5) Check that constants don't disagree
 	for _, expression in pairs(canon.relevant) do
@@ -718,9 +713,11 @@ function theory:isSatisfiable(modelInput)
 			restricted[key] = modelInput[key]
 		end
 
+		watch:finish()
 		return false, restricted
 	end
 
+	watch:finish()
 	return true
 end
 

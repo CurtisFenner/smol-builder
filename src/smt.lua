@@ -2,6 +2,7 @@
 
 local profile = import "profile.lua"
 local ansi = import "ansi.lua"
+local Stopwatch = import "stopwatch.lua"
 
 REGISTER_TYPE("Theory", recordType {
 	-- argument: (self, simpleModel)
@@ -160,6 +161,10 @@ function CNF:freeTermSet()
 		end
 	end
 	return out
+end
+
+function CNF:size()
+	return #self:freeTermSet() + #table.keys(self._assignment)
 end
 
 -- RETURNS nothing
@@ -681,7 +686,11 @@ end
 -- MODIFIES cnf to strengthen its clauses
 local function cnfSAT(theory, cnf, meta)
 	local stack = {}
+	local watch = Stopwatch.new(string.format("cnfSAT(%d)", cnf:size()))
+
 	while true do
+		watch:tick()
+
 		if false then
 			-- Debug printing
 			local assignment = cnf:getAssignment()
@@ -695,9 +704,9 @@ local function cnfSAT(theory, cnf, meta)
 				if assignment[keys[i]] == nil then
 					description[i] = "."
 				elseif assignment[keys[i]] then
-					description[i] = "#"
+					description[i] = "1"
 				else
-					description[i] = "@"
+					description[i] = "0"
 				end
 			end
 			print(table.concat(description))
@@ -705,10 +714,15 @@ local function cnfSAT(theory, cnf, meta)
 
 		if cnf:isTautology() then
 			local currentAssignment = cnf:getAssignment()
-			local out, conflicting = theory:isSatisfiable(currentAssignment)
+			local out, conflicting = watch:clock("issat", function()
+				return theory:isSatisfiable(currentAssignment)
+			end)
 			if not out then
 				assert(conflicting)
-				assert(not theory:isSatisfiable(conflicting))
+
+				watch:clock("issat conflicting", function()
+					assert(not theory:isSatisfiable(conflicting))
+				end)
 
 				-- While this truth model satisfies the CNF, the satisfaction
 				-- doesn't work in the theory
@@ -718,23 +732,28 @@ local function cnfSAT(theory, cnf, meta)
 				end)
 
 				-- Ask the theory for a minimal explanation why this didn't work
-				local coreClauses = unsatisfiableCoreClause(
-					theory,
-					conflicting,
-					keys
-				)
+				local coreClauses = watch:clock("core", function()
+					return unsatisfiableCoreClause(
+						theory,
+						conflicting,
+						keys
+					)
+				end)
 				for _, coreClause in ipairs(coreClauses) do
 					cnf:addClause(coreClause)
 				end
 			else
 				-- Expand quantified statements using the theory
-				local additional, newMeta = theory:additionalClauses(
-					currentAssignment,
-					meta
-				)
+				local additional, newMeta = watch:clock("additional", function()
+					return theory:additionalClauses(
+						currentAssignment,
+						meta
+					)
+				end)
 
 				if next(additional) == nil then
 					-- There are no quantifiers to expand; we are done!
+					watch:finish()
 					return currentAssignment
 				end
 
@@ -754,11 +773,14 @@ local function cnfSAT(theory, cnf, meta)
 
 				-- Recursively solve the new SAT problem
 				local newCNF = CNF.new(theory, newClauses, currentAssignment)
-				local sat = cnfSAT(theory, newCNF, newMeta)
+				local sat = watch:clock("subsat", function()
+					return cnfSAT(theory, newCNF, newMeta)
+				end)
 				if sat then
 					-- Even after expanding quantifiers, the formula remained
 					-- satisfiable
-					return sat
+					watch:finish()
+					return currentAssignment
 				end
 
 				-- Reject the current assignment in its entirety
@@ -772,12 +794,14 @@ local function cnfSAT(theory, cnf, meta)
 				-- (cnf cannot mention new terms that may have been
 				-- introduced by instantiation)
 				local core = newCNF:learnedClauses()
-				local coreClauses = quantifierCore(
-					theory,
-					currentAssignment,
-					expansionClauses,
-					core
-				)
+				local coreClauses = watch:clock("quantifiercore", function()
+					return quantifierCore(
+						theory,
+						currentAssignment,
+						expansionClauses,
+						core
+					)
+				end)
 				for _, coreClause in ipairs(coreClauses) do
 					cnf:addClause(coreClause)
 				end
@@ -788,6 +812,7 @@ local function cnfSAT(theory, cnf, meta)
 			while true do
 				if #stack == 0 then
 					-- There are no choices to undo
+					watch:finish()
 					return false
 				end
 

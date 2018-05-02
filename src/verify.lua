@@ -56,20 +56,6 @@ REGISTER_TYPE("Action", choiceType(
 	}
 ))
 
-REGISTER_TYPE("FieldAssertion", recordType {
-	tag = constantType "field",
-	base = "Assertion",
-	fieldName = "string",
-	definition = "VariableIR",
-})
-
-REGISTER_TYPE("FnAssertion", recordType {
-	tag = constantType "fn",
-	arguments = listType "Assertion",
-	signature = "Signature",
-	index = "integer",
-})
-
 REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "int",
@@ -90,11 +76,21 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "unit",
 	},
-	"FieldAssertion",
-	"FnAssertion",
 	recordType {
 		tag = constantType "variable",
 		variable = "VariableIR",
+	},
+	recordType {
+		tag = constantType "fn",
+		arguments = listType "Assertion",
+		signature = "Signature",
+		index = "integer",
+	},
+	recordType {
+		tag = constantType "field",
+		base = "Assertion",
+		fieldName = "string",
+		definition = "VariableIR",
 	},
 	recordType {
 		tag = constantType "isa",
@@ -138,7 +134,6 @@ local function andAssertion(a, b)
 		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "and"),
 		index = 1,
 	}
-	assertis(p, "FnAssertion")
 	return p
 end
 
@@ -158,7 +153,6 @@ local function impliesAssertion(a, b)
 		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "implies"),
 		index = 1,
 	}
-	assertis(p, "FnAssertion")
 	return p
 end
 
@@ -572,10 +566,10 @@ local function mustModel(scope, target)
 
 	if not tautology then
 		local explanation = {}
-		for assertion, truth in pairs(counter) do
-			local shown = assertionExprString(assertion) .. "\n\t\t" .. verifyTheory:canonKey(assertion)
-			table.insert(explanation, {expression = shown, truth = truth})
-		end
+		-- for assertion, truth in pairs(counter) do
+		-- 	local shown = assertionExprString(assertion) .. "\n\t\t" .. verifyTheory:canonKey(assertion)
+		-- 	table.insert(explanation, {expression = shown, truth = truth})
+		-- end
 		return false, explanation
 	end
 
