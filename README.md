@@ -31,9 +31,9 @@ package test;
 // You must explicitly import types defined in other files.
 import core;
 
-// This class called `Main` defines a static function called `main`,
+// This class called `HelloWorld` defines a static function called `main`,
 // which is the entry point of this hello world program.
-class Main {
+class HelloWorld {
 	static main!() Unit {
 		// Invoke a static action on the core:Out type.
 		// The `!` indicates that the function is not pure.
