@@ -608,6 +608,7 @@ function theory:isSatisfiable(modelInput)
 		end
 	end
 
+	-- Distinct symbols are not equal
 	for i = 1, #symbols do
 		for j = 1, i - 1 do
 			table.insert(negativeEq, {
