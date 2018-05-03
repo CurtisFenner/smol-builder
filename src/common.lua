@@ -146,6 +146,13 @@ local NEVER_TYPE = freeze {
 	location = {begins = "???", ends = "???"},
 }
 
+-- TODO: This is not a real type!
+local SYMBOL_TYPE = freeze {
+	tag = "keyword-type+",
+	name = "_Symbol",
+	location = {begins = "???", ends = "???"},
+}
+
 --------------------------------------------------------------------------------
 
 local OPERATOR_ALIAS = {
@@ -535,12 +542,6 @@ local function assertionExprString(a, grouped)
 			return "(" .. result .. ")"
 		end
 		return result
-	elseif a.tag == "isa" then
-		local inner = assertionExprString(a.base, true) .. " is " .. a.variant
-		if grouped then
-			return "(" .. inner .. ")"
-		end
-		return inner
 	elseif a.tag == "variant" then
 		local base = assertionExprString(a.base)
 		return base .. "." .. a.variantName
@@ -553,38 +554,6 @@ local function assertionExprString(a, grouped)
 	end
 
 	error("unhandled `" .. a.tag .. "`")
-end
-
---------------------------------------------------------------------------------
-
--- RETURNS a Signature for t.eq(t)
-local function makeEqSignature(t)
-	assertis(t, "Type+")
-
-	if t.name == "Boolean" then
-		return table.findwith(BOOLEAN_DEF.signatures, "memberName", "eq")
-	end
-
-	local unknown = freeze {begins = "???", ends = "???"}
-
-	local eqSignature = freeze {
-		memberName = "eq",
-		longName = showType(t) .. ":eq",
-
-		parameters = {dummy("left", t), dummy("right", t)},
-		returnTypes = {BOOLEAN_TYPE},
-		modifier = "method",
-		bang = false,
-		foreign = true,
-		ensuresAST = {},
-		requiresAST = {},
-		logic = false,
-		eval = false,
-	}
-
-	assertis(eqSignature, "Signature")
-
-	return eqSignature
 end
 
 --------------------------------------------------------------------------------
@@ -615,6 +584,12 @@ local function typeOfAssertion(assertion)
 		return assertion.definition.type
 	elseif assertion.tag == "forall" then
 		return BOOLEAN_TYPE
+	elseif assertion.tag == "symbol" then
+		return SYMBOL_TYPE
+	elseif assertion.tag == "gettag" then
+		return SYMBOL_TYPE
+	elseif assertion.tag == "eq" then
+		return BOOLEAN_TYPE
 	end
 
 	error("unhandled tag " .. assertion.tag)
@@ -636,7 +611,6 @@ return freeze {
 	areInterfaceTypesEqual = areInterfaceTypesEqual,
 	assertionExprString = assertionExprString,
 	showType = showType,
-	makeEqSignature = makeEqSignature,
 
 	typeOfAssertion = typeOfAssertion,
 

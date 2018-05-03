@@ -326,6 +326,8 @@ function CNF:isDecided()
 	return false
 end
 
+-- RETURNS nothing
+-- MODIFIES this
 function CNF:addClause(rawClause)
 	self:validate()
 	assert(1 <= #rawClause)
@@ -452,7 +454,32 @@ function toCNF(theory, bigTerm, target, normalization)
 		return {unitClause}
 	end
 
-	return toCNFFromBreakup(theory, terms, assignments, normalization)
+	local out = toCNFFromBreakup(theory, terms, assignments, normalization)
+
+	-- Filter tautological clauses out
+	local filteredCNF = {}
+	for _, clause in ipairs(out) do
+		local truths = {}
+		local filteredClause = {}
+		local isTautology = false
+		for _, p in ipairs(clause) do
+			local key = theory:canonKey(p[1])
+			if truths[key] == nil then
+				truths[key] = p[2]
+				table.insert(filteredClause, p)
+			elseif truths[key] ~= p[2] then
+				-- x | ~x is a tautology
+				isTautology = true
+				break
+			end
+		end
+		if not isTautology then
+			assert(1 <= #filteredClause)
+			table.insert(filteredCNF, filteredClause)
+		end
+	end
+
+	return filteredCNF
 end
 
 --------------------------------------------------------------------------------
@@ -677,6 +704,83 @@ local function quantifierCore(theory, assignment, map, cnf)
 		-- TODO: combine partial matches into looser cores
 	end
 
+	if #output == 0 then
+		local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		local index = {1}
+
+		local _name = {}
+		local _uses = {}
+		local function name(e)
+			local s = theory:canonKey(e)
+			if not _name[s] then
+				local out = {}
+				for i = 1, #index do
+					out[i] = alphabet:sub(index[i], index[i])
+				end
+				_name[s] = table.concat(out)
+				_uses[_name[s]] = {}
+				if assignment[e] ~= nil then
+					table.insert(_uses[_name[s]], tostring(assignment[e]))
+				end
+
+				-- Increment
+				for i = 1, #index + 1 do
+					if i > #index then
+						index[i] = 1
+					else
+						index[i] = index[i] + 1
+						if index[i] > #alphabet then
+							index[i] = 1
+						else
+							break
+						end
+					end
+				end
+			end
+			return _name[s]
+		end
+
+		print()
+		print()
+		print(string.rep("=", 80))
+		print("Could not un-instantiate quantified core:")
+		local i = 0
+		for quantifier, cnf in pairs(map) do
+			i = i + 1
+			print("", theory:canonKey(quantifier))
+			for j, clause in ipairs(cnf) do
+				local s = {}
+				for _, p in ipairs(clause) do
+					local n = name(p[1])
+					table.insert(s, n)
+					table.insert(_uses[n], "q" .. i .. ":" .. j .. "/" .. #clause)
+					if not p[2] then
+						s[#s] = "~" .. s[#s]
+					end
+				end
+				print("", "&", table.concat(s, " | "))
+			end
+			print()
+		end
+		print(string.rep("-", 80))
+
+		print("Instantiated core:")
+		for _, clause in ipairs(cnf) do
+			local s = {}
+			for _, p in ipairs(clause) do
+				local n = name(p[1])
+				table.insert(s, n)
+				if not p[2] then
+					s[#s] = "~" .. s[#s]
+				end
+				if #_uses[n] ~= 0 then
+					s[#s] = s[#s] .. "(" .. table.concat(_uses[n], ", ") .. ")"
+				end
+			end
+			print("&", table.concat(s, " | "))
+		end
+	end
+
 	return output
 end
 
@@ -794,16 +898,21 @@ local function cnfSAT(theory, cnf, meta)
 				-- (cnf cannot mention new terms that may have been
 				-- introduced by instantiation)
 				local core = newCNF:learnedClauses()
-				local coreClauses = watch:clock("quantifiercore", function()
-					return quantifierCore(
-						theory,
-						currentAssignment,
-						expansionClauses,
-						core
-					)
-				end)
-				for _, coreClause in ipairs(coreClauses) do
-					cnf:addClause(coreClause)
+				if #core == 0 then
+					-- The CNF itself was unsat
+					-- TODO: improve this using CDCL
+				else
+					local coreClauses = watch:clock("quantifiercore", function()
+						return quantifierCore(
+							theory,
+							currentAssignment,
+							expansionClauses,
+							core
+						)
+					end)
+					for _, coreClause in ipairs(coreClauses) do
+						cnf:addClause(coreClause)
+					end
 				end
 			end
 		elseif cnf:isContradiction() then

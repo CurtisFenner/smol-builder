@@ -13,7 +13,6 @@ local showType = common.showType
 
 local BUILTIN_DEFINITIONS = common.BUILTIN_DEFINITIONS
 local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
-local makeEqSignature = common.makeEqSignature
 
 local areTypesEqual = common.areTypesEqual
 
@@ -40,17 +39,16 @@ local function notAssertion(a)
 end
 notAssertion = memoized(1, notAssertion)
 
--- RETURNS a FnAssertion representing a == b
+-- RETURNS an EqAssertion representing a == b
 local function eqAssertion(a, b, t)
 	assertis(a, "Assertion")
 	assertis(b, "Assertion")
 	assertis(t, "Type+")
 
 	local p = freeze {
-		tag = "fn",
-		arguments = {a, b},
-		signature = makeEqSignature(t),
-		index = 1,
+		tag = "eq",
+		left = a,
+		right = b,
 	}
 	return p
 end
@@ -147,12 +145,16 @@ local function showAssertion(assertion)
 		return "(boolean " .. tostring(assertion.value) .. ")"
 	elseif assertion.tag == "field" then
 		return "(field " .. showAssertion(assertion.base) .. " " .. assertion.fieldName .. ")"
-	elseif assertion.tag == "isa" then
-		return "(isa " .. assertion.variant .. " " .. showAssertion(assertion.base) .. ")"
+	elseif assertion.tag == "eq" then
+		return "(" .. showAssertion(assertion.left) .. " == " .. showAssertion(assertion.right) .. ")"
+	elseif assertion.tag == "gettag" then
+		return "(gettag " .. showAssertion(assertion.base) .. ")"
 	elseif assertion.tag == "string" then
 		return "(string " .. string.format("%q", assertion.value) .. ")"
 	elseif assertion.tag == "variant" then
 		return "(variant " .. string.format("%q", assertion.variantName) .. " " .. showAssertion(assertion.base) .. ")"
+	elseif assertion.tag == "symbol" then
+		return "(symbol " .. assertion.symbol .. ")"
 	elseif assertion.tag == "forall" then
 		local loc = assertion.location.begins
 		if type(loc) ~= "string" then
@@ -175,6 +177,7 @@ local TERMINAL_TAG = {
 	["int"] = true,
 	["boolean"] = true,
 	["string"] = true,
+	["symbol"] = true,
 }
 
 -- RETURNS a Lua value for types representable as literals that is suitable,
@@ -199,7 +202,7 @@ local function m_ref(self, object, child)
 	local sChild = showAssertion(child)
 	local sObject = showAssertion(object)
 	assert(sChild ~= sObject)
-	assert(self.relevant[sChild], "child already in map")
+	assert(self.relevant[sChild], "child must already be in map")
 
 	self.referencedBy[child] = self.referencedBy[child] or {}
 	table.insert(self.referencedBy[child], self.relevant[sObject])
@@ -228,11 +231,16 @@ local function m_scan(self, object)
 				assert(argument == m_scan(self, argument))
 				m_ref(self, pre, argument)
 			end
-		elseif pre.tag == "field" or pre.tag == "variant" or pre.tag == "isa" then
+		elseif pre.tag == "field" or pre.tag == "variant" or pre.tag == "gettag" then
 			assert(pre.base == m_scan(self, pre.base))
 			m_ref(self, pre, pre.base)
 		elseif pre.tag == "forall" then
 			-- Do nothing
+		elseif pre.tag == "eq" then
+			assert(pre.left == m_scan(self, pre.left))
+			assert(pre.right == m_scan(self, pre.right))
+			m_ref(self, pre, pre.left)
+			m_ref(self, pre, pre.right)
 		else
 			error("unhandled tag " .. pre.tag)
 		end
@@ -274,17 +282,25 @@ local function m_scan(self, object)
 		}
 		self.relevant[shown] = canon
 		m_ref(self, canon, canon.base)
-	elseif object.tag == "isa" then
+	elseif object.tag == "gettag" then
 		local canon = freeze {
-			tag = "isa",
+			tag = "gettag",
 			base = self:scan(object.base),
-			variant = object.variant,
 		}
 		self.relevant[shown] = canon
 		m_ref(self, canon, canon.base)
 	elseif object.tag == "forall" then
 		-- Comparing by object identity is OK
 		self.relevant[shown] = object
+	elseif object.tag == "eq" then
+		local canon = freeze {
+			tag = "eq",
+			left = self:scan(object.left),
+			right = self:scan(object.right),
+		}
+		self.relevant[shown] = canon
+		m_ref(self, canon, canon.left)
+		m_ref(self, canon, canon.right)
 	end
 
 	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
@@ -430,13 +446,15 @@ local function recursiveStructure(e)
 		return "field-" .. e.fieldName, {e.base}
 	elseif e.tag == "variant" then
 		return "variant-" .. e.variantName, {e.base}
-	elseif e.tag == "isa" then
-		return "isa-" .. e.variant, {e.base}
+	elseif e.tag == "gettag" then
+		return "gettag", {e.base}
 	elseif e.tag == "fn" then
 		if #e.arguments == 0 then
 			return false
 		end
 		return "fn-" .. e.signature.longName, e.arguments
+	elseif e.tag == "eq" then
+		return "eq", {e.left, e.right}
 	end
 	error("unknown Assertion tag `" .. e.tag .. "`")
 end
@@ -540,10 +558,9 @@ function theory:isSatisfiable(modelInput)
 
 	watch:clock("separate eq", function()
 		for assertion, about in spairs(simple, showAssertion) do
-			if assertion.tag == "fn" and assertion.signature.memberName == "eq" then
-				assert(#assertion.arguments == 2)
-				local left = canon:scan(assertion.arguments[1])
-				local right = canon:scan(assertion.arguments[2])
+			if assertion.tag == "eq" then
+				local left = canon:scan(assertion.left)
+				local right = canon:scan(assertion.right)
 				if about.truth then
 					table.insert(positiveEq, {
 						left = left,
@@ -721,6 +738,11 @@ function theory:isSatisfiable(modelInput)
 	return true
 end
 
+local IFF = {
+	[true] = {{true, true}, {false, false}},
+	[false] = {{true, false}, {false, true}},
+}
+
 function theory:breakup(assertion, target)
 	assertis(assertion, "Assertion")
 
@@ -744,6 +766,11 @@ function theory:breakup(assertion, target)
 		end
 
 		return freeze(values), logic[target]
+	elseif assertion.tag == "eq" then
+		if areTypesEqual(BOOLEAN_TYPE, typeOfAssertion(assertion.left)) then
+			-- if and only if
+			return freeze {assertion.left, assertion.right}, IFF[target]
+		end
 	end
 
 	return false

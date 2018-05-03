@@ -93,9 +93,17 @@ REGISTER_TYPE("Assertion", choiceType(
 		definition = "VariableIR",
 	},
 	recordType {
-		tag = constantType "isa",
-		variant = "string",
+		tag = constantType "eq",
+		left = "Assertion",
+		right = "Assertion",
+	},
+	recordType {
+		tag = constantType "gettag",
 		base = "Assertion",
+	},
+	recordType {
+		tag = constantType "symbol",
+		symbol = "string",
 	},
 	recordType {
 		tag = constantType "variant",
@@ -169,21 +177,27 @@ local function assertionReplaced(expression, map)
 		return expression
 	end
 
-	if tag == "unit" or tag == "this" then
+	if tag == "unit" or tag == "this" or tag == "symbol" then
 		return expression
 	elseif tag == "forall" then
 		return expression
 	elseif tag == "boolean" or tag == "int" or tag == "string" then
 		return expression
-	elseif tag == "field" or tag == "isa" or tag == "variant" then
+	elseif tag == "field" or tag == "gettag" or tag == "variant" then
 		local subBase = assertionReplaced(expression.base, map)
 		if subBase == expression.base then
 			return expression
 		end
-		return table.with(expression, "base", subBase)
+		return freeze(table.with(expression, "base", subBase))
+	elseif tag == "eq" then
+		return freeze {
+			tag = "eq",
+			left = assertionReplaced(expression.left, map),
+			right = assertionReplaced(expression.right, map),
+		}
 	end
 
-	assert(tag == "fn")
+	assert(tag == "fn", tag)
 
 	local anyDifferent = false
 	local newArguments = {}
@@ -412,6 +426,18 @@ local function addMerge(scope, branches)
 	table.insert(scope, action)
 end
 
+-- RETURNS a Symbol Assertion
+local function variantSymbol(type, variant)
+	assertis(type, "Type+")
+	assertis(variant, "string")
+
+	-- TODO: be more specific and include type
+	return freeze {
+		tag = "symbol",
+		symbol = variant,
+	}
+end
+
 -- RETURNS an Assertion
 -- MODIFIES scope
 local snapshotID = 0
@@ -607,6 +633,15 @@ local function resultAssertion(statement, index)
 		table.insert(arguments, variableAssertion(statement.baseInstance))
 		for _, argument in ipairs(statement.arguments) do
 			table.insert(arguments, variableAssertion(argument))
+		end
+
+		if statement.signature.memberName == "eq" then
+			assert(#arguments == 2)
+			return freeze {
+				tag = "eq",
+				left = arguments[1],
+				right = arguments[2],
+			}
 		end
 
 		return freeze {
@@ -860,9 +895,12 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "new-union" then
 		-- Record the tag
 		addPredicate(scope, freeze {
-			tag = "isa",
-			variant = statement.field,
-			base = variableAssertion(statement.destination),
+			tag = "eq",
+			left = {
+				tag = "gettag",
+				base = variableAssertion(statement.destination),
+			},
+			right = variantSymbol(statement.destination.type, statement.field),
 		})
 
 		-- Record the variant contents
@@ -890,9 +928,12 @@ local function verifyStatement(statement, scope, semantics)
 			local subscope = scopeCopy(scope)
 
 			local condition = freeze {
-				tag = "isa",
-				base = variableAssertion(statement.base),
-				variant = case.variant,
+				tag = "eq",
+				left = {
+					tag = "gettag",
+					base = variableAssertion(statement.base),
+				},
+				right = variantSymbol(statement.base.type, case.variant),
 			}
 
 			-- Remember whether or not the condition was true when we started
@@ -991,9 +1032,12 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "isa" then
 		assertis(statement, "IsASt")
 		assignRaw(scope, statement.destination, freeze {
-			tag = "isa",
-			base = variableAssertion(statement.base),
-			variant = statement.variant,
+			tag = "eq",
+			left = {
+				tag = "gettag",
+				base = variableAssertion(statement.base),
+			},
+			right = variantSymbol(statement.base.type, statement.variant),
 		})
 		return
 	elseif statement.tag == "proof" then
