@@ -600,8 +600,22 @@ function theory:isSatisfiable(modelInput)
 
 	-- 3) Use each positive == assertion to join representatives
 	local eq = UnionFind.new()
+	local symbols = {}
 	for _, expression in pairs(canon.relevant) do
 		eq:init(expression)
+		if expression.tag == "symbol" then
+			table.insert(symbols, expression)
+		end
+	end
+
+	for i = 1, #symbols do
+		for j = 1, i - 1 do
+			table.insert(negativeEq, {
+				left = symbols[i],
+				right = symbols[j],
+				raws = {},
+			})
+		end
 	end
 
 	-- Union find

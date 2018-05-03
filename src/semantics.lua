@@ -900,25 +900,6 @@ local function closedUnionAssumption(union, var)
 		returns = "no",
 	})
 
-	-- Generate at-most-one
-	for i, va in ipairs(ises) do
-		for j, vb in ipairs(ises) do
-			if i < j then
-				local computeBoth, both = irMethod(var.location, AND_SIGNATURE, va, {vb})
-				table.insert(seq, computeBoth)
-
-				local bothNotSt, bothNot = irMethod(var.location, NOT_SIGNATURE, both, {})
-				table.insert(seq, bothNotSt)
-				table.insert(seq, {
-					tag = "assume",
-					variable = bothNot,
-					location = var.location,
-					returns = "no",
-				})
-			end
-		end
-	end
-
 	return buildBlock(seq)
 end
 
