@@ -87,7 +87,7 @@ function profile.clocked(f, s)
 		profile.open(s)
 		local out = {f(...)}
 		profile.close(s)
-		return unpack(out)
+		return table.unpack(out)
 	end
 end
 

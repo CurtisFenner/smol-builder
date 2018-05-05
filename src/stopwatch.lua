@@ -9,21 +9,40 @@ function Stopwatch.new(title, limit)
 		_clocks = {},
 		_began = os.clock(),
 		_limit = limit or 0,
+		_beforeTime = false,
+		_beforeName = false,
 	}
 	return setmetatable(instance, {__index = Stopwatch})
 end
 
-function Stopwatch:clock(name, f)
+function Stopwatch:before(name)
+	assert(not self._beforeTime, "missing :after() call")
+	self._beforeName = name
+	self._beforeTime = os.clock()
+
 	self._clocks[name] = self._clocks[name] or {
 		time = 0,
 		count = 0,
 	}
-	local before = os.clock()
-	local r = {f()}
-	local elapsed = os.clock() - before
+end
+
+function Stopwatch:after(name)
+	assert(self._beforeTime, "missing :before() call")
+	assert(self._beforeName == name, "names must match")
+
+	local elapsed = os.clock() - self._beforeTime
 	self._clocks[name].time = self._clocks[name].time + elapsed
 	self._clocks[name].count = self._clocks[name].count + 1
-	return unpack(r)
+
+	self._beforeName = false
+	self._beforeTime = false
+end
+
+function Stopwatch:clock(name, f)
+	self:before(name)
+	local r = {f()}
+	self:after(name)
+	return table.unpack(r)
 end
 
 function Stopwatch:tick()

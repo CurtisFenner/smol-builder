@@ -116,8 +116,8 @@ function ipairs(list)
 	return ipairsIterator, list, 0
 end
 
-local realUnpack = unpack
-function unpack(object)
+local realUnpack = table.unpack or _G.unpack
+function table.unpack(object)
 	if type(object) == "userdata" then
 		local asList = {}
 		for i = 1, #object do
@@ -217,13 +217,13 @@ function memoized(count, f)
 		local key = arguments[count]
 		local saved = c[key]
 		if saved then
-			return unpack(saved)
+			return table.unpack(saved)
 		end
 
 		-- Add to the cache
 		saved = {f(...)}
 		c[key] = saved
-		return unpack(saved)
+		return table.unpack(saved)
 	end
 
 	IMMUTABLE_OBJECTS[memoizedF] = true

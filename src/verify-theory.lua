@@ -495,7 +495,7 @@ local function fnLiteralEvaluation(expression, eq)
 	end
 
 	-- All the arguments were successfully evaluated
-	return expression.signature.eval(unpack(argumentLiterals)), reasons
+	return expression.signature.eval(table.unpack(argumentLiterals)), reasons
 end
 
 -- RETURNS whether or not the given model is satisfiable in a quantifier free
@@ -730,7 +730,8 @@ function theory:isSatisfiable(modelInput)
 			for _, equivalent in ipairs(eq:classOf(expression)) do
 				local otherLiteral = isLiteralAssertion(equivalent)
 				if otherLiteral ~= nil and otherLiteral ~= literal then
-					table.insert(rejects, table.concatted(unpack(eq:reasonEq(expression, equivalent))))
+					local reject = table.concatted(table.unpack(eq:reasonEq(expression, equivalent)))
+					table.insert(rejects, reject)
 				end
 			end
 		end

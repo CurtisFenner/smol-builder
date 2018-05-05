@@ -191,7 +191,7 @@ function CNF:validate()
 end
 
 -- Finds an unassigned term and returns a preferred truth value for it
--- RETURNS term, boolean
+-- RETURNS term, boolean prefer, boolean forced
 function CNF:pickUnassigned()
 	self:validate()
 
@@ -202,10 +202,27 @@ function CNF:pickUnassigned()
 			local key = next(clause.free)
 			local tuple = clause.free[key]
 			assert(key == tuple[1])
-			return tuple[1], tuple[2]
+			return tuple[1], tuple[2], i == 1
 		end
 	end
 	error "All terms are assigned"
+end
+
+-- RETURNS a map of assignments made
+-- MODIFIES this
+function CNF:forceAssignments()
+	self:validate()
+
+	local map = {}
+	while not self:isDecided() do
+		local term, truth, force = self:pickUnassigned()
+		if not force then
+			return map
+		end
+		map[term] = truth
+		self:assign(term, truth)
+	end
+	return map
 end
 
 -- REQUIRES term is an unassigned term for this CNF
@@ -484,8 +501,10 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS a (locally weakest) version of the assignment that is unsatisfiable
+-- Finds (locally weakest) version of the assignment that is unsatisfiable
 -- according to the theory as a CNF
+-- RETURNS a CNF that is a tautology which represents a weak explanation of
+-- "why" the given assignment is a contradiction
 local function unsatisfiableCoreClause(theory, assignment, order)
 	assertis(theory, "Theory")
 	assertis(assignment, mapType(theory.assertion_t, "boolean"))
@@ -554,6 +573,8 @@ end
 -- assignment: must assign a truth value to each quantifier in `map`
 -- map: maps each quantifier to a CNF that it implies
 -- RETURNS a CNF
+-- The returned formula is a tautology
+-- REQUIRES the learned clauses of `cnf` are tautologies
 local function quantifierCore(theory, assignment, map, cnf)
 	assertis(theory, "Theory")
 	local rawCNF = listType(listType(tupleType(theory.assertion_t, "boolean")))
@@ -704,83 +725,6 @@ local function quantifierCore(theory, assignment, map, cnf)
 		-- TODO: combine partial matches into looser cores
 	end
 
-	if #output == 0 then
-		local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		local index = {1}
-
-		local _name = {}
-		local _uses = {}
-		local function name(e)
-			local s = theory:canonKey(e)
-			if not _name[s] then
-				local out = {}
-				for i = 1, #index do
-					out[i] = alphabet:sub(index[i], index[i])
-				end
-				_name[s] = table.concat(out)
-				_uses[_name[s]] = {}
-				if assignment[e] ~= nil then
-					table.insert(_uses[_name[s]], tostring(assignment[e]))
-				end
-
-				-- Increment
-				for i = 1, #index + 1 do
-					if i > #index then
-						index[i] = 1
-					else
-						index[i] = index[i] + 1
-						if index[i] > #alphabet then
-							index[i] = 1
-						else
-							break
-						end
-					end
-				end
-			end
-			return _name[s]
-		end
-
-		print()
-		print()
-		print(string.rep("=", 80))
-		print("Could not un-instantiate quantified core:")
-		local i = 0
-		for quantifier, cnf in pairs(map) do
-			i = i + 1
-			print("", theory:canonKey(quantifier))
-			for j, clause in ipairs(cnf) do
-				local s = {}
-				for _, p in ipairs(clause) do
-					local n = name(p[1])
-					table.insert(s, n)
-					table.insert(_uses[n], "q" .. i .. ":" .. j .. "/" .. #clause)
-					if not p[2] then
-						s[#s] = "~" .. s[#s]
-					end
-				end
-				print("", "&", table.concat(s, " | "))
-			end
-			print()
-		end
-		print(string.rep("-", 80))
-
-		print("Instantiated core:")
-		for _, clause in ipairs(cnf) do
-			local s = {}
-			for _, p in ipairs(clause) do
-				local n = name(p[1])
-				table.insert(s, n)
-				if not p[2] then
-					s[#s] = "~" .. s[#s]
-				end
-				if #_uses[n] ~= 0 then
-					s[#s] = s[#s] .. "(" .. table.concat(_uses[n], ", ") .. ")"
-				end
-			end
-			print("&", table.concat(s, " | "))
-		end
-	end
-
 	return output
 end
 
@@ -818,9 +762,9 @@ local function cnfSAT(theory, cnf, meta)
 
 		if cnf:isTautology() then
 			local currentAssignment = cnf:getAssignment()
-			local out, conflicting = watch:clock("issat", function()
-				return theory:isSatisfiable(currentAssignment)
-			end)
+			watch:before "theory:isSatisfiable"
+			local out, conflicting = theory:isSatisfiable(currentAssignment)
+			watch:after "theory:isSatisfiable"
 			if not out then
 				assert(conflicting)
 
@@ -836,24 +780,24 @@ local function cnfSAT(theory, cnf, meta)
 				end)
 
 				-- Ask the theory for a minimal explanation why this didn't work
-				local coreClauses = watch:clock("core", function()
-					return unsatisfiableCoreClause(
-						theory,
-						conflicting,
-						keys
-					)
-				end)
+				watch:before "core"
+				local coreClauses = unsatisfiableCoreClause(
+					theory,
+					conflicting,
+					keys
+				)
+				watch:after "core"
 				for _, coreClause in ipairs(coreClauses) do
 					cnf:addClause(coreClause)
 				end
 			else
 				-- Expand quantified statements using the theory
-				local additional, newMeta = watch:clock("additional", function()
-					return theory:additionalClauses(
-						currentAssignment,
-						meta
-					)
-				end)
+				watch:before "additionalClauses"
+				local additional, newMeta = theory:additionalClauses(
+					currentAssignment,
+					meta
+				)
+				watch:after "additionalClauses"
 
 				if next(additional) == nil then
 					-- There are no quantifiers to expand; we are done!
@@ -877,9 +821,9 @@ local function cnfSAT(theory, cnf, meta)
 
 				-- Recursively solve the new SAT problem
 				local newCNF = CNF.new(theory, newClauses, currentAssignment)
-				local sat = watch:clock("subsat", function()
-					return cnfSAT(theory, newCNF, newMeta)
-				end)
+				watch:before "subsat"
+				local sat = cnfSAT(theory, newCNF, newMeta)
+				watch:after "subsat"
 				if sat then
 					-- Even after expanding quantifiers, the formula remained
 					-- satisfiable
@@ -887,7 +831,14 @@ local function cnfSAT(theory, cnf, meta)
 					return currentAssignment
 				end
 
+				-- XXX: After doing unit-prop, it's a contradiction.
+				-- What does that mean?
+				newCNF:forceAssignments()
+				assert(newCNF:isContradiction())
+
 				-- Reject the current assignment in its entirety
+				-- Because the current assignment is a contradiction, its
+				-- negation is a tautology
 				local notCurrent = {}
 				for k, v in pairs(currentAssignment) do
 					table.insert(notCurrent, {k, not v})
@@ -902,14 +853,14 @@ local function cnfSAT(theory, cnf, meta)
 					-- The CNF itself was unsat
 					-- TODO: improve this using CDCL
 				else
-					local coreClauses = watch:clock("quantifiercore", function()
-						return quantifierCore(
-							theory,
-							currentAssignment,
-							expansionClauses,
-							core
-						)
-					end)
+					watch:before "quantifier-core"
+					local coreClauses = quantifierCore(
+						theory,
+						currentAssignment,
+						expansionClauses,
+						core
+					)
+					watch:after "quantifier-core"
 					for _, coreClause in ipairs(coreClauses) do
 						cnf:addClause(coreClause)
 					end

@@ -166,7 +166,7 @@ function parser.oneOrMore(object)
 	}
 
 	local function f(object)
-		return {object.first, unpack(object.rest)}
+		return {object.first, table.unpack(object.rest)}
 	end
 
 	return parser.map(composite, f)

@@ -1635,7 +1635,7 @@ function compileExpression(pExpression, scope, environment)
 		local location = pExpression.location
 
 		local subEvaluation, subSources = compileSubexpressions(
-			{pExpression.base, unpack(pExpression.arguments)},
+			{pExpression.base, table.unpack(pExpression.arguments)},
 			"base/argument to method " .. n,
 			location,
 			scope,
