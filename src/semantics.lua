@@ -1130,7 +1130,7 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	-- Verify the correct number of arguments is provided
 	if #arguments ~= #method.parameters then
 		Report.WRONG_VALUE_COUNT {
-			purpose = "interface method " .. methodFullName,
+			purpose = "method " .. methodFullName,
 			expectedCount = #method.parameters,
 			givenCount = #arguments,
 			location = location,

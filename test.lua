@@ -61,7 +61,15 @@ local remainingArguments = arg[3] or ""
 --------------------------------------------------------------------------------
 
 local function shell(command)
-	local status = os.execute(command)
+	local status, _, code = os.execute(command)
+	if status == true then
+		-- Lua 5.2 returns true|nil, reason, status
+		return true, 0
+	elseif status == nil then
+		-- Lua 5.2 returns true|nil, reason, status
+		return false, code
+	end
+	-- Lua 5.1 returns just the status code
 	return status == 0, status
 end
 
@@ -204,7 +212,7 @@ local function compiler(directory, main)
 		" ", remainingArguments
 	}
 
-	local status = os.execute(command)
+	local _, status = shell(command)
 	while status > 255 do
 		status = status / 256
 	end

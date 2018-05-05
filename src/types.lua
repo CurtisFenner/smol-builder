@@ -90,18 +90,22 @@ function show(value)
 	return table.concat(out)
 end
 
--- Redefine `pairs` to use `__pairs` metamethod
+-- Redefine `pairs` to use `__next` metamethod
 function pairs(object)
+	return next, object
+end
+
+local realNext = next
+function next(object, from)
 	assert(
 		isobject(object),
-		"object must be reference type in pairs();" .. "\ngot `" .. type(object) .. "`"
+		"object must be reference type in next()"
 	)
-
 	local metatable = getmetatable(object)
-	if metatable and metatable.__pairs then
-		return metatable.__pairs(object)
+	if metatable and metatable.__next then
+		return metatable.__next(object, from)
 	end
-	return next, object
+	return realNext(object, from)
 end
 
 -- Redefine `ipairs` to respect `__index` metamethod
@@ -117,8 +121,13 @@ function ipairs(list)
 end
 
 local realUnpack = table.unpack or _G.unpack
+if rawget(_G, "unpack") then
+	-- Make 5.1 look like 5.2
+	_G.unpack = nil
+end
+
 function table.unpack(object)
-	if type(object) == "userdata" then
+	if getmetatable(object) then
 		local asList = {}
 		for i = 1, #object do
 			asList[i] = object[i]
@@ -244,25 +253,38 @@ function freeze(object)
 		return object
 	end
 
-	local out = newproxy(true)
+	local copy = {}
+	for k, v in pairs(object) do
+		copy[k] = freeze(v)
+	end
+
+	local out = {}
+	if rawget(_G, "newproxy") then
+		-- Lua 5.1 does not respect the __len metamethod for tables
+		-- Lua 5.2 does, which has dropped the newproxy function
+		out = _G.newproxy(true)
+	else
+		setmetatable(out, {})
+	end
 	traces[out] = "debug.traceback(2)"
 
 	local metatable = getmetatable(out)
 	local mem = {}
 	metatable.__index = function(_, key)
-		if object[key] == nil then
+		if copy[key] == nil then
 			local available = {}
-			for key, value in pairs(object) do
+			for key, value in pairs(copy) do
 				table.insert(available, tostring(key) .. "=" .. tostring(value))
 			end
 
 			if type(key) == "number" then
 				-- XXX: allow reading one past end of arrays
-				local previous = object[key - 1]
+				local previous = copy[key - 1]
 				if previous ~= nil or key == 1 then
 					return nil
 				end
 			end
+
 			error(
 				"frozen object has no field `" .. tostring(key) .. "`: available `" .. show(object),
 				2
@@ -270,24 +292,13 @@ function freeze(object)
 		end
 
 		-- Recursively freeze and cache
-		if mem[key] == nil then
-			mem[key] = freeze(object[key])
-		end
-		return mem[key]
+		return copy[key]
 	end
 	metatable.__newindex = function(_, key)
 		error("cannot write to field `" .. tostring(key) .. "` on frozen object", 2)
 	end
-	metatable.__pairs = function()
-		return function(o, ...)
-			assert(rawequal(o, nil))
-			local key = next(object, ...)
-			if key == nil then
-				return nil, nil
-			end
-			local value = out[key]
-			return key, value
-		end
+	metatable.__next = function(o, k)
+		return next(copy, k)
 	end
 	metatable.__len = function()
 		return #object
@@ -296,6 +307,9 @@ function freeze(object)
 	IMMUTABLE_OBJECTS[out] = true
 	return out
 end
+
+assert(#freeze {"a", "b", "c"} == 3)
+assert(next(freeze {"a", "b", "c"}) ~= nil)
 
 -- Lua Type Specifications -----------------------------------------------------
 
