@@ -383,7 +383,7 @@ end
 
 -- RETURNS a list of [](term, truth) raw clauses
 function CNF:learnedClauses()
-	return self._learned
+	return {table.unpack(self._learned)}
 end
 
 -- RETURNS a map from theory terms => booleans which is the current truth
@@ -728,6 +728,73 @@ local function quantifierCore(theory, assignment, map, cnf)
 	return output
 end
 
+local function showClause(theory, clause)
+	local s = {}
+	for _, p in ipairs(clause) do
+		local k = theory:canonKey(p[1])
+		if p[2] == false then
+			k = "~" .. k
+		end
+		table.insert(s, k)
+	end
+	return "&\t" .. table.concat(s, " | ")
+end
+
+-- RETURNS a (tautological) CNF
+local function reduceQuantifiedContradiction(theory, additional, cnf)
+	local before = os.clock()
+	local assignment = cnf:getAssignment()
+	local keys = table.keys(assignment)
+	for key in pairs(additional) do
+		assert(assignment[key] ~= nil)
+	end
+
+	local reduced = {}
+	for k, v in pairs(assignment) do
+		reduced[k] = v
+	end
+
+	local vital = {}
+
+	-- TODO: speed up using doubling (like unsatisfiableCoreClauses)
+	-- Find a locally minimal model
+	for i, key in ipairs(keys) do
+		local was = reduced[key]
+		assert(was ~= nil)
+
+		-- Try removing this assignment from the model
+		reduced[key] = nil
+
+		-- Re-generate the problem
+		local clauses = cnf:learnedClauses()
+		for key, instantiatedClauses in pairs(additional) do
+			if reduced[key] ~= nil then
+				for _, clause in ipairs(instantiatedClauses) do
+					table.insert(clauses, clause)
+				end
+			end
+		end
+
+		local c = CNF.new(theory, clauses, reduced)
+		c:forceAssignments()
+		if not c:isContradiction() then
+			-- This key was vital to producing a contradiction: keep it in the
+			-- model
+			table.insert(vital, {key, was})
+			reduced[key] = was
+		end
+	end
+
+	-- The model is a contradiction; negating it produces a tautology that
+	-- restricts the future search space
+	local notThis = {}
+	for _, p in ipairs(vital) do
+		table.insert(notThis, {p[1], not p[2]})
+	end
+
+	return {notThis}
+end
+
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no such satisfaction exists
@@ -832,9 +899,14 @@ local function cnfSAT(theory, cnf, meta)
 				end
 
 				-- XXX: After doing unit-prop, it's a contradiction.
-				-- What does that mean?
 				newCNF:forceAssignments()
 				assert(newCNF:isContradiction())
+
+				-- Reduce the current assignment using the above contradiction
+				local e = reduceQuantifiedContradiction(theory, expansionClauses, newCNF)
+				for _, clause in ipairs(e) do
+					cnf:addClause(clause)
+				end
 
 				-- Reject the current assignment in its entirety
 				-- Because the current assignment is a contradiction, its
