@@ -371,27 +371,7 @@ local function TYPE_DESCRIPTION(t)
 end
 TYPE_DESCRIPTION = memoized(1, TYPE_DESCRIPTION)
 
-local immC = 0
-local mutC = 0
-local hits = {}
 local function _assertis(value, t)
-	if not rawequal(value, nil) then
-		if isimmutable(value) then
-			immC = immC + 1
-		else
-			mutC = mutC + 1
-		end
-		if (immC + mutC) % 1000 == 0 then
-			--print("immutable:", immC)
-			--print("mutable:  ", mutC)
-		end
-		hits[value] = (hits[value] or 0) + 1
-		if hits[value] > 2000 then
-			--print(show(value))
-			--error("^^ excessive")
-		end
-	end
-
 	local predicate = TYPE_PREDICATE(t)
 	local okay, reason = predicate(value)
 	if not okay then

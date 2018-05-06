@@ -588,8 +588,6 @@ local function mustModel(scope, target)
 
 	local tautology, counter = smt.implies(verifyTheory, predicates, result)
 
-	--print("<-", tautology)
-
 	if not tautology then
 		local explanation = {}
 		-- for assertion, truth in pairs(counter) do
@@ -600,25 +598,6 @@ local function mustModel(scope, target)
 	end
 
 	return tautology
-end
-
--- RETURNS nothing
--- MODIFIES nothing
-local function dumpScope(scope)
-	assertis(scope, listType "Action")
-
-	for i, v in ipairs(scope) do
-		io.write("$ -- " .. i .. "\t")
-		if v.tag == "assignment" then
-			print(v.destination.name .. " := " .. verifyTheory:canonKey(v.value))
-		elseif v.tag == "predicate" then
-			print(verifyTheory:canonKey(v.value))
-		elseif v.tag == "branch" then
-			print("branch TODO")
-		else
-			error("unknown action tag `" .. v.tag .. "` in dumpScope")
-		end
-	end
 end
 
 -- RETURNS an Assertion
