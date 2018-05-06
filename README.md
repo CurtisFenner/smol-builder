@@ -26,7 +26,7 @@ programs written in Smol do not reach error states.
 
 ```java
 // Every Smol file begins with a "package" declaration, which is a namespace.
-package test;
+package hello;
 
 // You must explicitly import types defined in other files.
 import core;
@@ -40,7 +40,7 @@ class HelloWorld {
 		do core:Out.println!("Hello world!");
 
 		// Statically checked assertions can be embedded in your code
-		assert 1 + 2 == 3;
+		assert (1 + 2) == 3;
 	}
 }
 ```
