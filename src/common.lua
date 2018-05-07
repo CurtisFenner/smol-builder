@@ -557,6 +557,11 @@ local function assertionExprString(a, grouped)
 			return "(" .. i .. ")"
 		end
 		return i
+	elseif a.tag == "gettag" then
+		-- TODO: fix this
+		return "$tag(" .. assertionExprString(a.base) .. ")"
+	elseif a.tag == "symbol" then
+		return "$symbol(" .. a.symbol .. ")"
 	end
 
 	error("unhandled `" .. a.tag .. "`")

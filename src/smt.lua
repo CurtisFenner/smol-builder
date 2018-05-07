@@ -129,10 +129,12 @@ function CNF.new(theory, clauses, rawAssignment)
 		instance:addClause(rawClause)
 	end
 	instance._learned = {}
+	instance._constructed = true
 	return instance
 end
 
 -- RETURNS an equivalent term to term, canonicalize by the canon key
+-- REQUIRES term is not a new term (after CNF.new returns)
 function CNF:canonicalize(term)
 	if self._isCanon[term] then
 		return term
@@ -141,6 +143,7 @@ function CNF:canonicalize(term)
 	local key = self._theory:canonKey(term)
 	local out = self._canon[key]
 	if not out then
+		assert(not self._constructed, "canonicalize invoked on fresh term")
 		self._canon[key] = term
 		self._isCanon[term] = true
 		return term
@@ -582,17 +585,16 @@ end
 -- RETURNS a (tautological) CNF
 -- Produces a core referring to quantified statements dervied from
 -- contradictions between their instantiations
-local function reduceQuantifiedContradiction(theory, additional, cnf)
+local function reduceQuantifiedContradiction(theory, additional, quantifierAssignment, pruningClauses)
 	local before = os.clock()
-	local assignment = cnf:getAssignment()
 
 	for key in pairs(additional) do
-		assert(assignment[key] ~= nil)
+		assert(quantifierAssignment[key] ~= nil)
 	end
 
-	local core = minimizeSet(assignment, function(reduced)
+	local core = minimizeSet(quantifierAssignment, function(reduced)
 		-- Re-generate the problem
-		local clauses = cnf:learnedClauses()
+		local clauses = {table.unpack(pruningClauses)}
 		for key, instantiatedClauses in pairs(additional) do
 			if reduced[key] ~= nil then
 				for _, clause in ipairs(instantiatedClauses) do
@@ -611,10 +613,10 @@ local function reduceQuantifiedContradiction(theory, additional, cnf)
 	-- restricts the future search space
 	local notThis = {}
 	for k, v in pairs(core) do
+		assert(quantifierAssignment[k] ~= nil)
 		table.insert(notThis, {k, not v})
 	end
 
-	print("reduce quantified " .. #table.keys(assignment) .. " -> " .. #notThis, "in", os.clock() - before)
 
 	return {notThis}
 end
@@ -727,19 +729,21 @@ local function cnfSAT(theory, cnf, meta)
 				assert(newCNF:isContradiction())
 
 				-- Reduce the current assignment using the above contradiction
-				local e = reduceQuantifiedContradiction(theory, expansionClauses, newCNF)
+				local e = reduceQuantifiedContradiction(theory, expansionClauses, currentAssignment, newCNF:learnedClauses())
 				for _, clause in ipairs(e) do
 					cnf:addClause(clause)
 				end
 
-				-- Reject the current assignment in its entirety
-				-- Because the current assignment is a contradiction, its
-				-- negation is a tautology
-				local notCurrent = {}
-				for k, v in pairs(currentAssignment) do
-					table.insert(notCurrent, {k, not v})
+				if #e == 0 then
+					-- Reject the current assignment in its entirety
+					-- Because the current assignment is a contradiction, its
+					-- negation is a tautology
+					local notCurrent = {}
+					for k, v in pairs(currentAssignment) do
+						table.insert(notCurrent, {k, not v})
+					end
+					cnf:addClause(notCurrent)
 				end
-				cnf:addClause(notCurrent)
 			end
 		elseif cnf:isContradiction() then
 			-- Some assignment made by the SAT solver is bad
