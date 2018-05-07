@@ -334,7 +334,7 @@ local INT_DEF = freeze {
 			bang = false,
 			ensuresAST = {
 				-- Transitive
-				parseKind("ensures forall (middle Int) return when (this < middle).and(middle < right)", "ensures"),
+				parseKind("ensures (forall (middle Int) return when (this < middle).and(middle < right))", "ensures"),
 
 				-- Antireflexive
 				parseKind("ensures return.not() when this == right", "ensures"),
@@ -551,6 +551,12 @@ local function assertionExprString(a, grouped)
 			return "(" .. inner .. ")"
 		end
 		return inner
+	elseif a.tag == "eq" then
+		local i = assertionExprString(a.left) .. " == " .. assertionExprString(a.right)
+		if grouped then
+			return "(" .. i .. ")"
+		end
+		return i
 	end
 
 	error("unhandled `" .. a.tag .. "`")

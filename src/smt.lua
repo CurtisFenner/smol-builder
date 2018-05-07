@@ -501,6 +501,52 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a locally minimized set
+-- REQUIRES set is initially good
+-- REQUIRES isGood mutates nothing
+local function minimizeSet(set, isGood)
+	assert(isGood(set))
+
+	-- Make a copy
+	local keys = {}
+	local reduced = {}
+	for key, value in pairs(set) do
+		reduced[key] = value
+		table.insert(keys, key)
+	end
+
+	local goods = 0
+	local i = 1
+	local chunk = math.ceil(#keys / 6)
+	while i <= #keys do
+		for j = i, math.min(#keys, i + chunk - 1) do
+			reduced[keys[j]] = nil
+		end
+
+		goods = goods + 1
+		if isGood(reduced) then
+			i = i + chunk
+			chunk = math.ceil(chunk * 1.2)
+		else
+			-- Restore the old values
+			for j = i, math.min(#keys, i + chunk - 1) do
+				reduced[keys[j]] = set[keys[j]]
+			end
+
+			if chunk == 1 then
+				i = i + 1
+
+				-- Optimistically increase chunk size
+				chunk = math.ceil(1 + (#keys - i) / 6)
+			else
+				chunk = math.ceil(chunk / 6)
+			end
+		end
+	end
+
+	return reduced
+end
+
 -- Finds (locally weakest) version of the assignment that is unsatisfiable
 -- according to the theory as a CNF
 -- RETURNS a CNF that is a tautology which represents a weak explanation of
@@ -521,250 +567,30 @@ local function unsatisfiableCoreClause(theory, assignment, order)
 		reduced[k] = v
 	end
 
-	local core = {}
-	local coreIndex = {}
+	local core = minimizeSet(assignment, function(reduced)
+		return not theory:isSatisfiable(reduced)
+	end)
 
-	-- i is the lowest index that we are still unsure about
-	local i = 1
-	local chunk = math.ceil(#order / 6)
-	while i <= #order do
-		-- Remove the first `chunk` elements
-		for j = i, math.min(#order, i + chunk - 1) do
-			reduced[order[j]] = nil
-		end
-
-		local before = os.clock()
-
-		-- Use the theory to determine if the model is unsatisfiable
-		local sat = theory:isSatisfiable(reduced)
-		if not sat then
-			-- Constraints [i ... i + chunk - 1] are not part of the
-			-- unsatisfiable core, as it remains unsatisfiable without those
-			i = i + chunk
-			chunk = chunk * 2
-		else
-			-- Restore the first `chunk` elements
-			for j = i, math.min(#order, i + chunk - 1) do
-				reduced[order[j]] = assignment[order[j]]
-			end
-
-			-- At least some of [i ... i + chunk - 1] are part of the unsat
-			-- core, since it became satisifiable after lifting them
-			if chunk == 1 then
-				-- Thus the ONLY term MUST be in the unsatisfiable core
-				table.insert(core, {order[i], not assignment[order[i]]})
-				coreIndex[i] = true
-				i = i + 1
-
-				-- Optimistically increase chunk size
-				chunk = math.floor(1 + (#order - i) / 6)
-			else
-				-- Reduce the number of cores being considered
-				chunk = math.ceil(chunk / 2)
-			end
-		end
+	local tautologyOut = {}
+	for k, v in pairs(core) do
+		table.insert(tautologyOut, {k, not v})
 	end
 
-	return {core}
-end
-
--- Collapses an unsat-core using instatiated terms to refer instead to only
--- quantifiers.
--- assignment: must assign a truth value to each quantifier in `map`
--- map: maps each quantifier to a CNF that it implies
--- RETURNS a CNF
--- The returned formula is a tautology
--- REQUIRES the learned clauses of `cnf` are tautologies
-local function quantifierCore(theory, assignment, map, cnf)
-	assertis(theory, "Theory")
-	local rawCNF = listType(listType(tupleType(theory.assertion_t, "boolean")))
-	assertis(assignment, mapType(theory.assertion_t, "boolean"))
-	assertis(map, mapType(theory.assertion_t, rawCNF))
-	assertis(cnf, rawCNF)
-
-	-- Associate extra terms with their quantifiers
-	local toQuantifier = {}
-	for quantifier, instantiatedCNF in pairs(map) do
-		assert(type(assignment[quantifier]) == "boolean")
-
-		for _, clause in ipairs(instantiatedCNF) do
-			for i, term in ipairs(clause) do
-				local key = theory:canonKey(term[1])
-				toQuantifier[key] = toQuantifier[key] or {}
-				table.insert(toQuantifier[key], {
-					quantifier = quantifier,
-					clause = clause,
-					truth = term[2],
-					i = i,
-				})
-			end
-		end
-	end
-
-	local output = {}
-	local patterning = {}
-	for _, must in ipairs(cnf) do
-		-- Determine the "pattern" in terms of free terms
-		local pattern = {}
-		local filler = {}
-		for _, t in ipairs(must) do
-			local key = theory:canonKey(t[1])
-			if not toQuantifier[key] then
-				table.insert(pattern, {key = key, t = t})
-			else
-				table.insert(filler, {key = key, t = t})
-			end
-		end
-
-		if #pattern == #must then
-			-- The theory (for some odd reason) made a free clause
-			table.insert(output, must)
-		else
-			-- The clause is not free
-			local patternIDs = {}
-			for i = 1, #pattern do
-				patternIDs[i] = pattern[i].key .. "::" .. tostring(pattern[i].t)
-			end
-			table.sort(patternIDs)
-			local patternID = table.concat(patternIDs, " ## ")
-
-			local opposing = {}
-			for i = 1, #filler do
-				opposing[i] = {}
-				local key = filler[i].key
-				for _, triple in ipairs(toQuantifier[key]) do
-					if triple.truth == not filler[i].t[2] then
-						-- Opposes quantifier
-						table.insert(opposing[i], triple)
-					end
-				end
-			end
-			assert(#opposing == #filler)
-			assertis(opposing, listType(listType(recordType {
-				truth = "boolean",
-				i = "integer",
-				clause = listType(tupleType(theory.assertion_t, "boolean")),
-				quantifier = theory.assertion_t,
-			})))
-
-			for _, opposingTuple in ipairs(table.cartesian(opposing)) do
-				-- Check that each quantifier is distinct
-				-- TODO: what happens when two terms from the same quantifier
-				-- are mentioned?
-				local distinct = true
-				local indexForQuantifier = {}
-				local product = 1
-				for _, t in ipairs(opposingTuple) do
-					if indexForQuantifier[t.quantifier] then
-						distinct = false
-						break
-					end
-					indexForQuantifier[t.quantifier] = t.i
-					product = product * #t.clause
-				end
-
-				if distinct then
-					local indexTuple = {}
-					local quantifierTuple = {}
-					for q, i in spairs(indexForQuantifier, tostring) do
-						table.insert(quantifierTuple, theory:canonKey(q))
-						table.insert(indexTuple, i)
-					end
-					local qKey = table.concat(quantifierTuple, " ## ")
-					local iKey = table.concat(indexTuple, ",")
-
-					-- Record this as progress toward completing some grid
-					if not patterning[patternID] then
-						-- The first mention of the pattern
-						patterning[patternID] = {
-							pattern = pattern,
-							instances = {},
-						}
-					end
-
-					-- Set up the pattern for this particular combination of
-					-- quantifier clauses
-					if not patterning[patternID].instances[qKey] then
-						patterning[patternID].instances[qKey] = {
-							limit = product,
-							count = 0,
-							map = {},
-						}
-					end
-					local p = patterning[patternID]
-					if not p.instances[qKey].map[iKey] then
-						p.instances[qKey].map[iKey] = true
-						p.instances[qKey].count = p.instances[qKey].count + 1
-
-						-- Check if we have completed a matrix
-						if p.instances[qKey].limit == p.instances[qKey].count then
-							local newClause = {}
-							for i = 1, #pattern do
-								newClause[i] = pattern[i].t
-							end
-
-							-- Negate each quantifier
-							for q in spairs(indexForQuantifier, tostring) do
-								assertis(q, theory.assertion_t)
-								assertis(assignment[q], "boolean")
-								table.insert(newClause, {q, not assignment[q]})
-							end
-							table.insert(output, newClause)
-						end
-					end
-				end
-			end
-		end
-		assertis(patterning, mapType("string", recordType {
-			pattern = listType(recordType {
-				t = tupleType(theory.assertion_t, "boolean"),
-			}),
-			instances = recordType {},
-		}))
-
-		-- TODO: combine partial matches into looser cores
-	end
-
-	return output
-end
-
-local function showClause(theory, clause)
-	local s = {}
-	for _, p in ipairs(clause) do
-		local k = theory:canonKey(p[1])
-		if p[2] == false then
-			k = "~" .. k
-		end
-		table.insert(s, k)
-	end
-	return "&\t" .. table.concat(s, " | ")
+	return {tautologyOut}
 end
 
 -- RETURNS a (tautological) CNF
+-- Produces a core referring to quantified statements dervied from
+-- contradictions between their instantiations
 local function reduceQuantifiedContradiction(theory, additional, cnf)
 	local before = os.clock()
 	local assignment = cnf:getAssignment()
-	local keys = table.keys(assignment)
+
 	for key in pairs(additional) do
 		assert(assignment[key] ~= nil)
 	end
 
-	local reduced = {}
-	for k, v in pairs(assignment) do
-		reduced[k] = v
-	end
-
-	local vital = {}
-
-	-- TODO: speed up using doubling (like unsatisfiableCoreClauses)
-	-- Find a locally minimal model
-	for i, key in ipairs(keys) do
-		local was = reduced[key]
-		assert(was ~= nil)
-
-		-- Try removing this assignment from the model
-		reduced[key] = nil
-
+	local core = minimizeSet(assignment, function(reduced)
 		-- Re-generate the problem
 		local clauses = cnf:learnedClauses()
 		for key, instantiatedClauses in pairs(additional) do
@@ -775,22 +601,20 @@ local function reduceQuantifiedContradiction(theory, additional, cnf)
 			end
 		end
 
+		-- Check if the reduced version is still a contradiction
 		local c = CNF.new(theory, clauses, reduced)
 		c:forceAssignments()
-		if not c:isContradiction() then
-			-- This key was vital to producing a contradiction: keep it in the
-			-- model
-			table.insert(vital, {key, was})
-			reduced[key] = was
-		end
-	end
+		return c:isContradiction()
+	end)
 
 	-- The model is a contradiction; negating it produces a tautology that
 	-- restricts the future search space
 	local notThis = {}
-	for _, p in ipairs(vital) do
-		table.insert(notThis, {p[1], not p[2]})
+	for k, v in pairs(core) do
+		table.insert(notThis, {k, not v})
 	end
+
+	print("reduce quantified " .. #table.keys(assignment) .. " -> " .. #notThis, "in", os.clock() - before)
 
 	return {notThis}
 end
@@ -916,27 +740,6 @@ local function cnfSAT(theory, cnf, meta)
 					table.insert(notCurrent, {k, not v})
 				end
 				cnf:addClause(notCurrent)
-
-				-- Attempt to generalize the learned core clauses
-				-- (cnf cannot mention new terms that may have been
-				-- introduced by instantiation)
-				local core = newCNF:learnedClauses()
-				if #core == 0 then
-					-- The CNF itself was unsat
-					-- TODO: improve this using CDCL
-				else
-					watch:before "quantifier-core"
-					local coreClauses = quantifierCore(
-						theory,
-						currentAssignment,
-						expansionClauses,
-						core
-					)
-					watch:after "quantifier-core"
-					for _, coreClause in ipairs(coreClauses) do
-						cnf:addClause(coreClause)
-					end
-				end
 			end
 		elseif cnf:isContradiction() then
 			-- Some assignment made by the SAT solver is bad

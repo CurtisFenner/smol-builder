@@ -590,10 +590,10 @@ local function mustModel(scope, target)
 
 	if not tautology then
 		local explanation = {}
-		-- for assertion, truth in pairs(counter) do
-		-- 	local shown = assertionExprString(assertion) .. "\n\t\t" .. verifyTheory:canonKey(assertion)
-		-- 	table.insert(explanation, {expression = shown, truth = truth})
-		-- end
+		for assertion, truth in pairs(counter) do
+			local shown = assertionExprString(assertion) .. "\n\t\t" .. verifyTheory:canonKey(assertion)
+			table.insert(explanation, {expression = shown, truth = truth})
+		end
 		return false, explanation
 	end
 

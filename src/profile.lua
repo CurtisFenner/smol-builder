@@ -5,7 +5,7 @@ local summary = {}
 
 -- Times elapsed quicker than this threshold will not be printed as the program
 -- is running.
-local PRINT_SECONDS = 1
+local PRINT_SECONDS = 100
 
 function profile.open(message)
 	assert(type(message) == "string", "type of message must be a string")
