@@ -423,7 +423,7 @@ function theory:additionalClauses(model, meta)
 
 	for term in pairs(model) do
 		if term.tag == "forall" then
-			if not newMeta[term.unique] then
+			if not meta[term.unique] then
 				out[term] = quantifierClauses(model, term, canon)
 				newMeta[term.unique] = true
 			else
