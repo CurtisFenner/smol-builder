@@ -462,11 +462,12 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 		end
 	end
 
-	-- TODO: get alternatives
-	local alternatives = {"???"}
-
+	
 	-- Verify exactly one constraint supplies this method name
 	if #matches == 0 then
+		-- TODO: get alternatives
+		local alternatives = {"???"}
+
 		Report.NO_SUCH_METHOD {
 			modifier = modifier,
 			type = showType(genericType),
@@ -725,6 +726,7 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 
 		-- Can be not-false when checking `ensures` at `return` statement
 		returnOuts = environment.returnOuts,
+		verification = true,
 	}
 
 	local scope = {{}}
@@ -785,6 +787,7 @@ local function generatePostconditionAssume(assertion, method, invocation, enviro
 		thisVariable = invocation.this,
 		returnOuts = returnOuts,
 		ignoreEnsures = environment.ignoreEnsures,
+		verification = true,
 	}
 
 	-- Initialize the scope with just the arguments
@@ -1465,6 +1468,7 @@ function compileExpression(pExpression, scope, environment)
 		allDefinitions = listType "Definition",
 		thisVariable = choiceType(constantType(false), "VariableIR"),
 		ignoreEnsures = mapType("string", "integer"),
+		verification = "boolean",
 	})
 	local resolveType = environment.resolveType
 	local containerType = environment.containerType
@@ -1920,6 +1924,12 @@ function compileExpression(pExpression, scope, environment)
 		return buildBlock {baseEvaluation, isUnion, localSt(result), isA}, freeze {result}
 	elseif pExpression.tag == "forall-expr" then
 		-- TODO: check that this is in a ghost context
+		if not environment.verification then
+			Report.QUANTIFIER_USED_IN_IMPLEMENTATION {
+				quantifier = "forall",
+				location = pExpression.location,
+			}
+		end
 
 		local scopeCopy = {}
 
@@ -2769,7 +2779,7 @@ local function semanticsSmol(sources, main)
 					})
 				end
 
-				local environment = freeze {
+				local verificationEnvironment = freeze {
 					resolveType = makeTypeResolver(signature, definition.generics, allDefinitions),
 					containerType = containerType,
 					containingSignature = signature,
@@ -2777,20 +2787,21 @@ local function semanticsSmol(sources, main)
 					thisVariable = thisVariable,
 					returnOuts = returnOuts,
 					ignoreEnsures = {},
+					verification = true,
 				}
 
-				local function checkBoolean(e, purpose)
+				local function checkVerificationBoolean(e, purpose)
 					assertis(purpose, "string")
 
-					local _, outs = compileExpression(e, scope, environment)
+					local _, outs = compileExpression(e, scope, verificationEnvironment)
 					checkSingleBoolean(outs, purpose, e.location)
 				end
 
 				-- Check that each requires has type Boolean
 				for _, requires in ipairs(signature.requiresAST) do
-					checkBoolean(requires.condition, "requires condition")
+					checkVerificationBoolean(requires.condition, "requires condition")
 					for _, when in ipairs(requires.whens) do
-						checkBoolean(when, "requires when condition")
+						checkVerificationBoolean(when, "requires when condition")
 						if not isExprPure(when) then
 							Report.BANG_NOT_ALLOWED {
 								context = "requires-when",
@@ -2808,9 +2819,9 @@ local function semanticsSmol(sources, main)
 
 				-- Check that each ensures has type Boolean
 				for _, ensures in ipairs(signature.ensuresAST) do
-					checkBoolean(ensures.condition, "ensures condition")
+					checkVerificationBoolean(ensures.condition, "ensures condition")
 					for _, when in ipairs(ensures.whens) do
-						checkBoolean(when, "ensures when condition")
+						checkVerificationBoolean(when, "ensures when condition")
 						if not isExprPure(when) then
 							Report.BANG_NOT_ALLOWED {
 								context = "ensures-when",
@@ -2861,6 +2872,7 @@ local function semanticsSmol(sources, main)
 			thisVariable = thisVariable,
 			returnOuts = false,
 			ignoreEnsures = {},
+			verification = false,
 		}
 
 		local compileBlock
@@ -3379,11 +3391,11 @@ local function semanticsSmol(sources, main)
 				return buildBlock(out)
 			elseif pStatement.tag == "assert-statement" then
 				-- Evaluate the right-hand-side
-				-- TODO: environment must be annotated to allow `forall`
+				assert(environment.verification == false)
 				local valueEvaluation, valueOut = compileExpression(
 					pStatement.expression,
 					scope,
-					environment
+					table.with(environment, "verification", true)
 				)
 				if #valueOut ~= 1 then
 					Report.WRONG_VALUE_COUNT {

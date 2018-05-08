@@ -621,6 +621,15 @@ function Report.RETURN_USED_IN_IMPLEMENTATION(p)
 	)
 end
 
+function Report.QUANTIFIER_USED_IN_IMPLEMENTATION(p)
+	quit(
+		"The `", p.quantifier, "` quantifier can only be used in ",
+		"`requires`, `ensures,` `assert` conditions.",
+		"\nHowever, you use `", p.quantifier, "` ",
+		p.location
+	)
+end
+
 function Report.EVALUATION_ORDER(p)
 	quit("The evaluation order of an expression is not defined ", p.location)
 end
