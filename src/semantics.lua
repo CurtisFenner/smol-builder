@@ -1,7 +1,6 @@
 -- Curtis Fenner, copyright (C) 2017
 
 local Report = import "semantic-errors.lua"
-local profile = import "profile.lua"
 local common = import "common.lua"
 local showType = common.showType
 local areTypesEqual = common.areTypesEqual
@@ -1815,10 +1814,8 @@ function compileExpression(pExpression, scope, environment)
 		end
 	elseif pExpression.tag == "binary" then
 		-- Compile the two operands
-		profile.open("compileExpression binary recursive")
 		local leftEvaluation, leftOut = compileExpression(pExpression.left, scope, environment)
 		local rightEvaluation, rightOut = compileExpression(pExpression.right, scope, environment)
-		profile.close("compileExpression binary recursive")
 
 		if not isExprPure(pExpression.left) and not isExprPure(pExpression.right) then
 			Report.EVALUATION_ORDER {
@@ -2105,8 +2102,6 @@ end
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
 	assertis(main, "string")
-
-	profile.open "resolve types"
 
 	-- (1) Resolve the set of types and the set of packages that have been
 	-- defined
@@ -2552,9 +2547,6 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	profile.close "resolve types"
-	profile.open "check implements"
-
 	allDefinitions = freeze(allDefinitions)
 	assertis(allDefinitions, listType "Definition")
 
@@ -2669,9 +2661,6 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	profile.close "check implements"
-	profile.open "check prototypes"
-
 	-- (4) Verify all existing Type+'s (from headers) are OKAY
 	for _, definition in ipairs(allDefinitions) do
 		assertis(definition, "Definition")
@@ -2749,12 +2738,8 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	profile.close "check prototypes"
-	profile.open "check ensures"
-
 	-- (4.5) Verify the type of all ensures/requires
 	for _, definition in ipairs(allDefinitions) do
-		profile.open("check ensures of " .. definition.name)
 		if definition.tag == "class" or definition.tag == "union" then
 			for _, signature in ipairs(definition.signatures) do
 				-- Verify the type of the signature's ensures and requires
@@ -2842,11 +2827,7 @@ local function semanticsSmol(sources, main)
 				end
 			end
 		end
-		profile.close("check ensures of " .. definition.name)
 	end
-
-	profile.close "check ensures"
-	profile.open "compile bodies"
 
 	-- (5) Compile all code bodies
 
@@ -3626,9 +3607,6 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	profile.close "compile bodies"
-	profile.open "compile main"
-
 	assertis(functions, listType "FunctionIR")
 
 	-- Check that the main class exists
@@ -3656,8 +3634,6 @@ local function semanticsSmol(sources, main)
 			}
 		end
 	end
-
-	profile.close "compile main"
 
 	return freeze {
 		classes = classes,

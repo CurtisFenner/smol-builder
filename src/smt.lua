@@ -1,6 +1,5 @@
 -- A SMT Solver
 
-local profile = import "profile.lua"
 local ansi = import "ansi.lua"
 local Stopwatch = import "stopwatch.lua"
 
@@ -800,7 +799,6 @@ end
 -- `theory`.
 -- RETURNS false, counterexample | true
 local function implies(theory, givens, expression)
-	profile.open("smt.implies setup")
 
 	-- Is the case where givens are true but expression false satisfiable?
 	local args = {}
@@ -814,12 +812,8 @@ local function implies(theory, givens, expression)
 	table.insert(truths, false)
 
 	local clauses = toCNFFromBreakup(theory, args, {truths}, {})
-	profile.close("smt.implies setup")
-
-	profile.open("smt.implies sat")
 	local cnf = CNF.new(theory, clauses, {})
 	local sat = cnfSAT(theory, cnf, theory:emptyMeta())
-	profile.close("smt.implies sat")
 
 	if sat then
 		return false, sat

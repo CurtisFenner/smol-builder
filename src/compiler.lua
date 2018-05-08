@@ -111,7 +111,6 @@ end
 
 --------------------------------------------------------------------------------
 
-local profile = import "profile.lua"
 local syntax = import "syntax.lua"
 local calculateSemantics = import "semantics.lua"
 local codegen = {
@@ -325,13 +324,9 @@ class WInt is Eq {
 ]==]
 })
 
-profile.open "parsing"
-
 -- Load and parse source files
 local sourceParses = {}
 for _, sourceFile in ipairs(sourceFiles) do
-	profile.open("parsing " .. sourceFile.path)
-	profile.open("reading")
 	local contents = sourceFile.contents
 	if not contents then
 		local file, err = io.open(sourceFile.path, "r")
@@ -345,34 +340,21 @@ for _, sourceFile in ipairs(sourceFiles) do
 		end
 	end
 	assert(contents)
-	profile.close("reading")
 
 	-- Lex contents
-	profile.open("lexing")
 	local tokens = lexSmol(contents, sourceFile.short)
-	profile.close("lexing")
 
 	-- Parse contents
-	profile.open("parsing")
 	table.insert(sourceParses, syntax.parseFile(tokens))
-	profile.close("parsing")
-	profile.close("parsing " .. sourceFile.path)
 end
-
-profile.close "parsing"
 
 assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
-profile.open "semantics"
 local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
-profile.close "semantics"
 
-profile.open "verify"
 verify(semantics)
-profile.close "verify"
 
-profile.open "codegen"
 if semantics.main then
 	-- TODO: read target
 	local arguments = {out = "output.c"}
@@ -381,4 +363,3 @@ if semantics.main then
 else
 	print("Successfully compiled " .. #sourceFiles .. " file(s)")
 end
-profile.close "codegen"

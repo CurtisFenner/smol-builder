@@ -1,4 +1,3 @@
-local profile = import "profile.lua"
 local Stopwatch = import "stopwatch.lua"
 
 local theory = {

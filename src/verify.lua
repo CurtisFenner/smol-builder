@@ -11,7 +11,6 @@ local variableAssertion = (import "verify-theory.lua").variableAssertion
 
 local Report = import "verify-errors.lua"
 
-local profile = import "profile.lua"
 local ansi = import "ansi.lua"
 
 --------------------------------------------------------------------------------
@@ -483,7 +482,6 @@ local function getPredicateSet(scope, assignments, path, skip)
 
 	-- Translate assignments as a substitution in all subsequent predicates
 	for i, action in ipairs(scope) do
-		profile.open("action " .. action.tag)
 		if action.tag == "assignment" then
 			local t = action.destination.type
 
@@ -497,9 +495,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 			local newV = variableAssertion(newVariable)
 
 			-- Record the value of this new assignment at this time
-			profile.open("inNow")
 			local current = inNow(action.value)
-			profile.close("inNow")
 			local p = eqAssertion(current, newV, t)
 
 			-- Update the mapping to point to the new variable
@@ -514,7 +510,6 @@ local function getPredicateSet(scope, assignments, path, skip)
 		elseif action.tag == "branch" then
 			-- Learn the facts of both, predicated by condition => ...
 			for bi, branch in ipairs(action.branches) do
-				profile.open("setup branch")
 				local condition = inNow(branch.condition)
 				local notCondition = notAssertion(condition)
 
@@ -522,9 +517,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 				for key, value in pairs(assignments) do
 					branchAssignments[key] = value
 				end
-				profile.close("setup branch")
 
-				profile.open("recursive getPredicateSet")
 				local branchPredicates = getPredicateSet(
 					branch.scope,
 					branchAssignments,
@@ -533,9 +526,6 @@ local function getPredicateSet(scope, assignments, path, skip)
 				for _, p in ipairs(branchPredicates) do
 					table.insert(predicates, impliesAssertion(condition, p))
 				end
-				profile.close("recursive getPredicateSet")
-
-				profile.open("merge")
 
 				-- Capture modified variables into a select operation
 				for variable, newValue in pairs(branchAssignments) do
@@ -561,12 +551,10 @@ local function getPredicateSet(scope, assignments, path, skip)
 						table.insert(predicates, impliesAssertion(condition, isNew))
 					end
 				end
-				profile.close("merge")
 			end
 		else
 			error("unknown action tag `" .. action.tag .. "`")
 		end
-		profile.close("action " .. action.tag)
 
 		if i == skip then
 			-- Wipe out predicates learned before this point
@@ -579,9 +567,7 @@ end
 
 -- RETURNS a boolean indicating whether or not `scope` MUST model `predicate`
 local function mustModel(scope, target)
-	profile.open "translating-in-scope"
 	local predicates, inNow = getPredicateSet(scope, {}, "")
-	profile.close "translating-in-scope"
 
 	assertis(target, "Assertion")
 	local result = inNow(target)
@@ -774,8 +760,6 @@ local function verifyStatement(statement, scope, semantics)
 		end
 		return
 	elseif statement.tag == "verify" then
-		profile.open("verifyStatement verify " .. statement.reason)
-
 		-- Check that this variable is true in the current scope
 		local models, counter = mustModel(scope, variableAssertion(statement.variable))
 		if not models then
@@ -787,7 +771,6 @@ local function verifyStatement(statement, scope, semantics)
 			}
 		end
 
-		profile.close("verifyStatement verify " .. statement.reason)
 		return
 	elseif statement.tag == "assume" then
 		-- Make this expression become true in the current scope
@@ -1020,9 +1003,7 @@ local function verifyStatement(statement, scope, semantics)
 		})
 		return
 	elseif statement.tag == "proof" then
-		profile.open "verifyStatement proof"
 		verifyStatement(statement.body, scope, semantics)
-		profile.close "verifyStatement proof"
 		return
 	elseif statement.tag == "forall" then
 		local subscopePrime = scopeCopy(scope)
@@ -1092,9 +1073,7 @@ local function verifyFunction(func, semantics)
 	--print("== " .. modifier .. " " .. fullName .. " " .. string.rep("=", 80))
 	--print(showStatement(func.body))
 
-	profile.open("verifyFunction " .. func.name)
 	verifyStatement(func.body, {}, semantics)
-	profile.close("verifyFunction " .. func.name)
 end
 
 -- RETURNS nothing
