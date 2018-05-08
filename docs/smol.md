@@ -238,7 +238,7 @@ The grammar of Smol follows, with the following conventions:
 
 ## Types and Values
 
-Smol has several built-in types:
+Smol is statically typed. There are several built-in types:
 
 * `Unit`, which has one value, `unit`
 * `Boolean`, which has two values, `true` and `false`
@@ -246,18 +246,23 @@ Smol has several built-in types:
   ..., `-3`, `-2`, `-1`, `0`, `1`, `2`, `3`, ...
 * `String` which represents sequences of bytes such as `""` and `"Smol"`
 
-Smol has two types of type definitions: `class` and `union`. Smol has no concept
+Smol has two kinds of type definitions: `class` and `union`. Smol has no concept
 of "null" or any other value which is of "any" type; it also does not have an
 "Any" type which encompasses all values.
 
 `class` types correspond to records (product types) and has zero or more 
 *fields*.
 Each field is given a name and a type. Each instance of a `class` type has a
+value for each field. Class instances are created with `new` by providing a
 value for each field.
 
 	class Pair {
 		var myInt Int;
 		var myString String;
+		
+		static make(n Int, s String) Pair {
+			return new(myString = s, myInt = n);
+		}
 	}
 
 `union` types correspond to enums (sum types) and have one or more *variants*.
@@ -266,18 +271,27 @@ Each instance of a `union` type has a *tag* specifying which variant the
 instance is, and a value of that variant's type.
 
 Variants are distinguished by their tag and not their type: a `union` may have
-multiple variants with the same type.
+multiple variants with the same type. Union instances are created with `new`
+by providing a value for one variant.
 
 	union Either {
 		var success String;
 		var errorCode Int;
+
+		static makeSuccess() Either {
+			return new(success = "Yay!");
+		}
+
+		static makeFailure() Either {
+			return new(errorCode = 418);
+		}
 	}
 
 ### Parameterized Types (Generics)
 
 `class` and `union` types may be parameterized by type parameters. Type
-parameter tokens begin with a `#` such as `#Foo` or `#T`. They can be used
-everywhere in the `class` or `union` definition that other types can be used,
+parameter tokens begin with `#`; for example, `#Foo` or `#T`. Type parameters
+are regular types and can be used anywhere that other types can be used,
 including as function parameter types, function return types, field types, and
 static function invocations.
 
@@ -316,9 +330,8 @@ member functions for its implementers. These members can be both `method`
 functions and `static` functions (which can be used even in the absence of an
 instance of the type).
 
-Interfaces may use the `#Self` type to refer to the implementer's type. This
-allows many interfaces to be unparameterized where other languages require a
-(dummy) parameter.
+Interfaces may use the `#Self` type to refer to the implementer's type.
+`#Self` corresponds to the type of `this` in `method` functions.
 
 	interface Field {
 		method sum(other #Self) #Self;
@@ -337,6 +350,9 @@ allows many interfaces to be unparameterized where other languages require a
 		method reciprocal() #Self;
 	}
 
+	// A three-dimensional vector over an arbitrary field
+	// #F will have all of the functions of Field available because
+	// `#F is Field`.
 	class V3[#F | #F is Field] {
 		var x #F;
 		var y #F;
@@ -431,12 +447,17 @@ Most programming languages have primitives which can *fail*. Those failures
 are typically represented with runtime exceptions (aka panics, interrupts,
 errors, or crashes).
 
-Among programming languages, some of the most common runtime crashes are
+Among programming languages, some of the most common runtime crashes are caused
+by
 
-* Null pointer dereference. Smol does not have any concept or "null" or "nil"
-* Type upcast failure. Smol does not have any unsafe casts or inheritance
-* Array out of bounds. Smol does not have any unchecked array accesses.
-* Unwrap optional. Smol does not have an unchecked way to unwrap unions
+* Null pointer dereference.
+  Smol does not have any concept of "null" or "nil".
+* Type downcast failure.
+  Smol does not have any unsafe casts or inheritance.
+* Array out of bounds.
+  Smol does not have any unchecked array accesses.
+* Unwrapping optional vlaues.
+  Smol does not have an unchecked way to unwrap unions.
 
 Smol prevents all of these common runtime errors. In fact, during normal
 circumstances, no primitive function of Smol can fail at runtime.
@@ -450,8 +471,8 @@ functions to state the conditions they require and the conditions that they
 guarantee to hold following the function's invocation. These contracts are
 checked at compile time and have no runtime cost.
 
-For example, here are possible signatures for an array allowing only in-bounds
-accesses:
+For example, here are possible signatures for an array that allows only
+in-bounds accesses:
 
 	method get(i Int) #T
 		requires this.inBounds(i)
@@ -478,7 +499,7 @@ The question the verification system asks is,
 
 This is equivalent to asking
 
-> Is there possible execution where `~foo` holds at this point in the program?
+> Is there a possible execution where `~foo` holds at this point in the program?
 
 That is, this can be phrased as a *satisfiability problem*.
 
@@ -503,7 +524,8 @@ there are (provably) correct programs which Smol will reject.
 
 ### Verification and Language Primitives
 
-`if` and `elseif` and `else` can be used to prove conditions:
+The verification framework understands control flow and its impact on the truth
+of conditions:
 
 	if foo {
 		assert foo;
@@ -535,7 +557,25 @@ statically known. The tag can be tested dynamically using `isa` or `match`:
 		foo.one.bar();
 	}
 
-Smol applies *extensionality*, the idea that if two values are equal, functions
+Matches are typically required to be exhaustive, but if a tag has been ruled
+out, it does not need to be handled:
+
+	union Three {
+		a A;
+		b B;
+		c C;
+
+		static handle(x Three) Unit
+		requires (x isa c).not() {
+			match x {
+				case a a {}
+				case b b {}
+				// OK with no c case
+			}
+		}
+	}
+
+Smol applies *extensionality*, the fact that if two values are equal, functions
 of them are equal:
 
 	if a == b {
@@ -550,8 +590,8 @@ of them are equal:
 		assert (x == y).not();
 	}
 
-Assertions, preconditions, and postconditions are never *executed*, so they
-cannot contain any `!` actions.
+Assertions, preconditions, and postconditions are never executed at runtime, so
+they cannot contain any `!` actions.
 
 ### Quantifiers
 
@@ -568,8 +608,8 @@ However,
 
 is `true` because *every* number bigger than `10` is also bigger than `0`.
 
-"There exists" can be expressed by negating a quantifier, but typically such a
-value can instead be explicitly computed.
+"There exists" can be expressed by negating a `forall`. However, typically you
+can construct a value to show that it exists.
 
 ## Failure and Unsoundness
 
@@ -582,7 +622,7 @@ never
 
 However, Smol as designed is **not** entirely sound.
 
-### Unchecked errors
+### Unchecked Runtime Errors
 
 Some runtime edgecases are not handled by Smol for simplicity.
 While these can typically be avoided by properly designing your program, Smol
@@ -595,7 +635,7 @@ In the real world, `new` may fail because the program has run out of all memory.
 However, Smol assumes it will always succeed and has no way to handle allocation
 failures.
 
-#### Stack overflow
+#### Stack Overflow
 Smol currently assumes you have enough stack space to run your program.
 Because Smol has no looping construct, it's not possible to bound the growth of
 the stack. As a result, recursion may require an unpredictable amount of space.
