@@ -1,0 +1,14 @@
+package test;
+
+class Test {
+
+	static f(a Int, b Int, c Int) Unit
+	requires a < b
+	requires b < c
+	{
+		assert a < c;
+	}
+
+	static main() Unit {
+	}
+}

@@ -126,8 +126,15 @@ local function quitUsage()
 		"USAGE:\n",
 		"\tlua compiler.lua",
 		" --sources <sequence of one-or-more .smol files>",
-		" --main <mainpackage:Mainclass>",
-		"\n\n\tFor example, `lua compiler.lua --sources foo.smol --main main:Main`"
+		" --main <mainpackage:Mainclass>\n",
+		"\n",
+		"\tFor example,\n\t\tlua compiler.lua --sources foo.smol --main main:Main\n",
+		"\n",
+		"\tOptional Flags:\n",
+		"\t\t--nocolor\n\t\t\tDo NOT use ANSI escape codes to color output\n",
+		"\t\t--color\n\t\t\tDO use ANSI escape codes to color output\n",
+		"\t\t--location column\n\t\t\tThe default location description, for humans.\n",
+		"\t\t--location index\n\t\t\tLocation description, for machines.\n"
 	)
 end
 
@@ -148,6 +155,12 @@ for i = 1, #ARGV do
 	end
 end
 
+if commandMap.color then
+	ansi.enabled = true
+elseif commandMap.nocolor then
+	ansi.enabled = false
+end
+
 -- Check the command line arguments
 if not commandMap.main or #commandMap.main ~= 1 then
 	quitUsage()
@@ -156,14 +169,25 @@ elseif not commandMap.sources or #commandMap.sources == 0 then
 end
 
 if commandMap.location then
-	-- TODO: assert that it is correct
 	LOCATION_MODE = commandMap.location[1]
+
+	if LOCATION_MODE ~= "column" and LOCATION_MODE ~= "index" then
+		quitUsage()
+	end
 end
 
-if commandMap.color then
-	ansi.enabled = true
-elseif commandMap.nocolor then
-	ansi.enabled = false
+local knownFlags = {
+	color = true,
+	location = true,
+	main = true,
+	nocolor = true,
+	sources = true,
+}
+
+for key in pairs(commandMap) do
+	if not knownFlags[key] then
+		quitUsage()
+	end
 end
 
 -- Main ------------------------------------------------------------------------

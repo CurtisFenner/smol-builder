@@ -779,18 +779,19 @@ struct _smol_Int {
 		table.insert(code, "")
 	end
 
-	-- TODO: generate a tagged union for each union
+	-- Generate a tagged union for each union
 	for _, union in ipairs(semantics.unions) do
 		-- Open struct definition
 		table.insert(code, "// union " .. union.name)
 		local structName = unionStructName(union.name)
+
+		-- TODO: Generate a union rather than a struct
 		table.insert(code, "struct _" .. structName .. "{")
 
 		-- Generate tag
 		assert(#union.fields < 64)
 		table.insert(code, "\tunsigned " .. TAG_FIELD .. ";")
 
-		-- TODO: generate a union
 		-- Generate all value fields
 		for _, field in ipairs(union.fields) do
 			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. unionFieldName(field.name) .. ";")

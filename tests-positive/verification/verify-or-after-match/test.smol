@@ -14,7 +14,6 @@ union AB {
 }
 
 class Test {
-
 	static foo(u Int, opaque AB) Unit {
 		var x Int = u;
 
@@ -27,7 +26,6 @@ class Test {
 			}
 		}
 
-		// TODO: closed union assumption should be a forall
 		//assert (opaque is a).or(opaque is b);
 		assert (x == 0).or(x == 1);
 	}
