@@ -211,7 +211,10 @@ local function lexSmol(source, filename)
 				local c = source:sub(i, i)
 				if c == "\n" or c == "\r" then
 					location.ends = advanceCursor(source:sub(1, i - 1))
-					quit("The compiler found an unfinished string literal ", location)
+					quit(
+						"The compiler found an unfinished string literal ",
+						location
+					)
 				end
 				if escaped then
 					if not SPECIAL[c] then
@@ -277,10 +280,8 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				quit(
-					"The compiler could not recognize any token ",
-					table.with(location, "ends", location.begins)
-				)
+				local badToken = table.with(location, "ends", location.begins)
+				quit("The compiler could not recognize any token ", badToken)
 			end
 		end
 	end

@@ -53,7 +53,11 @@ function ansi.measure(text)
 		end
 		local toMeasure = line:gsub("\27%[%d+m", "")
 		local line = line:sub(1, -2)
-		table.insert(lines, {text = line, width = #toMeasure, formats = formats})
+		table.insert(lines, {
+			text = line,
+			width = #toMeasure,
+			formats = formats,
+		})
 	end
 	return lines
 end

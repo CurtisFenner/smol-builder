@@ -570,11 +570,21 @@ function Report.NO_MAIN_STATIC(p)
 end
 
 function Report.MAIN_MUST_NOT_BE_GENERIC(p)
-	quit("The class `" .. p.name .. "` is generic, so it cannot be used as", " a main class.")
+	quit(
+		"The class `",
+		p.name,
+		"` is generic, so it cannot be used as",
+		" a main class."
+	)
 end
 
 function Report.UNKNOWN_OPERATOR_USED(p)
-	quit("You try to use the undefined operator `", p.operator, "` ", p.location)
+	quit(
+		"You try to use the undefined operator `",
+		p.operator,
+		"` ",
+		p.location
+	)
 end
 
 function Report.THIS_USED_OUTSIDE_METHOD(p)
@@ -623,9 +633,13 @@ end
 
 function Report.QUANTIFIER_USED_IN_IMPLEMENTATION(p)
 	quit(
-		"The `", p.quantifier, "` quantifier can only be used in ",
+		"The `",
+		p.quantifier,
+		"` quantifier can only be used in ",
 		"`requires`, `ensures,` `assert` conditions.",
-		"\nHowever, you use `", p.quantifier, "` ",
+		"\nHowever, you use `",
+		p.quantifier,
+		"` ",
 		p.location
 	)
 end

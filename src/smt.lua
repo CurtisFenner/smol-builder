@@ -616,7 +616,6 @@ local function reduceQuantifiedContradiction(theory, additional, quantifierAssig
 		table.insert(notThis, {k, not v})
 	end
 
-
 	return {notThis}
 end
 
@@ -638,7 +637,9 @@ local function cnfSAT(theory, cnf, meta)
 			for _, t in ipairs(cnf:freeTermSet()) do
 				table.insert(keys, t)
 			end
-			table.sort(keys, function(a, b) return theory:canonKey(a) < theory:canonKey(b) end)
+			table.sort(keys, function(a, b)
+				return theory:canonKey(a) < theory:canonKey(b)
+			end)
 			local description = {}
 			for i = 1, #keys do
 				if assignment[keys[i]] == nil then
@@ -728,7 +729,12 @@ local function cnfSAT(theory, cnf, meta)
 				assert(newCNF:isContradiction())
 
 				-- Reduce the current assignment using the above contradiction
-				local e = reduceQuantifiedContradiction(theory, expansionClauses, currentAssignment, newCNF:learnedClauses())
+				local e = reduceQuantifiedContradiction(
+					theory,
+					expansionClauses,
+					currentAssignment,
+					newCNF:learnedClauses()
+				)
 				for _, clause in ipairs(e) do
 					cnf:addClause(clause)
 				end
@@ -799,7 +805,6 @@ end
 -- `theory`.
 -- RETURNS false, counterexample | true
 local function implies(theory, givens, expression)
-
 	-- Is the case where givens are true but expression false satisfiable?
 	local args = {}
 	local truths = {}

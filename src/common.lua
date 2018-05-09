@@ -42,7 +42,7 @@ end
 
 local function locationBrief(location)
 	assertis(location, "Location")
-	
+
 	local begins, ends = location.begins, location.ends
 	if type(begins) == "string" or type(ends) == "string" then
 		-- Internal code
@@ -716,7 +716,6 @@ local function showStatement(statement, indent)
 		return pre .. " <?>"
 	end
 end
-
 
 --------------------------------------------------------------------------------
 

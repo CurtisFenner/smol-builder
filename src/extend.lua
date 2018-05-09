@@ -125,7 +125,10 @@ end
 
 -- RETURNS a list produced by mapping each element of `list` through `f`
 function table.map(f, list, ...)
-	assert(type(f) == "function", "the first argument to table.map must be a function")
+	assert(
+		type(f) == "function",
+		"the first argument to table.map must be a function"
+	)
 	local out = {}
 	for k, v in ipairs(list) do
 		out[k] = f(v, ...)
@@ -211,8 +214,12 @@ function spairs(t, vf)
 	for key in pairs(t) do
 		keys[#keys + 1] = key
 	end
-	vf = vf or function(x) return x end
-	table.sort(keys, function(a, b) return vf(a) < vf(b) end)
+	vf = vf or function(x)
+		return x
+	end
+	table.sort(keys, function(a, b)
+		return vf(a) < vf(b)
+	end)
 	local i = 0
 	return function()
 		i = i + 1

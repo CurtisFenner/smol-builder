@@ -176,7 +176,7 @@ do
 	assert(table.indexof(reason15, "d"))
 	assert(not table.indexof(reason15, "e"))
 	assert(not table.indexof(reason15, "f"))
-	
+
 	-- Redundant (implementation detail)
 	assert(not table.indexof(reason15, "g"))
 end
