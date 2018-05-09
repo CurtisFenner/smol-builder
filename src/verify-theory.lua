@@ -250,11 +250,7 @@ local function m_scan(self, object)
 		for _, argument in ipairs(object.arguments) do
 			table.insert(arguments, m_scan(self, argument))
 		end
-		local canon = fnAssertion(
-			object.signature,
-			arguments,
-			object.index
-		)
+		local canon = fnAssertion(object.signature, arguments, object.index)
 		self.relevant[shown] = canon
 		for _, argument in ipairs(arguments) do
 			m_ref(self, canon, argument)
@@ -636,6 +632,7 @@ function theory:isSatisfiable(modelInput)
 				local id, subs = recursiveStructure(expression)
 				if id then
 					assert(#subs >= 1)
+
 					-- A recursive expression
 					local keyStrings = {id}
 					for _, sub in ipairs(subs) do

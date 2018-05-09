@@ -94,10 +94,10 @@ REGISTER_TYPE("Signature", recordType {
 	bang = "boolean",
 	requiresAST = listType "ASTExpression",
 	ensuresAST = listType "ASTExpression",
-	logic = choiceType(constantType(false), mapType(
-		"boolean",
-		listType(listType(choiceType("boolean", constantType "*")))
-	)),
+	logic = choiceType(
+		constantType(false),
+		mapType("boolean", listType(listType(choiceType("boolean", constantType "*"))))
+	),
 	eval = choiceType(constantType(false), "function"),
 })
 
@@ -287,7 +287,7 @@ EXTEND_TYPE("GenericStaticCallSt", "AbstractStatementIR", recordType {
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	signature = "Signature",
-	
+
 	-- XXX: delete this
 	staticName = "nil",
 })

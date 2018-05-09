@@ -57,7 +57,7 @@ local function generateVariable(nameHint, type, location)
 	assertis(nameHint, "string")
 	assertis(type, "Type+")
 	assertis(location, "Location")
-	
+
 	local variable = freeze {
 		name = generateLocalID(nameHint),
 		type = type,
@@ -482,7 +482,6 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 		end
 	end
 
-	
 	-- Verify exactly one constraint supplies this method name
 	if #matches == 0 then
 		-- TODO: get alternatives
@@ -689,7 +688,11 @@ local compileExpression
 local function compileWhen(conditionExpression, thenBody, scope, subEnvironment)
 	assertis(thenBody, "StatementIR")
 
-	local conditionEval, conditionVars = compileExpression(conditionExpression, scope, subEnvironment)
+	local conditionEval, conditionVars = compileExpression(
+		conditionExpression,
+		scope,
+		subEnvironment
+	)
 	checkSingleBoolean(conditionVars, "when")
 	assert(#conditionVars == 1)
 	assert(areTypesEqual(conditionVars[1].type, BOOLEAN_TYPE))
@@ -710,7 +713,8 @@ local function compileWhen(conditionExpression, thenBody, scope, subEnvironment)
 	}
 
 	return buildBlock {
-		conditionEval, guarded,
+		conditionEval,
+		guarded,
 	}
 end
 
@@ -861,10 +865,14 @@ local function irMethod(location, signature, base, arguments)
 	assertis(signature, "Signature")
 	assertis(base, "VariableIR")
 	assertis(arguments, listType "VariableIR")
-	
+
 	assert(#signature.returnTypes == 1)
 
-	local result = generateVariable(signature.longName .. "_result", signature.returnTypes[1], location)
+	local result = generateVariable(
+		signature.longName .. "_result",
+		signature.returnTypes[1],
+		location
+	)
 	local d1 = variableDescription(base)
 	local ds = {}
 	for i = 1, #arguments do
@@ -1034,7 +1042,11 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 		)
 		assertis(method.signature, "Signature")
 
-		local substituter = getSubstituterFromInterface(method.constraint, baseInstance.type, allDefinitions)
+		local substituter = getSubstituterFromInterface(
+			method.constraint,
+			baseInstance.type,
+			allDefinitions
+		)
 
 		local methodFullName = method.signature.longName
 
@@ -1194,7 +1206,11 @@ local function compileMethod(baseInstance, arguments, methodName, bang, location
 	local evaluation = {}
 	local destinations = {}
 	for _, returnType in ipairs(method.returnTypes) do
-		local destination = generateVariable(method.longName .. "_result", substituter(returnType), location)
+		local destination = generateVariable(
+			method.longName .. "_result",
+			substituter(returnType),
+			location
+		)
 		table.insert(destinations, destination)
 		table.insert(evaluation, localSt(destination))
 	end
@@ -1435,7 +1451,11 @@ local function compileStatic(t, argumentSources, funcName, bang, location, envir
 	local evaluation = {}
 	local outs = {}
 	for _, returnType in ipairs(method.returnTypes) do
-		local returnVariable = generateVariable(method.longName .. "_result", substituter(returnType), location)
+		local returnVariable = generateVariable(
+			method.longName .. "_result",
+			substituter(returnType),
+			location
+		)
 		table.insert(outs, returnVariable)
 		table.insert(evaluation, localSt(returnVariable))
 	end
@@ -1652,7 +1672,14 @@ function compileExpression(pExpression, scope, environment)
 			environment
 		)
 
-		local invocation, out = compileStatic(t, argumentSources, n, pExpression.bang, location, environment)
+		local invocation, out = compileStatic(
+			t,
+			argumentSources,
+			n,
+			pExpression.bang,
+			location,
+			environment
+		)
 		return buildBlock {argumentEvaluation, invocation}, out
 	elseif pExpression.tag == "method-call" then
 		local n = pExpression.methodName
@@ -1669,7 +1696,14 @@ function compileExpression(pExpression, scope, environment)
 		local baseInstance = subSources[1]
 		local arguments = table.rest(subSources, 2)
 
-		local call, out = compileMethod(baseInstance, arguments, n, pExpression.bang, location, environment)
+		local call, out = compileMethod(
+			baseInstance,
+			arguments,
+			n,
+			pExpression.bang,
+			location,
+			environment
+		)
 		return buildBlock {subEvaluation, call}, out
 	elseif pExpression.tag == "keyword" then
 		if pExpression.keyword == "false" or pExpression.keyword == "true" then
@@ -1787,7 +1821,11 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 
-			local result = generateVariable("variant", substituter(field.type), pExpression.location)
+			local result = generateVariable(
+				"variant",
+				substituter(field.type),
+				pExpression.location
+			)
 			local access = {
 				tag = "variant",
 				variant = pExpression.field,
@@ -1878,7 +1916,7 @@ function compileExpression(pExpression, scope, environment)
 				}
 			end
 		end
-		
+
 		-- Check if the operator is known
 		if not table.haskey(OPERATOR_ALIAS, pExpression.operator) then
 			return Report.UNKNOWN_OPERATOR_USED {
@@ -1887,11 +1925,16 @@ function compileExpression(pExpression, scope, environment)
 			}
 		end
 
-		local operatorAsMethodName = OPERATOR_ALIAS[pExpression.operator]		
+		local operatorAsMethodName = OPERATOR_ALIAS[pExpression.operator]
 
 		-- Rewrite the operations as a method call
 		local callEvaluation, callOut = compileMethod(
-			left, {right}, operatorAsMethodName, false, pExpression.location, environment
+			left,
+			{right},
+			operatorAsMethodName,
+			false,
+			pExpression.location,
+			environment
 		)
 		return buildBlock {leftEvaluation, rightEvaluation, callEvaluation}, callOut
 	elseif pExpression.tag == "isa" then
@@ -2501,7 +2544,11 @@ local function semanticsSmol(sources, main)
 				signature = table.with(signature, "body", method.body)
 				signature = table.with(signature, "resolveType", resolveType)
 				signature = table.with(signature, "resolveInterface", resolveInterface)
-				signature = table.with(signature, "longName", structName .. ":" .. signature.memberName)
+				signature = table.with(
+					signature,
+					"longName",
+					structName .. ":" .. signature.memberName
+				)
 				table.insert(signatures, signature)
 			end
 
@@ -2602,7 +2649,11 @@ local function semanticsSmol(sources, main)
 			-- Check that each signature matches
 			for _, iSignature in ipairs(interface.signatures) do
 				-- Search for a method/static with the same name, if any
-				local cSignature = table.findwith(class.signatures, "memberName", iSignature.memberName)
+				local cSignature = table.findwith(
+					class.signatures,
+					"memberName",
+					iSignature.memberName
+				)
 				if not cSignature then
 					Report.INTERFACE_REQUIRES_MEMBER {
 						class = class.name,
@@ -2921,11 +2972,7 @@ local function semanticsSmol(sources, main)
 				local verify = generatePreconditionVerify(
 					ensures,
 					containingSignature,
-					{
-						arguments = arguments,
-						this = thisVariable,
-						container = containerType
-					},
+					{arguments = arguments, this = thisVariable, container = containerType,},
 					sub,
 					context,
 					location
@@ -3036,7 +3083,11 @@ local function semanticsSmol(sources, main)
 					sources = subsources
 				elseif #pStatement.values == 0 then
 					-- Returning no values is equivalent to returning one unit
-					local unitVariable = generateVariable("unit_return", UNIT_TYPE, pStatement.location)
+					local unitVariable = generateVariable(
+						"unit_return",
+						UNIT_TYPE,
+						pStatement.location
+					)
 					local execution = buildBlock {
 						localSt(unitVariable),
 						{
@@ -3313,7 +3364,11 @@ local function semanticsSmol(sources, main)
 					}
 
 					for _, variant in ipairs(unhandledVariants) do
-						local isBad = generateVariable("isBad_" .. variant, BOOLEAN_TYPE, pStatement.location)
+						local isBad = generateVariable(
+							"isBad_" .. variant,
+							BOOLEAN_TYPE,
+							pStatement.location
+						)
 						table.insert(seq, localSt(isBad))
 						table.insert(seq, {
 							tag = "isa",
@@ -3323,7 +3378,12 @@ local function semanticsSmol(sources, main)
 							returns = "no",
 						})
 
-						local isNotBadSt, isNotBad = irMethod(pStatement.location, NOT_SIGNATURE, isBad, {})
+						local isNotBadSt, isNotBad = irMethod(
+							pStatement.location,
+							NOT_SIGNATURE,
+							isBad,
+							{}
+						)
 						table.insert(seq, isNotBadSt)
 
 						table.insert(seq, {
@@ -3579,7 +3639,11 @@ local function semanticsSmol(sources, main)
 				end
 
 				-- Returning no values is equivalent to returning one unit
-				local unitVariable = generateVariable("unit_return", UNIT_TYPE, containingSignature.body.location)
+				local unitVariable = generateVariable(
+					"unit_return",
+					UNIT_TYPE,
+					containingSignature.body.location
+				)
 				unitVariable = table.with(unitVariable, "description", "unit")
 				local returnSt = {
 					tag = "unit",

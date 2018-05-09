@@ -43,7 +43,11 @@ function parser.map(parser, f, includeLocation)
 
 		if includeLocation then
 			local ends = rest:priorLocation()
-			out = table.with(out, "location", {begins = begins.begins, ends = ends.ends})
+			out = table.with(
+				out,
+				"location",
+				{begins = begins.begins, ends = ends.ends}
+			)
 		end
 		return out, rest
 	end
@@ -51,7 +55,10 @@ end
 
 -- RETURNS a parser
 function parser.choice(options)
-	assert(type(options) == "table" or type(options) == "userdata", "parser.choice expects a list")
+	assert(
+		type(options) == "table" or type(options) == "userdata",
+		"parser.choice expects a list"
+	)
 	assert(#options >= 1)
 
 	return function(stream, grammar)
@@ -82,13 +89,21 @@ function parser.composite(components)
 
 	for i = 1, #components do
 		assert(#components[i] >= 2)
-		assert(type(components[i][1]) == "string", "component must provide key as string")
+		assert(
+			type(components[i][1]) == "string",
+			"component must provide key as string"
+		)
 		assert(components[i][1] ~= "tag", "component cannot use key 'tag'")
-		assert(components[i][1] ~= "location", "component cannot use key 'location'")
+		assert(
+			components[i][1] ~= "location",
+			"component cannot use key 'location'"
+		)
 
 		assert(
 			type(components[i][2]) == "function",
-			"component must provide member as parser" .. " (key `" .. components[i][1] .. "`" .. "; " .. i .. " of " .. #components .. ")"
+			"component must provide member as parser" .. " (key `" .. components[
+				i
+			][1] .. "`" .. "; " .. i .. " of " .. #components .. ")"
 		)
 
 		assert(#components[i] <= 3)
@@ -137,7 +152,13 @@ function parser.composite(components)
 				elseif i == #components then
 					context = contextFinish
 				end
-				quit("The compiler expected ", required, context, " ", stream:location())
+				quit(
+					"The compiler expected ",
+					required,
+					context,
+					" ",
+					stream:location()
+				)
 			else
 				-- This failed to parse
 				return nil
@@ -323,7 +344,12 @@ function parser.query(query, tag)
 		elseif query:match "%A%d%+$" then
 			-- Delimited
 			local before, delimiter, count = query:match "^(.+)(%A+)(%d+%+)$"
-			return parser.delimited(parser.query(before), count, delimiter, describe(before))
+			return parser.delimited(
+				parser.query(before),
+				count,
+				delimiter,
+				describe(before)
+			)
 		elseif query:sub(-1) == "+" then
 			return parser.oneOrMore(parser.query(query:sub(1, -2)))
 		elseif query == query:lower() then

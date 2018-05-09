@@ -104,7 +104,19 @@ function showLocation(location)
 
 	-- Include indexes for computer consumption of error messages
 	if LOCATION_MODE == "index" then
-		location = location .. "@" .. begins.filename .. ":" .. begins.line .. ":" .. begins.index .. "::" .. ends.line .. ":" .. ends.index
+		location = table.concat {
+			location,
+			"@",
+			begins.filename,
+			":",
+			begins.line,
+			":",
+			begins.index,
+			"::",
+			ends.line,
+			":",
+			ends.index,
+		}
 	end
 	return location
 end
@@ -355,12 +367,20 @@ for _, sourceFile in ipairs(sourceFiles) do
 	if not contents then
 		local file, err = io.open(sourceFile.path, "r")
 		if not file then
-			quit("The compiler could not open source file `", sourceFile.path, "`")
+			quit(
+				"The compiler could not open source file `",
+				sourceFile.path,
+				"`"
+			)
 		end
 		contents = file:read("*all")
 		file:close()
 		if not contents then
-			quit("The compiler could not read from the source file `", sourceFile.path, "`")
+			quit(
+				"The compiler could not read from the source file `",
+				sourceFile.path,
+				"`"
+			)
 		end
 	end
 	assert(contents)
