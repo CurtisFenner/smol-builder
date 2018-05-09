@@ -3,6 +3,7 @@
 
 local tokenization = import "tokenization.lua"
 local syntax = import "syntax.lua"
+local ansi = import "ansi.lua"
 
 -- RETURNS a parse object, or quits with a syntax error
 local function parseKind(s, k)
@@ -608,6 +609,117 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a string
+-- DEBUG USE ONLY
+local function showStatement(statement, indent)
+	-- RETURNS a string representing a list of VariableIR destinations
+	local function showDestinations(destinations)
+		return table.concat(table.map(table.getter "name", destinations), ", ")
+	end
+
+	indent = (indent or "")
+	local color = ansi.blue
+	if statement.tag == "verify" or statement.tag == "assume" or statement.tag == "proof" then
+		color = ansi.red
+	elseif statement.tag == "block" then
+		color = ansi.gray
+	end
+
+	local pre = indent .. color(statement.tag)
+	if statement.tag == "block" then
+		if #statement.statements == 0 then
+			return pre .. " {}"
+		end
+		local out = pre .. " {\n"
+		for _, element in ipairs(statement.statements) do
+			out = out .. showStatement(element, indent .. "\t") .. "\n"
+		end
+		return out .. indent .. "}"
+	elseif statement.tag == "proof" then
+		return pre .. " {\n" .. showStatement(statement.body, indent .. "\t") .. "\n" .. indent .. "}"
+	elseif statement.tag == "assume" then
+		return pre .. " " .. statement.variable.name
+	elseif statement.tag == "verify" then
+		local x = {}
+		table.insert(x, pre)
+		table.insert(x, " ")
+		table.insert(x, statement.variable.name)
+		table.insert(x, " // ")
+		table.insert(x, show(statement.reason))
+		return table.concat(x)
+	elseif statement.tag == "local" then
+		return pre .. " " .. statement.variable.name .. " " .. showType(statement.variable.type)
+	elseif statement.tag == "assign" then
+		return pre .. " " .. statement.destination.name .. " := " .. statement.source.name
+	elseif statement.tag == "isa" then
+		local x = {
+			pre .. " ",
+			statement.destination.name,
+			" := ",
+			statement.base.name,
+			" is ",
+			statement.variant,
+		}
+		return table.concat(x)
+	elseif statement.tag == "method-call" then
+		local destinations = showDestinations(statement.destinations)
+		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
+		local rhs = statement.baseInstance.name .. "." .. statement.signature.memberName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations .. " := " .. rhs
+	elseif statement.tag == "static-call" then
+		local destinations = showDestinations(statement.destinations)
+		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
+		local rhs = statement.signature.longName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations .. " := " .. rhs
+	elseif statement.tag == "generic-method-call" then
+		local destinations = showDestinations(statement.destinations)
+		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
+		local rhs = statement.baseInstance.name .. "." .. statement.signature.memberName .. "(" .. arguments .. ")"
+		return pre .. " " .. destinations .. " := " .. rhs
+	elseif statement.tag == "return" then
+		local out = {}
+		for _, s in ipairs(statement.sources) do
+			table.insert(out, s.name)
+		end
+		return pre .. " " .. table.concat(out, ", ")
+	elseif statement.tag == "if" then
+		local x = {}
+		table.insert(x, pre)
+		table.insert(x, " ")
+		table.insert(x, statement.condition.name)
+		table.insert(x, " then\n")
+		table.insert(x, showStatement(statement.bodyThen, indent .. "\t"))
+		table.insert(x, "\n" .. indent .. "else\n")
+		table.insert(x, showStatement(statement.bodyElse, indent .. "\t"))
+		return table.concat(x, "")
+	elseif statement.tag == "this" then
+		return pre .. " " .. statement.destination.name
+	elseif statement.tag == "field" then
+		local rhs = statement.base.name .. "." .. statement.name
+		return pre .. " " .. statement.destination.name .. " := " .. rhs
+	elseif statement.tag == "variant" then
+		local rhs = statement.base.name .. "." .. statement.variant
+		return pre .. " " .. statement.destination.name .. " := " .. rhs
+	elseif statement.tag == "new-class" then
+		local rhs = {}
+		for k, v in spairs(statement.fields) do
+			table.insert(rhs, k .. " -> " .. v.name)
+		end
+		rhs = table.concat(rhs, ", ")
+		local t = showType(statement.type)
+		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
+	elseif statement.tag == "new-union" then
+		local rhs = statement.field .. " -> " .. statement.value.name
+		local t = showType(statement.type)
+		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
+	else
+		return pre .. " <?>"
+	end
+end
+
+
+--------------------------------------------------------------------------------
+
 return freeze {
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
@@ -628,4 +740,6 @@ return freeze {
 	excerpt = excerpt,
 	locationBrief = locationBrief,
 	variableDescription = variableDescription,
+
+	showStatement = showStatement,
 }

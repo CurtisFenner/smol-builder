@@ -1,0 +1,11 @@
+package test;
+
+class Test {
+	static yes!() Boolean ensures return {
+		return true;
+	}
+
+	static main!() Unit {
+		assert forall (n Int) Test.yes!();
+	}
+}

@@ -155,11 +155,7 @@ local function showAssertion(assertion)
 	elseif assertion.tag == "symbol" then
 		return "(symbol " .. assertion.symbol .. ")"
 	elseif assertion.tag == "forall" then
-		local loc = assertion.location.begins
-		if type(loc) ~= "string" then
-			loc = loc.filename .. ":" .. loc.index
-		end
-		return "(forall " .. showType(assertion.quantified) .. " " .. loc .. ")"
+		return "(forall " .. showType(assertion.quantified) .. " " .. assertion.unique .. " " .. assertion.instance .. ")"
 	end
 	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
@@ -427,6 +423,9 @@ function theory:additionalClauses(model, meta)
 				newMeta[term.unique] = true
 			else
 				-- This quantifier has already been instantiated
+				-- NOTE: Foralls are identified by .unique AND by .instnace
+				-- Multiple quantifiers with difference .instance values SHOULD
+				-- be instantiated all at once
 			end
 		end
 	end

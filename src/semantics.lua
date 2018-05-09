@@ -71,8 +71,28 @@ end
 -- sequence
 local function buildBlock(statements)
 	assertis(statements, listType(recordType {}))
-	for i = 1, #statements do
-		assertis(statements[i], "StatementIR")
+
+	-- Blocks have absolutely no meaning (in terms of scope, etc):
+	-- Blocks ONLY group statements into a single statement for constructs that
+	-- require it.
+	-- For cleanliness, blocks-of-blocks are flattened.
+	-- However, this is NOT to be taken as a guarantee that blocks will never
+	-- contain blocks as children.
+	local flattenList = {}
+	local flatten = false
+	for _, s in ipairs(statements) do
+		assertis(s, "StatementIR")
+		if s.tag == "block" then
+			for _, c in ipairs(s.statements) do
+				table.insert(flattenList, c)
+			end
+			flatten = true
+		else
+			table.insert(flattenList, s)
+		end
+	end
+	if flatten then
+		return buildBlock(flattenList)
 	end
 
 	local returned = "no"
@@ -654,7 +674,8 @@ local function isExprPure(expr)
 	elseif expr.tag == "isa" then
 		return isExprPure(expr.base)
 	elseif expr.tag == "forall-expr" then
-		-- XXX: forall is always pure, but argument must be checked
+		-- The body of a forall is checked elsewhere; foralls never have side
+		-- effects since they are never run
 		return true
 	end
 	error("unknown tag `" .. expr.tag .. "`")
@@ -2043,7 +2064,9 @@ function compileExpression(pExpression, scope, environment)
 			quantified = variable1.type,
 			location = pExpression.location,
 			returns = "no",
-			unique = freeze {},
+
+			-- XXX: Use a monotonic counter
+			unique = tostring(math.random()),
 		}
 		assertis(forall, "ForallSt")
 
@@ -2069,7 +2092,7 @@ function compileExpression(pExpression, scope, environment)
 		return out, freeze {result}
 	end
 
-	error("TODO expression")
+	error("unknown expression tag")
 end
 
 local function typeFromDefinition(definition)
