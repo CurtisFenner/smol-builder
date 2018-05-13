@@ -116,7 +116,7 @@ Compiler bugs are inevitable, exercise caution!
 
 As of commit c5a8f99176f1a794ec5ff8849340c78b605c791f on 9 May 2018, all tests except
 
-* ["tests-negative/verification/unsound-oracle"](docs/smol#Nonterminating%20conditions)
+* ["tests-negative/verification/unsound-oracle"](docs/smol.md#nonterminating-conditions)
 
 are passing. 
 
