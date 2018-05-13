@@ -49,10 +49,9 @@ class HelloWorld {
 
 These instructions explain what you need to run `smolc` and the compiler tests.
 
-First, install Lua 5.1 or Lua 5.2. Lua may already be installed on your machine!
+First, install Lua 5.1, Lua 5.2, or Lua 5.3. Lua may already be installed on
+your machine!
 `$ lua -v` will print the installed version.
-
-Lua 5.3 is **not** supported at this time.
 
 Next, clone this repository.
 
@@ -92,7 +91,7 @@ While the compiler itself is intended to be very portable, the tests are not
 *quite* as portable.
 
 You need to have `ls` available in your path (Cygwin/MinGW will work on Windows)
-and your installation of Lua 5.1/5.2 must support `io.popen`
+and your installation of Lua 5.1/5.2/5.3 must support `io.popen`
 (most installations of Lua support `io.popen` by default).
 
 You also must have a version of `gcc` installed that supports (pedantic) C99.
