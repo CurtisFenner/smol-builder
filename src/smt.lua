@@ -27,11 +27,6 @@ REGISTER_TYPE("Theory", recordType {
 	additionalClauses = "function",
 })
 
--- RETURNS a type
-local function CNFType(theory)
-	return recordType {_theory = constantType(theory)}
-end
-
 --------------------------------------------------------------------------------
 
 local CNF = {}
@@ -400,26 +395,6 @@ end
 
 --------------------------------------------------------------------------------
 
--- a: a CNF description
--- b: a CNF description
--- RETURNS a CNF description
-local function disjunctionOfCNF(theory, a, b)
-	local clauses = {}
-	for _, x in ipairs(a) do
-		for _, y in ipairs(b) do
-			local disjunction = {}
-			for _, t in ipairs(x) do
-				table.insert(disjunction, t)
-			end
-			for _, t in ipairs(y) do
-				table.insert(disjunction, t)
-			end
-			table.insert(clauses, disjunction)
-		end
-	end
-	return clauses
-end
-
 local toCNF
 
 local function toCNFFromBreakup(theory, terms, assignments, normalization)
@@ -448,7 +423,14 @@ local function toCNFFromBreakup(theory, terms, assignments, normalization)
 	-- To create a single CNF, must distribute
 	local out = options[1]
 	for i = 2, #options do
-		out = disjunctionOfCNF(theory, out, options[i])
+		local right = options[i]
+		local disjunction = {}
+		for _, leftClause in ipairs(out) do
+			for _, rightClause in ipairs(options[i]) do
+				table.insert(disjunction, table.concatted(leftClause, rightClause))
+			end
+		end
+		out = disjunction
 	end
 	return out
 end
