@@ -468,7 +468,7 @@ local function fnLiteralEvaluation(expression, eq)
 	local reasons = {}
 	for i, argument in ipairs(expression.arguments) do
 		-- Evaluate each argument, stopping if a contradiction is reached
-		for _, equivalent in ipairs(eq:classOf(argument)) do
+		for _, equivalent in eq:classOf(argument):traverse() do
 			local literal = isLiteralAssertion(equivalent)
 			if literal ~= nil then
 				table.insert(argumentLiterals, literal)
@@ -596,7 +596,7 @@ function theory:isSatisfiable(modelInput)
 	local eq = UnionFind.new()
 	local symbols = {}
 	for _, expression in pairs(canon.relevant) do
-		eq:init(expression)
+		eq = eq:withInit(expression)
 		if expression.tag == "symbol" then
 			table.insert(symbols, expression)
 		end
@@ -618,111 +618,111 @@ function theory:isSatisfiable(modelInput)
 	while #positiveEq > 0 do
 		it = it + 1
 
-		watch:clock("union(" .. #positiveEq .. ")", function()
-			for _, bin in ipairs(positiveEq) do
-				eq:union(bin.left, bin.right, bin.raws)
-			end
-		end)
+		watch:before("union(" .. #positiveEq .. ")")
+		for _, bin in ipairs(positiveEq) do
+			eq = eq:withUnion(bin.left, bin.right, bin.raws)
+		end
+		watch:after("union(" .. #positiveEq .. ")")
 
 		positiveEq = {}
 
-		watch:clock("function unioning", function()
-			local byStructure = {}
-			for _, expression in pairs(canon.relevant) do
-				local id, subs = recursiveStructure(expression)
-				if id then
-					assert(#subs >= 1)
+		watch:before("function unioning")
+		local byStructure = {}
+		for _, expression in pairs(canon.relevant) do
+			local id, subs = recursiveStructure(expression)
+			if id then
+				assert(#subs >= 1)
 
-					-- A recursive expression
-					local keyStrings = {id}
-					for _, sub in ipairs(subs) do
-						table.insert(keyStrings, tostring(eq:classOf(sub)))
-					end
+				-- A recursive expression
+				local keyStrings = {id}
+				for _, sub in ipairs(subs) do
+					table.insert(keyStrings, tostring(eq:classOf(sub)))
+				end
 
-					local key = table.concat(keyStrings, ", ")
-					local other = byStructure[key]
-					if other then
-						if not eq:query(expression, other) then
-							-- Functions of equal arguments are equal
-							local _, otherSubs = recursiveStructure(other)
-							assert(#otherSubs == #subs)
-							local reasons = {}
-							for i in ipairs(subs) do
-								for _, set in ipairs(eq:reasonEq(subs[i], otherSubs[i])) do
-									for _, reason in ipairs(set) do
-										table.insert(reasons, reason)
-									end
+				local key = table.concat(keyStrings, ", ")
+				local other = byStructure[key]
+				if other then
+					if not eq:query(expression, other) then
+						-- Functions of equal arguments are equal
+						local _, otherSubs = recursiveStructure(other)
+						assert(#otherSubs == #subs)
+						local reasons = {}
+						for i in ipairs(subs) do
+							for _, set in ipairs(eq:reasonEq(subs[i], otherSubs[i])) do
+								for _, reason in ipairs(set) do
+									table.insert(reasons, reason)
 								end
 							end
-							table.insert(positiveEq, {
-								left = other,
-								right = expression,
-								raws = reasons,
-							})
 						end
-					else
-						byStructure[key] = expression
+						table.insert(positiveEq, {
+							left = other,
+							right = expression,
+							raws = reasons,
+						})
 					end
+				else
+					byStructure[key] = expression
 				end
 			end
-		end)
+		end
+		watch:after("function unioning")
 
 		-- Evaluate constant functions
-		watch:clock("constant eval", function()
-			for _, expression in pairs(canon.relevant) do
-				if expression.tag == "fn" then
-					local literal, reasons = fnLiteralEvaluation(expression, eq)
-					if literal ~= nil then
-						local literalExpression = constantAssertion(literal)
-						literalExpression = canon:scan(literalExpression)
-						eq:tryinit(literalExpression)
+		watch:before "constant eval"
+		for _, expression in pairs(canon.relevant) do
+			if expression.tag == "fn" then
+				local literal, reasons = fnLiteralEvaluation(expression, eq)
+				if literal ~= nil then
+					local literalExpression = constantAssertion(literal)
+					literalExpression = canon:scan(literalExpression)
+					eq = eq:withTryInit(literalExpression)
 
-						for _, reason in ipairs(reasons) do
-							assert(modelInput[reason] ~= nil)
-						end
+					for _, reason in ipairs(reasons) do
+						assert(modelInput[reason] ~= nil)
+					end
 
-						if not eq:query(literalExpression, expression) then
-							table.insert(positiveEq, {
-								left = expression,
-								right = literalExpression,
-								raws = reasons,
-							})
-						end
+					if not eq:query(literalExpression, expression) then
+						table.insert(positiveEq, {
+							left = expression,
+							right = literalExpression,
+							raws = reasons,
+						})
 					end
 				end
 			end
-		end)
+		end
+		watch:after "constant eval"
 	end
 
 	-- 4) Use each negative == assertion to separate groups
 	local rejects = {}
-	watch:clock("!=", function()
-		for _, bin in ipairs(negativeEq) do
-			local a, b = bin.left, bin.right
+	watch:before "!="
+	for _, bin in ipairs(negativeEq) do
+		local a, b = bin.left, bin.right
 
-			if eq:query(a, b) then
-				-- This model is inconsistent; explain the contradiction
-				local limited = {}
-				for _, a in ipairs(bin.raws) do
+		if eq:query(a, b) then
+			-- This model is inconsistent; explain the contradiction
+			local limited = {}
+			for _, a in ipairs(bin.raws) do
+				table.insert(limited, a)
+			end
+			for _, s in ipairs(eq:reasonEq(a, b)) do
+				for _, a in ipairs(s) do
 					table.insert(limited, a)
 				end
-				for _, s in ipairs(eq:reasonEq(a, b)) do
-					for _, a in ipairs(s) do
-						table.insert(limited, a)
-					end
-				end
-
-				assert(1 <= #limited)
-				table.insert(rejects, limited)
 			end
+
+			assert(1 <= #limited)
+			table.insert(rejects, limited)
 		end
-	end)
+	end
+	watch:after "!="
 
 	-- 5) Check that constants don't disagree
 	for _, expression in pairs(canon.relevant) do
 		local literal = isLiteralAssertion(expression)
 		if literal ~= nil then
-			for _, equivalent in ipairs(eq:classOf(expression)) do
+			for _, equivalent in eq:classOf(expression):traverse() do
 				local otherLiteral = isLiteralAssertion(equivalent)
 				if otherLiteral ~= nil and otherLiteral ~= literal then
 					local reject = table.concatted(table.unpack(eq:reasonEq(expression, equivalent)))
