@@ -1,13 +1,23 @@
 -- A SMT Solver
 
+local Map = import "map.lua"
 local ansi = import "ansi.lua"
 local Stopwatch = import "stopwatch.lua"
 
-REGISTER_TYPE("Theory", recordType {
-	-- argument: (self, simpleModel)
-	-- RETURNS true when simple assertion_t assertion may be inhabited
+REGISTER_TYPE("TheoryModel", recordType {
+	-- RETURNS true when the model may be inhabited
 	-- RETURNS false ONLY when it is provable that the model is not satisfiable
+	-- MODIFIES nothing
 	isSatisfiable = "function",
+
+	-- RETURNS new model
+	-- MODIFIES nothing
+	-- self:assign(assertion_t, boolean)
+	assigned = "function",
+})
+
+REGISTER_TYPE("Theory", recordType {
+	isSatisfiable = "nil",
 
 	-- argument: (self, assertion_t, boolean)
 	-- RETURNS false
@@ -25,6 +35,12 @@ REGISTER_TYPE("Theory", recordType {
 	-- additionalInfo is used to manage recursive instantiations, and may be
 	-- returned as nil
 	additionalClauses = "function",
+
+	-- RETURNS an empty "model" which can have theory terms assigned truths
+	-- via :assign(term, truth)
+	-- and :unassign()
+	-- and :isSatisfiable()
+	makeEmptyModel = "function",
 })
 
 --------------------------------------------------------------------------------
@@ -605,7 +621,10 @@ end
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no such satisfaction exists
 -- MODIFIES cnf to strengthen its clauses
-local function cnfSAT(theory, cnf, meta)
+local function cnfSAT(theory, cnf, meta, model)
+	assertis(theory, "Theory")
+	assertis(model, "TheoryModel")
+
 	local stack = {}
 	local watch = Stopwatch.new(string.format("cnfSAT(%d)", cnf:size()))
 
@@ -638,33 +657,18 @@ local function cnfSAT(theory, cnf, meta)
 		if cnf:isTautology() then
 			local currentAssignment = cnf:getAssignment()
 			watch:before "theory:isSatisfiable"
-			local out, conflicting = theory:isSatisfiable(currentAssignment)
+			local out, conflicting = model:isSatisfiable()
 			watch:after "theory:isSatisfiable"
 			if not out then
 				assert(conflicting)
 
-				watch:clock("issat conflicting", function()
-					assert(not theory:isSatisfiable(conflicting))
-				end)
-
 				-- While this truth model satisfies the CNF, the satisfaction
 				-- doesn't work in the theory
-				local keys = table.keys(conflicting)
-				table.sort(keys, function(a, b)
-					return theory:canonKey(a) < theory:canonKey(b)
-				end)
-
-				-- Ask the theory for a minimal explanation why this didn't work
-				watch:before "core"
-				local coreClauses = unsatisfiableCoreClause(
-					theory,
-					conflicting,
-					keys
-				)
-				watch:after "core"
-				for _, coreClause in ipairs(coreClauses) do
-					cnf:addClause(coreClause)
+				local coreClause = {}
+				for k, v in pairs(conflicting) do
+					table.insert(coreClause, {k, not v})
 				end
+				cnf:addClause(coreClause)
 			else
 				-- Expand quantified statements using the theory
 				watch:before "additionalClauses"
@@ -697,7 +701,7 @@ local function cnfSAT(theory, cnf, meta)
 				-- Recursively solve the new SAT problem
 				local newCNF = CNF.new(theory, newClauses, currentAssignment)
 				watch:before "subsat"
-				local sat = cnfSAT(theory, newCNF, newMeta)
+				local sat = cnfSAT(theory, newCNF, newMeta, model)
 				watch:after "subsat"
 				if sat then
 					-- Even after expanding quantifiers, the formula remained
@@ -744,11 +748,13 @@ local function cnfSAT(theory, cnf, meta)
 
 				local variable = stack[#stack].variable
 				local preferred = stack[#stack].preferTruth
+				model = stack[#stack].model
 				if stack[#stack].first then
 					-- Flip the assignment
 					stack[#stack].first = false
 					cnf:unassign(variable)
 					cnf:assign(variable, not preferred)
+					model = model:assigned(variable, not preferred)
 					break
 				else
 					-- Backtrack
@@ -763,8 +769,10 @@ local function cnfSAT(theory, cnf, meta)
 				variable = term,
 				preferTruth = prefer,
 				first = true,
+				model = model,
 			})
 			cnf:assign(term, prefer)
+			model = model:assigned(term, prefer)
 		end
 	end
 end
@@ -779,7 +787,7 @@ local function isSatisfiable(theory, expression)
 
 	local clauses = toCNF(theory, expression, true, {})
 	local cnf = CNF.new(theory, clauses, {})
-	local sat = cnfSAT(theory, cnf, theory:emptyMeta())
+	local sat = cnfSAT(theory, cnf, theory:emptyMeta(), theory:makeEmptyModel())
 	return sat
 end
 
@@ -800,7 +808,7 @@ local function implies(theory, givens, expression)
 
 	local clauses = toCNFFromBreakup(theory, args, {truths}, {})
 	local cnf = CNF.new(theory, clauses, {})
-	local sat = cnfSAT(theory, cnf, theory:emptyMeta())
+	local sat = cnfSAT(theory, cnf, theory:emptyMeta(), theory:makeEmptyModel())
 
 	if sat then
 		return false, sat
@@ -813,12 +821,20 @@ end
 -- plaintheory is an implementation of a Theory used to test the SMT solver
 local plaintheory = {assertion_t = "any"}
 
+function plaintheory.makeEmptyModel()
+	return {
+		isSatisfiable = plaintheory.checkModel,
+		assigned = plaintheory.modelAssigned,
+		_assignment = Map.new(),
+	}
+end
+
 -- Test theory
-function plaintheory:isSatisfiable(model)
+function plaintheory.checkModel(model)
 	for x = 1, 2 do
 		for y = 1, 2 do
 			local all = true
-			for k, v in pairs(model) do
+			for k, v in model._assignment:traverse() do
 				assert(type(v) == "boolean")
 				if type(k) ~= "string" and k[1] == "f" then
 					local e = k[2]
@@ -853,7 +869,21 @@ function plaintheory:isSatisfiable(model)
 			end
 		end
 	end
-	return false, model
+
+	-- No sat
+	local map = {}
+	for k, v in model._assignment:traverse() do
+		map[k] = v
+	end
+	return false, map
+end
+
+function plaintheory.modelAssigned(model, key, truth)
+	return {
+		isSatisfiable = plaintheory.checkModel,
+		assigned = plaintheory.modelAssigned,
+		_assignment = model._assignment:with(key, truth),
+	}
 end
 
 function plaintheory:breakup(e, target)

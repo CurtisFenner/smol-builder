@@ -1,0 +1,16 @@
+package test;
+
+class Test {
+	static opaque(n Int) Int {
+		return n;
+	}
+
+	static f(a Int, b Int) Unit
+	requires a == b {
+		assert Test.opaque(a) == Test.opaque(b);
+	}
+
+	static main() Unit {
+		
+	}
+}

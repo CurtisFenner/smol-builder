@@ -135,6 +135,36 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS the "next" key (traversal order is unspecified)
+function Map:next(key)
+	if self._rope:size() == 0 then
+		return nil
+	elseif key == nil then
+		return self._rope:get(1)[1]
+	end
+
+	local i = self:_getIndex(key)
+	assert(i)
+	if i == self._rope:size() then
+		return nil
+	end
+	return self._rope:get(i + 1)[1]
+end
+
+function Map:_iterator(key)
+	local n = self:next(key)
+	if n == nil then
+		return nil
+	end
+	return n, self:get(n)
+end
+
+function Map:traverse()
+	return Map._iterator, self, nil
+end
+
+--------------------------------------------------------------------------------
+
 if false then
 	local m = Map.new()
 	assert(m:get("foo") == nil)

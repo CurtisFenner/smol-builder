@@ -2,9 +2,10 @@ local Stopwatch = import "stopwatch.lua"
 
 local theory = {
 	assertion_t = "Assertion",
-	satisfaction_t = "any",
 }
 
+local Rope = import "rope.lua"
+local Map = import "map.lua"
 local UnionFind = import "unionfind.lua"
 
 local common = import "common.lua"
@@ -193,16 +194,6 @@ local function isLiteralAssertion(e)
 	return nil
 end
 
-local function m_ref(self, object, child)
-	local sChild = showAssertion(child)
-	local sObject = showAssertion(object)
-	assert(sChild ~= sObject)
-	assert(self.relevant[sChild], "child must already be in map")
-
-	self.referencedBy[child] = self.referencedBy[child] or {}
-	table.insert(self.referencedBy[child], self.relevant[sObject])
-end
-
 local globalCanon = {}
 
 -- Canonicalizes objects so that syntactically equivalent subtrees become the
@@ -224,18 +215,14 @@ local function m_scan(self, object)
 		elseif pre.tag == "fn" then
 			for _, argument in ipairs(pre.arguments) do
 				assert(argument == m_scan(self, argument))
-				m_ref(self, pre, argument)
 			end
 		elseif pre.tag == "field" or pre.tag == "variant" or pre.tag == "gettag" then
 			assert(pre.base == m_scan(self, pre.base))
-			m_ref(self, pre, pre.base)
 		elseif pre.tag == "forall" then
 			-- Do nothing
 		elseif pre.tag == "eq" then
 			assert(pre.left == m_scan(self, pre.left))
 			assert(pre.right == m_scan(self, pre.right))
-			m_ref(self, pre, pre.left)
-			m_ref(self, pre, pre.right)
 		else
 			error("unhandled tag " .. pre.tag)
 		end
@@ -250,48 +237,40 @@ local function m_scan(self, object)
 		for _, argument in ipairs(object.arguments) do
 			table.insert(arguments, m_scan(self, argument))
 		end
-		local canon = fnAssertion(object.signature, arguments, object.index)
-		self.relevant[shown] = canon
-		for _, argument in ipairs(arguments) do
-			m_ref(self, canon, argument)
-		end
+		local real = fnAssertion(object.signature, arguments, object.index)
+		self.relevant[shown] = real
 	elseif object.tag == "field" then
-		local canon = freeze {
+		local real = freeze {
 			tag = "field",
 			base = self:scan(object.base),
 			fieldName = object.fieldName,
 			definition = object.definition,
 		}
-		self.relevant[shown] = canon
-		m_ref(self, canon, canon.base)
+		self.relevant[shown] = real
 	elseif object.tag == "variant" then
-		local canon = freeze {
+		local real = freeze {
 			tag = "variant",
 			base = self:scan(object.base),
 			variantName = object.variantName,
 			definition = object.definition,
 		}
-		self.relevant[shown] = canon
-		m_ref(self, canon, canon.base)
+		self.relevant[shown] = real
 	elseif object.tag == "gettag" then
-		local canon = freeze {
+		local real = freeze {
 			tag = "gettag",
 			base = self:scan(object.base),
 		}
-		self.relevant[shown] = canon
-		m_ref(self, canon, canon.base)
+		self.relevant[shown] = real
 	elseif object.tag == "forall" then
 		-- Comparing by object identity is OK
 		self.relevant[shown] = object
 	elseif object.tag == "eq" then
-		local canon = freeze {
+		local real = freeze {
 			tag = "eq",
 			left = self:scan(object.left),
 			right = self:scan(object.right),
 		}
-		self.relevant[shown] = canon
-		m_ref(self, canon, canon.left)
-		m_ref(self, canon, canon.right)
+		self.relevant[shown] = real
 	end
 
 	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
@@ -392,10 +371,11 @@ end
 -- cnf: the remaining clauses to satisfy
 -- term: the key just added to model
 function theory:additionalClauses(model, meta)
+	assertis(model, mapType("Assertion", "boolean"))
 	assert(meta)
 
 	-- Collect all in-scope/relevant constants
-	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
+	local canon = {scan = m_scan; relevant = {}}
 	canon:scan(TRUE_ASSERTION)
 	canon:scan(FALSE_ASSERTION)
 	for _, v in spairs(INT_ASSERTIONS) do
@@ -453,6 +433,26 @@ local function recursiveStructure(e)
 	error("unknown Assertion tag `" .. e.tag .. "`")
 end
 
+-- RETURNS a set of expression and all their subexpressions
+local function recursiveComponents(e)
+	assertis(e, "Assertion")
+
+	local stack = {e}
+	local set = {[e] = true}
+	while #stack > 0 do
+		local _, children = recursiveStructure(table.remove(stack))
+		if children then
+			for _, child in ipairs(children) do
+				if not set[child] then
+					set[child] = true
+					table.insert(stack, child)
+				end
+			end
+		end
+	end
+	return set
+end
+
 -- RETURNS a Lua constant, reason when the function can be evaluated statically
 -- RETURNS nil otherwise
 local function fnLiteralEvaluation(expression, eq)
@@ -468,7 +468,7 @@ local function fnLiteralEvaluation(expression, eq)
 	local reasons = {}
 	for i, argument in ipairs(expression.arguments) do
 		-- Evaluate each argument, stopping if a contradiction is reached
-		for _, equivalent in eq:classOf(argument):traverse() do
+		for _, equivalent in eq:withTryInit(argument):classOf(argument):traverse() do
 			local literal = isLiteralAssertion(equivalent)
 			if literal ~= nil then
 				table.insert(argumentLiterals, literal)
@@ -492,261 +492,386 @@ local function fnLiteralEvaluation(expression, eq)
 	return expression.signature.eval(table.unpack(argumentLiterals)), reasons
 end
 
+-- list: [](A, B)
+-- RETURNS {A => B}
+local function listToMap(list)
+	assertis(list, listType(tupleType("any", "any")))
+
+	local m = {}
+	for _, pair in ipairs(list) do
+		m[pair[1]] = pair[2]
+	end
+	return m
+end
+
 -- RETURNS whether or not the given model is satisfiable in a quantifier free
 -- theory of uninterpreted functions
 -- as a part of the 'theory' interface for the SMT solver
-function theory:isSatisfiable(modelInput)
-	assertis(modelInput, mapType("Assertion", "boolean"))
+local function modelSatisfiable(self)
+	assertis(self, "SmolModel")
 
-	local watch = Stopwatch.new(string.format("theory(%d)", #table.keys(modelInput)), 0.1)
+	if self._contradiction then
+		return false, self._contradiction
+	end
 
-	local unquantifiedModel = {}
-	for key, value in pairs(modelInput) do
-		if key.tag == "forall" then
-			-- Do not handle here.
-			-- See theory:additionalClauses.
-		else
-			-- Regular, non-quantifier expression
-			unquantifiedModel[key] = value
+	-- Check that != are not equal
+	for _, bin in self._negatives:traverse() do
+		local a, b = bin.left, bin.right
+		if self._eq:query(a, b) then
+			-- This model is inconsistent; explain the contradiction
+			local limited = {}
+			for _, reason in ipairs(bin.reasons) do
+				table.insert(limited, reason)
+			end
+			for _, set in ipairs(self._eq:reasonEq(a, b)) do
+				for _, reason in ipairs(set) do
+					table.insert(limited, reason)
+				end
+			end
+			assert(1 <= #limited)
+
+			return false, listToMap(limited)
 		end
 	end
 
-	-- 1) Generate a list of relevant subexpressions
-	local canon = {scan = m_scan; relevant = {}, referencedBy = {}}
-	local trueAssertion = canon:scan(TRUE_ASSERTION)
-	local falseAssertion = canon:scan(FALSE_ASSERTION)
+	return true
+end
 
-	local simple = {}
+REGISTER_TYPE("SmolModel", recordType {
+	assigned = "function",
+	isSatisfiable = "function",
+	
+	_canon = "object",
 
-	watch:clock("canon", function()
-		for key, truth in pairs(unquantifiedModel) do
-			local object = canon:scan(key)
+	-- TODO: UnionFind
+	_eq = "object",
 
-			-- After canonicalizing, two expressions with different truth
-			-- assignments could be in the map
-			if simple[object] ~= nil and simple[object].truth ~= truth then
-				-- This model is inconsistent
-				-- TODO: be more specific
-				watch:finish()
-				return false, {
-					[key] = truth,
-					[simple[object].raw] = simple[object].truth,
-				}
+	-- TODO: Rope(record)
+	_negatives = "object",
+
+	-- TODO: Map
+	_assignments = "object",
+
+	-- TODO: Map(canon Assertion => raw Assertion)
+	_rawVersion = "object",
+
+	-- TODO: Map(raw Assertion => boolean)
+	_rawAssignment = "object",
+
+	-- TODO: Map(string => canon Assertion)
+	_functionMap = "object",
+
+	-- TODO: Map(representative Assertion => Map(canon Assertion => true))
+	_mentionMap = "object",
+
+	_contradiction = choiceType(
+		constantType(false),
+		mapType("Assertion", "boolean")
+	),
+})
+
+-- RETURNS false when the assertion is not function-like
+-- RETURN key (string), UF, set of representatives otherwise
+-- where 'key' is equal for all equal functions (the same function applied to
+-- equal arguments)
+local function makeKeyOfFunction(f, eq)
+	assertis(f, "Assertion")
+	assertis(eq, "object")
+
+	-- Find the arguments of the function-like assertion
+	local id, children = recursiveStructure(f)
+	if not id then
+		-- Assertions without arguments don't need to be handled like this
+		return false
+	end
+
+	-- Compute a canonical form for the function, as a string
+	eq = eq:withTryInit(f)
+	local functionIDs = {id}
+	local representatives = {}
+	local reasons = {}
+	for _, child in ipairs(children) do
+		eq = eq:withTryInit(child)
+		local representative = eq:representativeOf(child)
+		table.insert(functionIDs, tostring(representative))
+		table.insert(representatives, representative)
+	end
+	return table.concat(functionIDs, "@"), eq, representatives
+end
+
+-- RETURNS a set of reasons explaining why the two function values should be
+-- considered equal
+-- REQUIRES a and b are the same kind of function and should be equal
+local function reasonFnsEqual(f1, f2, eq)
+	assertis(f1, "Assertion")
+	assertis(f2, "Assertion")
+	assertis(eq, "object")
+
+	local s1, c1 = recursiveStructure(f1)
+	local s2, c2 = recursiveStructure(f2)
+
+	assert(s1 and s2)
+	assert(s1 == s2)
+	assert(#c1 == #c2)
+	local reasons = {}
+	for i = 1, #c1 do
+		for _, set in ipairs(eq:reasonEq(c1[i], c2[i])) do
+			for _, reason in ipairs(set) do
+				table.insert(reasons, reason)
 			end
-			simple[object] = {
-				truth = truth,
-				raw = key,
-			}
 		end
-	end)
+	end
+	return reasons
+end
 
-	assertis(simple, mapType("Assertion", recordType {
-		raw = "Assertion",
-		truth = "boolean",
-	}))
-	assertis(canon.relevant, mapType("string", "Assertion"))
-	assertis(canon.referencedBy, mapType("Assertion", listType("Assertion")))
+-- RETURNS a new version of the model acknowleding the new assignment,
+-- doing all work iteratively so that this is fast as well as contradiction
+-- detection is fast
+local function modelAssigned(self, key, truth)
+	assertis(self, "SmolModel")
+	
+	local eq = self._eq
+	local assertion = self._canon:scan(key)
 
-	-- 2) Find all positive == assertions
-	local positiveEq, negativeEq = {}, {}
+	if self._assignments:get(assertion) == truth then
+		-- No change
+		return self
+	elseif self._assignments:get(assertion) ~= nil then
+		-- Contradiction
+		local keyOne = self._rawVersion:get(assertion)
+		local truthOne = self._assignments:get(assertion)
+		return table.with(self, "_contradiction", {
+			[keyOne] = truthOne,
+			[key] = truth,
+		})
+	end
 
-	watch:clock("separate eq", function()
-		for assertion, about in spairs(simple, showAssertion) do
-			if assertion.tag == "eq" then
-				local left = canon:scan(assertion.left)
-				local right = canon:scan(assertion.right)
-				if about.truth then
-					table.insert(positiveEq, {
-						left = left,
-						right = right,
-						raws = {about.raw},
-					})
-				else
-					table.insert(negativeEq, {
-						left = left,
-						right = right,
-						raws = {about.raw},
+	local quantifiers = self._quantifiers
+	local neq = self._negatives
+
+	local eqQueue = {}
+
+	local functionMap = self._functionMap
+	local mentionMap = self._mentionMap
+
+	-- RETURNS nothing
+	-- MODIFIES eq, functionMap, mentionMap
+	local function recheckFunction(subassertion)
+		assertis(subassertion, "Assertion")
+
+		local key, newEq, reps = makeKeyOfFunction(subassertion, eq)
+		if key then
+			eq = newEq
+			if not functionMap:get(key) then
+				functionMap = functionMap:with(key, subassertion)
+			end
+			local other = functionMap:get(key)
+			if other ~= subassertion then
+				-- Functions with the same canonicalized key should be equal
+				if not eq:query(subassertion, other) then
+					local reasons = reasonFnsEqual(subassertion, other, eq)
+					table.insert(eqQueue, {
+						left = subassertion,
+						right = other,
+						reasons = reasons,
 					})
 				end
 			end
 
-			if about.truth then
-				table.insert(positiveEq, {
-					left = trueAssertion,
-					right = assertion,
-					raws = {about.raw},
-				})
-			else
-				table.insert(positiveEq, {
-					left = falseAssertion,
-					right = assertion,
-					raws = {about.raw},
-				})
+			-- Mark this assertion to be notified if a representative is
+			-- superceded
+			for _, rep in ipairs(reps) do
+				local previousSet = mentionMap:get(rep) or Map.new()
+				mentionMap = mentionMap:with(rep, previousSet:with(subassertion, true))
 			end
-		end
-	end)
-
-	table.insert(negativeEq, {
-		left = falseAssertion,
-		right = trueAssertion,
-		raws = {},
-	})
-
-	-- 3) Use each positive == assertion to join representatives
-	local eq = UnionFind.new()
-	local symbols = {}
-	for _, expression in pairs(canon.relevant) do
-		eq = eq:withInit(expression)
-		if expression.tag == "symbol" then
-			table.insert(symbols, expression)
 		end
 	end
 
-	-- Distinct symbols are not equal
-	for i = 1, #symbols do
-		for j = 1, i - 1 do
-			table.insert(negativeEq, {
-				left = symbols[i],
-				right = symbols[j],
-				raws = {},
+	-- Identify all the functions in this new term and canonicalize and index
+	-- them using the UF data structure
+	for subassertion in pairs(recursiveComponents(assertion)) do
+		recheckFunction(subassertion)
+	end
+
+	if assertion.tag == "forall" then
+		-- Quantifiers are unhandled here
+		quantifiers = quantifiers:with(assertion, truth)
+	else
+		if assertion.tag == "eq" then
+			local left = self._canon:scan(assertion.left)
+			local right = self._canon:scan(assertion.right)
+			
+			if truth then
+				-- a = b joins union find
+				table.insert(eqQueue, {
+					left = left,
+					right = right,
+					reasons = {{key, truth}},
+				})
+			else
+				-- a != b joins list of disequalities
+				eq = eq:withTryInit(left)
+				eq = eq:withTryInit(right)
+				neq = neq .. Rope.singleton {
+					left = left,
+					right = right,
+					reasons = {{key, truth}},
+				}
+			end
+		end
+
+		if truth then
+			table.insert(eqQueue, {
+				left = self._canon:scan(TRUE_ASSERTION),
+				right = assertion,
+				reasons = {{key, truth}},
+			})
+		else
+			table.insert(eqQueue, {
+				left = self._canon:scan(FALSE_ASSERTION),
+				right = assertion,
+				reasons = {{key, truth}},
 			})
 		end
 	end
 
-	-- Union find
-	local it = 0
-	while #positiveEq > 0 do
-		it = it + 1
+	local contradiction = self._contradiction
 
-		watch:before("union(" .. #positiveEq .. ")")
-		for _, bin in ipairs(positiveEq) do
-			eq = eq:withUnion(bin.left, bin.right, bin.raws)
-		end
-		watch:after("union(" .. #positiveEq .. ")")
+	while 0 < #eqQueue do
+		local was = eqQueue
+		eqQueue = {}
+		for _, r in ipairs(was) do
+			-- This may be the first mention of these objects to the UF
+			eq = eq:withTryInit(r.left)
+			eq = eq:withTryInit(r.right)
 
-		positiveEq = {}
+			local oldLeftRep = eq:representativeOf(r.left)
+			local oldRightRep = eq:representativeOf(r.right)
 
-		watch:before("function unioning")
-		local byStructure = {}
-		for _, expression in pairs(canon.relevant) do
-			local id, subs = recursiveStructure(expression)
-			if id then
-				assert(#subs >= 1)
+			-- Join the objects in the UF data-structure
+			eq = eq:withUnion(r.left, r.right, r.reasons)
 
-				-- A recursive expression
-				local keyStrings = {id}
-				for _, sub in ipairs(subs) do
-					table.insert(keyStrings, tostring(eq:classOf(sub)))
-				end
-
-				local key = table.concat(keyStrings, ", ")
-				local other = byStructure[key]
-				if other then
-					if not eq:query(expression, other) then
-						-- Functions of equal arguments are equal
-						local _, otherSubs = recursiveStructure(other)
-						assert(#otherSubs == #subs)
-						local reasons = {}
-						for i in ipairs(subs) do
-							for _, set in ipairs(eq:reasonEq(subs[i], otherSubs[i])) do
-								for _, reason in ipairs(set) do
-									table.insert(reasons, reason)
-								end
-							end
-						end
-						table.insert(positiveEq, {
-							left = other,
-							right = expression,
-							raws = reasons,
-						})
-					end
-				else
-					byStructure[key] = expression
-				end
-			end
-		end
-		watch:after("function unioning")
-
-		-- Evaluate constant functions
-		watch:before "constant eval"
-		for _, expression in pairs(canon.relevant) do
-			if expression.tag == "fn" then
-				local literal, reasons = fnLiteralEvaluation(expression, eq)
-				if literal ~= nil then
-					local literalExpression = constantAssertion(literal)
-					literalExpression = canon:scan(literalExpression)
-					eq = eq:withTryInit(literalExpression)
-
-					for _, reason in ipairs(reasons) do
-						assert(modelInput[reason] ~= nil)
-					end
-
-					if not eq:query(literalExpression, expression) then
-						table.insert(positiveEq, {
-							left = expression,
-							right = literalExpression,
-							raws = reasons,
-						})
+			-- One of the representatives may have just been dethroned
+			local newRep = eq:representativeOf(r.left)
+			assert(newRep == oldLeftRep or newRep == oldRightRep)
+			if newRep ~= oldLeftRep then
+				if mentionMap:get(oldLeftRep) then
+					for mentioner in mentionMap:get(oldLeftRep):traverse() do
+						recheckFunction(mentioner)
 					end
 				end
-			end
-		end
-		watch:after "constant eval"
-	end
-
-	-- 4) Use each negative == assertion to separate groups
-	local rejects = {}
-	watch:before "!="
-	for _, bin in ipairs(negativeEq) do
-		local a, b = bin.left, bin.right
-
-		if eq:query(a, b) then
-			-- This model is inconsistent; explain the contradiction
-			local limited = {}
-			for _, a in ipairs(bin.raws) do
-				table.insert(limited, a)
-			end
-			for _, s in ipairs(eq:reasonEq(a, b)) do
-				for _, a in ipairs(s) do
-					table.insert(limited, a)
+			elseif newRep ~= oldRightRep then
+				if mentionMap:get(oldRightRep) then
+					for mentioner in mentionMap:get(oldRightRep):traverse() do
+						recheckFunction(mentioner)
+					end
 				end
+			else
+				assert(oldLeftRep == oldRightRep)
 			end
 
-			assert(1 <= #limited)
-			table.insert(rejects, limited)
-		end
-	end
-	watch:after "!="
+			-- Check if this has created a contradiction
+			if not contradiction then
+				-- Check that we haven't violated symbol/literal distinctness
+				local symbols = eq:specialsOf("symbol", r.left)
+				local literals = eq:specialsOf("literal", r.left)
 
-	-- 5) Check that constants don't disagree
-	for _, expression in pairs(canon.relevant) do
-		local literal = isLiteralAssertion(expression)
-		if literal ~= nil then
-			for _, equivalent in eq:classOf(expression):traverse() do
-				local otherLiteral = isLiteralAssertion(equivalent)
-				if otherLiteral ~= nil and otherLiteral ~= literal then
-					local reject = table.concatted(table.unpack(eq:reasonEq(expression, equivalent)))
-					table.insert(rejects, reject)
+				if 1 < symbols:size() then
+					local reasons = table.concatted(table.unpack(eq:reasonEq(symbols:get(1), symbols:get(2))))
+					contradiction = listToMap(reasons)
+				elseif 1 < literals:size() then
+					local reasons = table.concatted(table.unpack(eq:reasonEq(literals:get(1), literals:get(2))))
+					contradiction = listToMap(reasons)
 				end
 			end
 		end
+
+		-- Prepare for joining
+		-- for _, e in pairs(self._canon.relevant) do
+		-- 	eq = eq:withTryInit(e)
+		-- 	local id, subs = recursiveStructure(e)
+		-- 	if id then
+		-- 		assert(1 <= #subs)
+		-- 		for _, sub in ipairs(subs) do
+		-- 			eq = eq:withTryInit(sub)
+		-- 		end
+		-- 	end
+
+		-- 	-- Constant evaluation
+		-- 	if e.tag == "fn" then
+		-- 		local literal, reasons = fnLiteralEvaluation(e, eq)
+		-- 		if literal ~= nil then
+		-- 			local literalExpression = constantAssertion(literal)
+		-- 			literalExpression = self._canon:scan(literalExpression)
+
+		-- 			eq = eq:withTryInit(literalExpression)
+		-- 			if not eq:query(literalExpression, e) then
+		-- 				table.insert(eqQueue, {
+		-- 					left = e,
+		-- 					right = literalExpression,
+		-- 					reasons = reasons,
+		-- 				})
+		-- 			end
+		-- 		end
+		-- 	end
+		-- end
 	end
 
-	if #rejects ~= 0 then
-		local best = rejects[1]
+	local out = {
+		assigned = modelAssigned,
+		isSatisfiable = modelSatisfiable,
 
-		local restricted = {}
-		for _, key in ipairs(best) do
-			assert(modelInput[key] ~= nil)
-			restricted[key] = modelInput[key]
-		end
+		_quantifiers = quantifiers,
+		_canon = self._canon,
+		_eq = eq,
+		_negatives = neq,
+		_assignments = self._assignments:with(assertion, truth),
+		_rawVersion = self._rawVersion:with(assertion, key),
+		_rawAssignment = self._rawAssignment:with(key, truth),
+		_contradiction = contradiction,
 
-		watch:finish()
-		return false, restricted
-	end
+		_mentionMap = mentionMap,
+		_functionMap = functionMap,
+	}
+	assertis(out, "SmolModel")
+	return out
+end
 
-	watch:finish()
-	return true
+-- RETURNS a SmolModel with no assignments
+function theory:makeEmptyModel()
+	local canon = {scan = m_scan; relevant = {}}
+	local out = {
+		assigned = modelAssigned,
+		isSatisfiable = modelSatisfiable,
+		_canon = canon,
+		_assignments = Map.new(),
+		_quantifiers = Map.new(),
+		_rawAssignment = Map.new(),
+		_rawVersion = Map.new(),
+		_contradiction = false,
+		_mentionMap = Map.new(),
+		_functionMap = Map.new(),
+	}
+
+	local aTrue = canon:scan(TRUE_ASSERTION)
+	local aFalse = canon:scan(FALSE_ASSERTION)
+	out._negatives = Rope.singleton {
+		left = aTrue,
+		right = aFalse,
+		reasons = {},
+	}
+	out._eq = UnionFind.new {
+		symbol = function(x)
+			return x.tag == "symbol"
+		end,
+		literal = function(x)
+			return isLiteralAssertion(x) ~= nil
+		end,
+	}
+	out._eq = out._eq:withInit(aTrue):withInit(aFalse)
+
+	assertis(out, "SmolModel")
+	return out
 end
 
 local IFF = {

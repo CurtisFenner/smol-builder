@@ -7,12 +7,22 @@ local UnionFind = {}
 UnionFind.__index = UnionFind
 
 -- RETURNS an empty UnionFind data structure
-function UnionFind.new()
+function UnionFind.new(special)
+	assertis(special, mapType("string", "function"))
+
 	local instance = {
 		_representatives = Map.new(),
 		_classes = Map.new(),
 		_graph = Map.new(),
+		_special = special,
+		_specialsPer = {},
 	}
+
+	-- Each per is a rope of special elements in that class
+	for k, v in pairs(special) do
+		instance._specialsPer[k] = Map.new()
+	end
+
 	return setmetatable(instance, UnionFind)
 end
 
@@ -34,8 +44,22 @@ function UnionFind:withTryInit(e)
 	local out = {
 		_representatives = self._representatives:with(e, e),
 		_classes = self._classes:with(e, Rope.singleton(e)),
-		_graph = self._graph:with(e, Rope.empty())
+		_graph = self._graph:with(e, Rope.empty()),
+		_special = self._special,
+		_specialsPer = {}
 	}
+
+	for k, v in pairs(self._special) do
+		local rope
+		if v(e) then
+			-- e is the only special value of this class
+			rope = Rope.singleton(e)
+		else
+			-- e is not special, so this singleton class has no special values
+			rope = Rope.empty()
+		end
+		out._specialsPer[k] = self._specialsPer[k]:with(e, rope)
+	end
 
 	return setmetatable(out, UnionFind)
 end
@@ -62,8 +86,10 @@ function UnionFind:withUnion(a, b, reason)
 
 	if a ~= b then
 		-- Update the graph
-		outGraph = outGraph:with(a, outGraph:get(a) .. Rope.singleton {from = a, to = b, reason = reason})
-		outGraph = outGraph:with(b, outGraph:get(b) .. Rope.singleton {from = b, to = a, reason = reason})
+		local aOut = outGraph:get(a) or Rope.empty()
+		local bOut = outGraph:get(b) or Rope.empty()
+		outGraph = outGraph:with(a, aOut .. Rope.singleton {from = a, to = b, reason = reason})
+		outGraph = outGraph:with(b, bOut .. Rope.singleton {from = b, to = a, reason = reason})
 	end
 
 	local ra = self:_root(a)
@@ -74,6 +100,8 @@ function UnionFind:withUnion(a, b, reason)
 			_representatives = self._representatives,
 			_classes = self._classes,
 			_graph = outGraph,
+			_special = self._special,
+			_specialsPer = self._specialsPer,
 		}
 		return setmetatable(out, UnionFind)
 	end
@@ -81,19 +109,29 @@ function UnionFind:withUnion(a, b, reason)
 	-- Update the representatives and classes
 	local outRepresentatives
 	local outClasses
+
+	local child, parent
 	if math.random() < 0.5 then
-		outRepresentatives = self._representatives:with(ra, rb)
-		outClasses = self._classes:with(rb, self._classes:get(rb) .. self._classes:get(ra))
+		child, parent = ra, rb
 	else
-		outRepresentatives = self._representatives:with(rb, ra)
-		outClasses = self._classes:with(ra, self._classes:get(ra) .. self._classes:get(rb))
+		child, parent = rb, ra
 	end
+	outRepresentatives = self._representatives:with(child, parent)
+	outClasses = self._classes:with(parent, self._classes:get(parent) .. self._classes:get(child))
 
 	local out = {
 		_representatives = outRepresentatives,
 		_classes = outClasses,
 		_graph = outGraph,
+		_special = self._special,
+		_specialsPer = {},
 	}
+
+	for k in pairs(self._special) do
+		local merged = self._specialsPer[k]:get(child) .. self._specialsPer[k]:get(parent)
+		out._specialsPer[k] = self._specialsPer[k]:with(parent, merged)
+	end
+
 	return setmetatable(out, UnionFind)
 end
 
@@ -147,9 +185,27 @@ function UnionFind:classOf(a)
 	return self._classes:get(self:_root(a))
 end
 
+-- RETURNS an object equal to a such that all other things equal to a have the
+-- same representative
+function UnionFind:representativeOf(a)
+	return self:_root(a)
+end
+
+-- RETURNS a set of objects equal to a that are special, according to 
+-- predicates past to UnionFind's constructor
+function UnionFind:specialsOf(k, a)
+	assert(self._special[k], "unknown special class")
+	
+	return self._specialsPer[k]:get(self:_root(a))
+end
+
+function UnionFind:traverse()
+	return self._representatives:traverse()
+end
+
 do
 	-- Test classes
-	local u = UnionFind.new()
+	local u = UnionFind.new {}
 	for i = 1, 20 do
 		u = u:withInit(i)
 	end
@@ -164,7 +220,7 @@ end
 
 do
 	-- Test reasons
-	local u = UnionFind.new()
+	local u = UnionFind.new {}
 	for i = 1, 10 do
 		u = u:withInit(i)
 	end
@@ -190,7 +246,7 @@ end
 
 do
 	-- Test reasons
-	local u = UnionFind.new()
+	local u = UnionFind.new {}
 	u = u:withInit "P.left"
 	u = u:withInit "R"
 	u = u:withInit "u.left"
