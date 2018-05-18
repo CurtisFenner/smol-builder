@@ -540,7 +540,7 @@ end
 REGISTER_TYPE("SmolModel", recordType {
 	assigned = "function",
 	isSatisfiable = "function",
-	
+
 	_canon = "object",
 
 	-- TODO: UnionFind
@@ -564,10 +564,7 @@ REGISTER_TYPE("SmolModel", recordType {
 	-- TODO: Map(representative Assertion => Map(canon Assertion => true))
 	_mentionMap = "object",
 
-	_contradiction = choiceType(
-		constantType(false),
-		mapType("Assertion", "boolean")
-	),
+	_contradiction = choiceType(constantType(false), mapType("Assertion", "boolean")),
 })
 
 -- RETURNS false when the assertion is not function-like
@@ -683,7 +680,7 @@ end
 -- detection is fast
 local function modelAssigned(self, key, truth)
 	assertis(self, "SmolModel")
-	
+
 	local eq = self._eq
 	local assertion = self._canon:scan(key)
 
@@ -726,7 +723,14 @@ local function modelAssigned(self, key, truth)
 	-- Identify all the functions in this new term and canonicalize and index
 	-- them using the UF data structure
 	for subassertion in pairs(recursiveComponents(assertion)) do
-		eq, functionMap, mentionMap = recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap, self._canon)
+		eq, functionMap, mentionMap = recheckFunction(
+			subassertion,
+			eqQueue,
+			eq,
+			functionMap,
+			mentionMap,
+			self._canon
+		)
 	end
 
 	if assertion.tag == "forall" then
@@ -736,7 +740,7 @@ local function modelAssigned(self, key, truth)
 		if assertion.tag == "eq" then
 			local left = self._canon:scan(assertion.left)
 			local right = self._canon:scan(assertion.right)
-			
+
 			if truth then
 				-- a = b joins union find
 				table.insert(eqQueue, {
@@ -799,7 +803,14 @@ local function modelAssigned(self, key, truth)
 			if staleRep then
 				if mentionMap:get(staleRep) then
 					for mentioner in mentionMap:get(staleRep):traverse() do
-						eq, functionMap, mentionMap = recheckFunction(mentioner, eqQueue, eq, functionMap, mentionMap, self._canon)
+						eq, functionMap, mentionMap = recheckFunction(
+							mentioner,
+							eqQueue,
+							eq,
+							functionMap,
+							mentionMap,
+							self._canon
+						)
 					end
 				end
 			end

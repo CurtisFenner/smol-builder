@@ -672,10 +672,7 @@ local function cnfSAT(theory, cnf, meta, model)
 			else
 				-- Expand quantified statements using the theory
 				watch:before "additionalClauses"
-				local additional, newMeta = theory:additionalClauses(
-					currentAssignment,
-					meta
-				)
+				local additional, newMeta = theory:additionalClauses(currentAssignment, meta)
 				watch:after "additionalClauses"
 
 				if next(additional) == nil then
@@ -1104,14 +1101,8 @@ end
 
 assert(isSatisfiable(plaintheory, {"d", {"f", "x == 1"}}))
 assert(not isSatisfiable(plaintheory, {"d", {"f", "x == 99"}}))
-assert(isSatisfiable(
-	plaintheory,
-	{"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}}}
-))
-assert(not isSatisfiable(
-	plaintheory,
-	{"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}
-))
+assert(isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x ==  1"}}}))
+assert(not isSatisfiable(plaintheory, {"and", {"d", {"f", "x == 1"}}, {"d", {"f", "x == 2"}}}))
 
 -- Performance test (uses unsat cores for quantifiers)
 for N = 50, 0, 10 do

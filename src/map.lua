@@ -95,34 +95,64 @@ local function inserted(tree, key, value)
 		local height = 1 + max(newLeft[1], newRight[1])
 		return {height, newLeft, tree[3], newRight}
 	end
-	
+
 	if d == -2 then
 		-- newRight is too heavy
 		assert(close(newLeft[1], newRight[2][1]))
 		if close(1 + max(newLeft[1], newRight[2][1]), newRight[4][1]) then
-			local outLeft = {1 + max(newLeft[1], newRight[2][1]), newLeft, tree[3], newRight[2]}
-			return {1 + max(outLeft[1], newRight[4][1]), outLeft, newRight[3], newRight[4]}
+			local outLeft = {
+				1 + max(newLeft[1], newRight[2][1]),
+				newLeft,
+				tree[3],
+				newRight[2]
+			}
+			return {
+				1 + max(outLeft[1], newRight[4][1]),
+				outLeft,
+				newRight[3],
+				newRight[4]
+			}
 		end
 
 		-- split newRight[2]
 		assert(newRight[2][1] ~= 0)
 		local x, kxy, y = newRight[2][2], newRight[2][3], newRight[2][4]
 		local outLeft = {1 + max(newLeft[1], x[1]), newLeft, tree[3], x}
-		local outRight = {1 + max(y[1], newRight[4][1]), y, newRight[3], newRight[4]}
+		local outRight = {
+			1 + max(y[1], newRight[4][1]),
+			y,
+			newRight[3],
+			newRight[4]
+		}
 		assert(close(outLeft[1], outRight[1]))
 		return {1 + max(outLeft[1], outRight[1]), outLeft, kxy, outRight}
 	elseif d == 2 then
 		-- newLeft is too heavy
 		assert(close(newLeft[4][1], newRight[1]))
 		if close(newLeft[2][1], 1 + max(newLeft[4][1], newRight[1])) then
-			local outRight = {1 + max(newLeft[4][1], newRight[1]), newLeft[4], tree[3], newRight}
-			return {1 + max(newLeft[2][1], outRight[1]), newLeft[2], newLeft[3], outRight}
+			local outRight = {
+				1 + max(newLeft[4][1], newRight[1]),
+				newLeft[4],
+				tree[3],
+				newRight
+			}
+			return {
+				1 + max(newLeft[2][1], outRight[1]),
+				newLeft[2],
+				newLeft[3],
+				outRight
+			}
 		end
-		
+
 		-- split newLeft[4]
 		assert(newLeft[4][1] ~= 0)
 		local x, kxy, y = newLeft[4][2], newLeft[4][3], newLeft[4][4]
-		local outLeft = {1 + max(newLeft[2][1], x[1]), newLeft[2], newLeft[3], x}
+		local outLeft = {
+			1 + max(newLeft[2][1], x[1]),
+			newLeft[2],
+			newLeft[3],
+			x
+		}
 		local outRight = {1 + max(y[1], newRight[1]), y, tree[3], newRight}
 		assert(close(outLeft[1], outRight[1]))
 		return {1 + max(outLeft[1], outRight[1]), outLeft, kxy, outRight}
@@ -203,7 +233,7 @@ if false then
 	local m2 = m:with("foo", "bar")
 	assert(m:get("foo") == nil)
 	assert(m2:get("foo") == "bar")
-	
+
 	local m3 = m2:with("foo", "qux")
 	assert(m3:get("foo") == "qux")
 
