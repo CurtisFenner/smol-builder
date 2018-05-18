@@ -626,7 +626,7 @@ local function cnfSAT(theory, cnf, meta, model)
 	assertis(model, "TheoryModel")
 
 	local stack = {}
-	local watch = Stopwatch.new(string.format("cnfSAT(%d)", cnf:size()))
+	local watch = Stopwatch.new(string.format("cnfSAT(%d)", cnf:size()), 1)
 
 	while true do
 		watch:tick()
@@ -772,7 +772,9 @@ local function cnfSAT(theory, cnf, meta, model)
 				model = model,
 			})
 			cnf:assign(term, prefer)
+			watch:before "model assigned"
 			model = model:assigned(term, prefer)
+			watch:after "model assigned"
 		end
 	end
 end

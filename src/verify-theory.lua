@@ -624,6 +624,40 @@ local function reasonFnsEqual(f1, f2, eq)
 	return reasons
 end
 
+-- RETURNS modified eq, functionMap, mentionMap
+local function recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap)
+	assertis(subassertion, "Assertion")
+
+	local key, newEq, reps = makeKeyOfFunction(subassertion, eq)
+	if key then
+		eq = newEq
+		if not functionMap:get(key) then
+			functionMap = functionMap:with(key, subassertion)
+		end
+		local other = functionMap:get(key)
+		if other ~= subassertion then
+			-- Functions with the same canonicalized key should be equal
+			if not eq:query(subassertion, other) then
+				local reasons = reasonFnsEqual(subassertion, other, eq)
+				table.insert(eqQueue, {
+					left = subassertion,
+					right = other,
+					reasons = reasons,
+				})
+			end
+		end
+
+		-- Mark this assertion to be notified if a representative is
+		-- superceded
+		for _, rep in ipairs(reps) do
+			local previousSet = mentionMap:get(rep) or Map.new()
+			mentionMap = mentionMap:with(rep, previousSet:with(subassertion, true))
+		end
+	end
+
+	return eq, functionMap, mentionMap
+end
+
 -- RETURNS a new version of the model acknowleding the new assignment,
 -- doing all work iteratively so that this is fast as well as contradiction
 -- detection is fast
@@ -640,57 +674,39 @@ local function modelAssigned(self, key, truth)
 		-- Contradiction
 		local keyOne = self._rawVersion:get(assertion)
 		local truthOne = self._assignments:get(assertion)
-		return table.with(self, "_contradiction", {
-			[keyOne] = truthOne,
-			[key] = truth,
-		})
+		return {
+			_contradiction = {
+				[keyOne] = truthOne,
+				[key] = truth,
+			},
+
+			assigned = modelAssigned,
+			isSatisfiable = modelSatisfiable,
+
+			_quantifiers = self._quantifiers,
+			_canon = self._canon,
+			_eq = eq,
+			_negatives = self._negatives,
+			_assignments = self._assignments:with(assertion, truth),
+			_rawVersion = self._rawVersion:with(assertion, key),
+			_rawAssignment = self._rawAssignment:with(key, truth),
+
+			_mentionMap = self._mentionMap,
+			_functionMap = self._functionMap,
+		}
 	end
 
 	local quantifiers = self._quantifiers
 	local neq = self._negatives
-
-	local eqQueue = {}
-
 	local functionMap = self._functionMap
 	local mentionMap = self._mentionMap
 
-	-- RETURNS nothing
-	-- MODIFIES eq, functionMap, mentionMap
-	local function recheckFunction(subassertion)
-		assertis(subassertion, "Assertion")
-
-		local key, newEq, reps = makeKeyOfFunction(subassertion, eq)
-		if key then
-			eq = newEq
-			if not functionMap:get(key) then
-				functionMap = functionMap:with(key, subassertion)
-			end
-			local other = functionMap:get(key)
-			if other ~= subassertion then
-				-- Functions with the same canonicalized key should be equal
-				if not eq:query(subassertion, other) then
-					local reasons = reasonFnsEqual(subassertion, other, eq)
-					table.insert(eqQueue, {
-						left = subassertion,
-						right = other,
-						reasons = reasons,
-					})
-				end
-			end
-
-			-- Mark this assertion to be notified if a representative is
-			-- superceded
-			for _, rep in ipairs(reps) do
-				local previousSet = mentionMap:get(rep) or Map.new()
-				mentionMap = mentionMap:with(rep, previousSet:with(subassertion, true))
-			end
-		end
-	end
+	local eqQueue = {}
 
 	-- Identify all the functions in this new term and canonicalize and index
 	-- them using the UF data structure
 	for subassertion in pairs(recursiveComponents(assertion)) do
-		recheckFunction(subassertion)
+		eq, functionMap, mentionMap = recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap)
 	end
 
 	if assertion.tag == "forall" then
@@ -757,13 +773,13 @@ local function modelAssigned(self, key, truth)
 			if newRep ~= oldLeftRep then
 				if mentionMap:get(oldLeftRep) then
 					for mentioner in mentionMap:get(oldLeftRep):traverse() do
-						recheckFunction(mentioner)
+						eq, functionMap, mentionMap = recheckFunction(mentioner, eqQueue, eq, functionMap, mentionMap)
 					end
 				end
 			elseif newRep ~= oldRightRep then
 				if mentionMap:get(oldRightRep) then
 					for mentioner in mentionMap:get(oldRightRep):traverse() do
-						recheckFunction(mentioner)
+						eq, functionMap, mentionMap = recheckFunction(mentioner, eqQueue, eq, functionMap, mentionMap)
 					end
 				end
 			else
