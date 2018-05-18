@@ -625,7 +625,7 @@ local function reasonFnsEqual(f1, f2, eq)
 end
 
 -- RETURNS modified eq, functionMap, mentionMap
-local function recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap)
+local function recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap, canon)
 	assertis(subassertion, "Assertion")
 
 	local key, newEq, reps = makeKeyOfFunction(subassertion, eq)
@@ -644,6 +644,26 @@ local function recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMa
 					right = other,
 					reasons = reasons,
 				})
+			end
+		end
+
+		if subassertion.tag == "fn" then
+			-- Perform constant evaluation of functions of constant arguments
+			local wasAsConstant = eq:specialsOf("literal", subassertion)
+			if #wasAsConstant == 0 then
+				local literal, reasons = fnLiteralEvaluation(subassertion, eq)
+				if literal ~= nil then
+					local literalExpression = constantAssertion(literal)
+					literalExpression = canon:scan(literalExpression)
+					eq = eq:withTryInit(literalExpression)
+					if not eq:query(literalExpression, subassertion) then
+						table.insert(eqQueue, {
+							left = subassertion,
+							right = literalExpression,
+							reasons = reasons,
+						})
+					end
+				end
 			end
 		end
 
@@ -706,7 +726,7 @@ local function modelAssigned(self, key, truth)
 	-- Identify all the functions in this new term and canonicalize and index
 	-- them using the UF data structure
 	for subassertion in pairs(recursiveComponents(assertion)) do
-		eq, functionMap, mentionMap = recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap)
+		eq, functionMap, mentionMap = recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMap, self._canon)
 	end
 
 	if assertion.tag == "forall" then
@@ -770,20 +790,18 @@ local function modelAssigned(self, key, truth)
 			-- One of the representatives may have just been dethroned
 			local newRep = eq:representativeOf(r.left)
 			assert(newRep == oldLeftRep or newRep == oldRightRep)
+			local staleRep = false
 			if newRep ~= oldLeftRep then
-				if mentionMap:get(oldLeftRep) then
-					for mentioner in mentionMap:get(oldLeftRep):traverse() do
-						eq, functionMap, mentionMap = recheckFunction(mentioner, eqQueue, eq, functionMap, mentionMap)
-					end
-				end
+				staleRep = oldLeftRep
 			elseif newRep ~= oldRightRep then
-				if mentionMap:get(oldRightRep) then
-					for mentioner in mentionMap:get(oldRightRep):traverse() do
-						eq, functionMap, mentionMap = recheckFunction(mentioner, eqQueue, eq, functionMap, mentionMap)
+				staleRep = oldRightRep
+			end
+			if staleRep then
+				if mentionMap:get(staleRep) then
+					for mentioner in mentionMap:get(staleRep):traverse() do
+						eq, functionMap, mentionMap = recheckFunction(mentioner, eqQueue, eq, functionMap, mentionMap, self._canon)
 					end
 				end
-			else
-				assert(oldLeftRep == oldRightRep)
 			end
 
 			-- Check if this has created a contradiction
@@ -801,36 +819,6 @@ local function modelAssigned(self, key, truth)
 				end
 			end
 		end
-
-		-- Prepare for joining
-		-- for _, e in pairs(self._canon.relevant) do
-		-- 	eq = eq:withTryInit(e)
-		-- 	local id, subs = recursiveStructure(e)
-		-- 	if id then
-		-- 		assert(1 <= #subs)
-		-- 		for _, sub in ipairs(subs) do
-		-- 			eq = eq:withTryInit(sub)
-		-- 		end
-		-- 	end
-
-		-- 	-- Constant evaluation
-		-- 	if e.tag == "fn" then
-		-- 		local literal, reasons = fnLiteralEvaluation(e, eq)
-		-- 		if literal ~= nil then
-		-- 			local literalExpression = constantAssertion(literal)
-		-- 			literalExpression = self._canon:scan(literalExpression)
-
-		-- 			eq = eq:withTryInit(literalExpression)
-		-- 			if not eq:query(literalExpression, e) then
-		-- 				table.insert(eqQueue, {
-		-- 					left = e,
-		-- 					right = literalExpression,
-		-- 					reasons = reasons,
-		-- 				})
-		-- 			end
-		-- 		end
-		-- 	end
-		-- end
 	end
 
 	local out = {
