@@ -11,8 +11,7 @@ properties at compile time.
 ## Program File Structure
 
 A Smol program is made of one or more source files. These source files
-conventionally have a `.smol` extension. Source files must be encoded in an
-ASCII-compatible encoding (such as UTF-8).
+conventionally have a `.smol` extension.
 
 Each source file begins with a `package` declaration. A package is a word
 made of ASCII letters and numbers, beginning with a
@@ -24,6 +23,12 @@ The `core` package is reserved for standard definitions. Source files should not
 declare themselves to be in `package core`.
 
 ## Source File Syntax
+
+Source files must be encoded in an ASCII-compatible encoding (such as UTF-8).
+
+Source files are interpretted as a sequence of tokens. Tokens can be split by
+interpretting the ASCII bytes of the source file; non-ASCII bytes can appear
+only in comments and string literals.
 
 ### Tokens
 
@@ -250,11 +255,12 @@ Smol has two kinds of type definitions: `class` and `union`. Smol has no concept
 of "null" or any other value which is of "any" type; it also does not have an
 "Any" type which encompasses all values.
 
-`class` types correspond to records (product types) and has zero or more 
+`class` types correspond to records (product types) and have zero or more 
 *fields*.
 Each field is given a name and a type. Each instance of a `class` type has a
 value for each field. Class instances are created with `new` by providing a
-value for each field.
+value for each field. There is no special notion of a "constructor"; instances
+can be created by any function in the class.
 
 	class Pair {
 		var myInt Int;
@@ -315,7 +321,7 @@ static function invocations.
 Parameterized types are allowed to be *recursive*:
 
 	class Foo[#T] {
-		var field Foo[Foo[#T]];
+		var field core:Option[Foo[Foo[#T]]];
 	}
 
 > IMPLEMENTATION NOTE:
@@ -323,7 +329,7 @@ Parameterized types are allowed to be *recursive*:
 > C++ is *not* sufficient to implement Smol generics. Instead, a function
 > v-table must be used, in at least some circumstances.
 
-### Interfaces
+### Constraints on Type Parameters: Interfaces
 
 A type may `implement` an `interface`. An `interface` defines required
 member functions for its implementers. These members can be both `method`
@@ -399,8 +405,9 @@ All values in Smol are **immutable**; the values associated with the fields of a
 `class` or `union` cannot change. Instead, you can create a new value which has
 been modified from the previous value.
 
-In particular, this means "copying" a data structure is never necessary; if the
-fields of two classes or two unions are the same, then the values are the same.
+In particular, this means "copying" a data structure in its entireity is never
+necessary: if the fields of two class or union instances of the same tyoe are
+the same, then the values are the same.
 Thus, there is no concept of object identity in Smol.
 
 While values are immutable, *variables* may be modified to hold a different
@@ -424,16 +431,11 @@ For example, the expression `a + b` is pure in most programming languages
 because it depends only on the values of `a` and `b`.
 
 While values in Smol can never be modified, external state *can* affect the
-execution of a Smol program. Functions that are affected by external state or
+execution of a Smol program. Functions that can be affected by external state or
 that can affect external state are marked with `!`.
 
 A function with `!` after its name may invoke other `!` actions. A function
-without this mark *cannot* invoke `!` functions.
-
-> IMPLEMENTATION NOTE:
-> It is important that the standard library and any other foreign
-> implementations are correctly annotated with `!` whenever functions
-> interact with state outside of Smol
+without this mark *cannot* invoke `!` actions.
 
 For example, standard input and output functions are marked with `!`:
 
@@ -613,8 +615,8 @@ can construct a value to show that it exists.
 
 ## Failure and Unsoundness
 
-Smol attempts to be *sound*, meaning that a Smol program that compiles will
-never 
+Smol attempts to be as *sound* as possible. A *sound* analysis ensures that a
+program that compiles will never
 
 * crash at runtime
 * violate at runtime any of the functional correctness propositions expressed in
@@ -654,7 +656,7 @@ Because this is a partial correctness condition, if *evaluating the condition*
 may never terminate, the condition may hold *vacuously*. In such a case, the
 compiler will accept the buggy program.
 
-Below is an example of such a program, which does `assert false` at the
+Below is an example of such a program, which does `assert false;` at the
 beginning of `main()`.
 
 	class Test {
@@ -683,5 +685,7 @@ sort!) or in some cases impossible (for example, in the case of a
 Thus, the compiler must check that all assertions *are guaranteed to halt*. This
 can be checked easily for non-recursive functions, but recursive functions must
 be analyzed or annotated further.
+
+The current implementation does not attempt to check termination.
 
 This is a future area of work for Smol.

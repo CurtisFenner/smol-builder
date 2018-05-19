@@ -1,7 +1,7 @@
 # Satisfiability Modulo Theories
 
 Satisfiability Modulo Theories (SMT) is a problem and problem-solving method for
-determining whether or not a mathematical formula may be true.
+determining whether or not a mathematical formula is (or is not) true.
 
 SMT can be used to statically check hardware and software by proving the
 design can never reach error states. SMT is popular for checking software
@@ -159,7 +159,7 @@ clauses are made.
 ## Theories
 
 Programs use more than just Booleans. We need to be able to reason about
-functions and numbers are strings and lists. SMT does this by coordinating 
+functions and numbers and strings and lists. SMT does this by coordinating 
 cooperation between a CNF-SAT solver and a *theory*.
 
 An input problem may look like
@@ -190,15 +190,20 @@ The CNF-SAT algorithm produced the following assignment:
 
 We now ask the *theory* whether or not it finds this assignment reasonable.
 
-Because `x=y`, `f(x,y) = f(y, y)`. Yet the assignment says `f(x,y) != f(y,y)`.
+Because `x=y` it should be the case that `f(x,y) = f(y, y)`.
 
-Thus, the given assignment does not work to satisfy the original formula.
+Yet the assignment says `f(x,y) != f(y,y)`. Figuring out this contradiction
+is the job of the *theory*.
+
+Because of this contradiction, the given assignment does not work to satisfy the
+original formula.
 
 Because CNF-SAT doesn't understand the *meaning* of the variables it is
 assigning, it does not know about the implicit constraints. By asking the
 theory, it *learns* additional constraints. In this case, it learns
 
-`~(a and ~c)` or equivalently, the new clause `(~a or c)`:
+Because `a` and `~c` contradiction each other, it learns that `~(a and ~c)`.
+Equivanently, a new clause `(~a or c)` is added to the problem:
 
 	a b c d | [a or b] and [~c or ~d]
 	--------+--------------------------------------------------------------
@@ -215,7 +220,6 @@ The theory will also reject `x=y and f(x,y)=f(y,y) and f(x,x)!=f(x,y)`. We can
 easily get the clause `(~a or ~c or d)`. However, if the theory is *specific* it
 can explain that just `(~a or d)` explains the problem. Smaller clauses rule out
 far more assignments, so we hope the theory can give us this.
-
 
 	a b c d | [a or b] and [~c or ~d]
 	--------+--------------------------------------------------------------
