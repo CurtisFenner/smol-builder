@@ -117,7 +117,11 @@ function UnionFind:withUnion(a, b, reason)
 		child, parent = rb, ra
 	end
 	outRepresentatives = self._representatives:with(child, parent)
-	outClasses = self._classes:with(parent, self._classes:get(parent) .. self._classes:get(child))
+
+	-- Update the component sets
+	local componentUnion = self._classes:get(parent) .. self._classes:get(child)
+	outClasses = self._classes:with(parent, componentUnion)
+	outClasses = outClasses:with(child, nil)
 
 	local out = {
 		_representatives = outRepresentatives,
@@ -200,7 +204,7 @@ function UnionFind:specialsOf(k, a)
 end
 
 function UnionFind:traverse()
-	return self._representatives:traverse()
+	return self._classes:traverse()
 end
 
 do

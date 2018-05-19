@@ -298,17 +298,17 @@ local INT_ASSERTIONS = freeze {
 }
 
 -- RETURNS a list of clauses
-local function quantifierClauses(model, term, canon)
+local function quantifierClauses(model, term, truth)
 	assert(term.tag == "forall")
 
-	if model[term] then
+	if truth then
 		-- Find all terms of the specified sort
 		-- Instantiate for all interesting terms
 
 		-- TODO: PERFORMANCE: filter by triggers, see
 		-- https://doi.org/10.1007/978-3-540-73595-3_12
 		local opportunities = {}
-		for _, x in spairs(canon.relevant) do
+		for x in model._eq:traverse() do
 			assertis(x, "Assertion")
 
 			local tx = typeOfAssertion(x)
@@ -371,19 +371,8 @@ end
 -- cnf: the remaining clauses to satisfy
 -- term: the key just added to model
 function theory:additionalClauses(model, meta)
-	assertis(model, mapType("Assertion", "boolean"))
+	assertis(model, "SmolModel")
 	assert(meta)
-
-	-- Collect all in-scope/relevant constants
-	local canon = {scan = m_scan; relevant = {}}
-	canon:scan(TRUE_ASSERTION)
-	canon:scan(FALSE_ASSERTION)
-	for _, v in spairs(INT_ASSERTIONS) do
-		canon:scan(v)
-	end
-	for v in pairs(model) do
-		canon:scan(v)
-	end
 
 	local newMeta = {}
 	for k, v in pairs(meta) do
@@ -392,10 +381,10 @@ function theory:additionalClauses(model, meta)
 
 	local out = {}
 
-	for term in pairs(model) do
+	for term, truth in model._quantifiers:traverse() do
 		if term.tag == "forall" then
 			if not meta[term.unique] then
-				out[term] = quantifierClauses(model, term, canon)
+				out[term] = quantifierClauses(model, term, truth)
 				newMeta[term.unique] = true
 			else
 				-- This quantifier has already been instantiated
@@ -548,6 +537,9 @@ REGISTER_TYPE("SmolModel", recordType {
 
 	-- TODO: Rope(record)
 	_negatives = "object",
+
+	-- TODO: Map(Assertion => boolean)
+	_quantifiers = "object",
 
 	-- TODO: Map
 	_assignments = "object",

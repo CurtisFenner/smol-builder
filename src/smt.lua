@@ -672,7 +672,7 @@ local function cnfSAT(theory, cnf, meta, model)
 			else
 				-- Expand quantified statements using the theory
 				watch:before "additionalClauses"
-				local additional, newMeta = theory:additionalClauses(currentAssignment, meta)
+				local additional, newMeta = theory:additionalClauses(model, meta)
 				watch:after "additionalClauses"
 
 				if next(additional) == nil then
@@ -943,7 +943,7 @@ function plaintheory:additionalClauses(model, meta)
 	end
 
 	local out = {}
-	for key, value in pairs(model) do
+	for key, value in model._assignment:traverse() do
 		if not meta[key] then
 			if type(key) == "table" and key[1] == "d" then
 				newMeta[key] = true
