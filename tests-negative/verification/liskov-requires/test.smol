@@ -1,0 +1,21 @@
+package test;
+
+interface I {
+	method foo(n Int) Int;
+}
+
+class Foo is I {
+	method foo(n Int) Int
+	requires Test.good(n) {
+		return n;
+	}
+}
+
+class Test {
+	static good(n Int) Boolean {
+		return n == 7;
+	}
+
+	static main() Unit {
+	}
+}

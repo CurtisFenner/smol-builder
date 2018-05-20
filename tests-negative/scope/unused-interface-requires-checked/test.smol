@@ -1,0 +1,11 @@
+package test;
+
+interface I {
+	method foo(n Int) Int
+	requires Test.good(n);
+}
+
+class Test {
+	static main() Unit {
+	}
+}

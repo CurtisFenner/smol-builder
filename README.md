@@ -112,14 +112,6 @@ $ lua test.lua hello
 **NOTE**: This produces C code and then compiles and executes that C code.
 Compiler bugs are inevitable, exercise caution!
 
-### Test Status
-
-As of commit c5a8f99176f1a794ec5ff8849340c78b605c791f on 9 May 2018, all tests except
-
-* ["tests-negative/verification/unsound-oracle"](docs/smol.md#nonterminating-conditions)
-
-are passing. 
-
 ## VSCode Plugin
 
 The VSCode extension can be found here:
