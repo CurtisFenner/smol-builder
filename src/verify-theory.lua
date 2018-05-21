@@ -334,19 +334,16 @@ local function quantifierClauses(model, term, truth)
 
 		local out = {}
 		for _, x in ipairs(opportunities) do
-			-- TODO: this is a terrible heuristic
-			if (x.tag == "variable" and (x.variable.name:find "local" or not x.variable.name:find "[^a-zA-Z0-9']")) or x.tag == "fn" then
-				-- Instantiate an example of a forall instance
-				local constantName = newConst() .. "forall" .. tostring(term.unique)
-				local newTerm, res, var = term:instantiate(constantName)
+			-- Instantiate an example of a forall instance
+			local constantName = newConst() .. "forall" .. tostring(term.unique)
+			local newTerm, res, var = term:instantiate(constantName)
 
-				-- x is the same as constant
-				table.insert(out, eqAssertion(x, variableAssertion(var), term.quantified))
+			-- x is the same as constant
+			table.insert(out, eqAssertion(x, variableAssertion(var), term.quantified))
 
-				-- The predicate holds for `x`
-				table.insert(out, newTerm)
-				table.insert(out, res)
-			end
+			-- The predicate holds for `x`
+			table.insert(out, newTerm)
+			table.insert(out, res)
 		end
 		return out
 	else
