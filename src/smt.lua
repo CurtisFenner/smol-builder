@@ -205,6 +205,7 @@ end
 
 -- Finds an unassigned term and returns a preferred truth value for it
 -- RETURNS term, boolean prefer, boolean forced
+-- REQUIRES this is not decided
 function CNF:pickUnassigned()
 	self:validate()
 
@@ -246,7 +247,7 @@ function CNF:assign(term, truth)
 
 	-- Update the assignment map
 	local key = self:canonicalize(term)
-	assert(self._assignment[key] == nil)
+	assert(self._assignment[key] == nil, "term must not already be assigned")
 	self._assignment[key] = truth
 
 	-- Update the clauses mentioning this term
@@ -655,7 +656,6 @@ local function cnfSAT(theory, cnf, meta, model)
 		end
 
 		if cnf:isTautology() then
-			local currentAssignment = cnf:getAssignment()
 			watch:before "theory:isSatisfiable"
 			local out, conflicting = model:isSatisfiable()
 			watch:after "theory:isSatisfiable"
@@ -675,6 +675,7 @@ local function cnfSAT(theory, cnf, meta, model)
 				local additional, newMeta = theory:additionalClauses(model, meta)
 				watch:after "additionalClauses"
 
+				local currentAssignment = cnf:getAssignment()
 				if next(additional) == nil then
 					-- There are no quantifiers to expand; we are done!
 					watch:finish()
@@ -746,7 +747,7 @@ local function cnfSAT(theory, cnf, meta, model)
 				local variable = stack[#stack].variable
 				local preferred = stack[#stack].preferTruth
 				model = stack[#stack].model
-				if stack[#stack].first then
+				if stack[#stack].first and not stack[#stack].implied then
 					-- Flip the assignment
 					stack[#stack].first = false
 					cnf:unassign(variable)
@@ -761,12 +762,13 @@ local function cnfSAT(theory, cnf, meta, model)
 			end
 		else
 			-- Make a choice
-			local term, prefer = cnf:pickUnassigned()
+			local term, prefer, implied = cnf:pickUnassigned()
 			table.insert(stack, {
 				variable = term,
 				preferTruth = prefer,
 				first = true,
 				model = model,
+				implied = implied,
 			})
 			cnf:assign(term, prefer)
 			watch:before "model assigned"
