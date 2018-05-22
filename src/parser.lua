@@ -1,6 +1,4 @@
--- Curtis Fenner, copyright (C) 2017
--- Parser ----------------------------------------------------------------------
-
+-- A PEG parsing library
 local parser = {}
 
 -- RETURNS a parser for a sequence of 0 or more `object`s

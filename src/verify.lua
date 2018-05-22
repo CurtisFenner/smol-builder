@@ -1,7 +1,3 @@
-local calculateSemantics = import "semantics.lua"
-local showType = calculateSemantics.showType
-local showInterfaceType = calculateSemantics.showInterfaceType
-
 local smt = import "smt.lua"
 
 local verifyTheory = (import "verify-theory.lua").theory
@@ -33,6 +29,7 @@ local excerpt = common.excerpt
 local variableDescription = common.variableDescription
 
 local assertionExprString = common.assertionExprString
+local showType = common.showType
 
 --------------------------------------------------------------------------------
 
@@ -644,9 +641,8 @@ local function verifyStatement(statement, scope, semantics)
 	assertis(semantics, "Semantics")
 
 	local allDefinitions = table.concatted(
-		semantics.classes,
-		semantics.interfaces,
-		semantics.unions
+		semantics.compounds,
+		semantics.interfaces
 	)
 	allDefinitions = freeze(allDefinitions)
 

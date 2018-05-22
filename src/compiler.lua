@@ -190,12 +190,13 @@ end
 
 local knownFlags = {
 	color = true,
+	nocolor = true,
 	location = true,
 	main = true,
-	nocolor = true,
 	sources = true,
 }
 
+-- Check that only known command line flags are used
 for key in pairs(commandMap) do
 	if not knownFlags[key] then
 		quitUsage()
@@ -204,7 +205,7 @@ end
 
 -- Main ------------------------------------------------------------------------
 
--- RETURNS the string prefix in common to all members of list
+-- RETURNS the string prefix in common to all members of list of strings
 local function commonPrefix(list)
 	assert(#list >= 1)
 	local out = list[1]
@@ -395,15 +396,18 @@ end
 assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
+-- Get an intermediate representation of the program
 local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
 
+-- Verify the assertions in the program statically hold
 verify(semantics)
 
 if semantics.main then
+	-- Compile output in the given target
 	-- TODO: read target
 	local arguments = {out = "output.c"}
 	local TARGET = "c"
 	codegen[TARGET](semantics, arguments)
 else
-	print("Successfully compiled " .. #sourceFiles .. " file(s)")
+	print("Successfully verified " .. #sourceFiles .. " file(s)")
 end

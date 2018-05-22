@@ -216,9 +216,7 @@ local function cConstraint(constraint, semantics)
 		return C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. constraint.name:gsub("#", "")
 	elseif constraint.tag == "concrete-constraint" then
 		local func = concreteConstraintFunctionName(constraint.concrete.name, constraint.interface.name)
-		local class = table.findwith(semantics.classes, "name", constraint.concrete.name)
-		local union = table.findwith(semantics.unions, "name", constraint.concrete.name)
-		local definition = class or union
+		local definition = table.findwith(semantics.compounds, "name", constraint.concrete.name)
 		assertis(definition, recordType {generics = listType "TypeParameterIR"})
 
 		local argumentValues = {}
@@ -359,8 +357,8 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		cT = cT:sub(1, -2)
 		emit(destination .. " = ALLOCATE(" .. cT .. ");")
 
-		local union = table.findwith(semantics.unions, "name", statement.type.name)
-		assert(union)
+		local union = table.findwith(semantics.compounds, "name", statement.type.name)
+		assert(union and union.tag == "union")
 
 		-- Initialize the tag
 		emit(destination .. "->" .. TAG_FIELD .. " = " .. unionTagValue(union, statement.field) .. ";")
@@ -409,9 +407,7 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 		local invocation = staticFunctionName(statement.signature.longName)
 		local arguments = table.concat(argumentNames, ", ")
 
-		local class = table.findwith(semantics.classes, "name", statement.baseType.name)
-		local union = table.findwith(semantics.unions, "name", statement.baseType.name)
-		local definition = class or union
+		local definition = table.findwith(semantics.compounds, "name", statement.baseType.name)
 		assert(definition)
 		local signature = statement.signature
 
@@ -446,10 +442,9 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 
 		-- Get the signature
 		local baseName = statement.baseInstance.type.name
-		local class = table.findwith(semantics.classes, "name", baseName)
-		local union = table.findwith(semantics.unions, "name", baseName)
+		local compound = table.findwith(semantics.compounds, "name", baseName)
 		local builtin = table.findwith(semantics.builtins, "name", baseName)
-		local definition = class or union or builtin
+		local definition = compound or builtin
 		assert(definition)
 		local signature = statement.signature
 
@@ -569,8 +564,8 @@ local function generateStatement(statement, emit, structScope, semantics, demand
 	elseif statement.tag == "isa" then
 		comment(statement.destination.name .. " = " .. statement.base.name .. " isa " .. statement.variant)
 		emit(localName(statement.destination.name) .. " = ALLOCATE(smol_Boolean);")
-		local union = table.findwith(semantics.unions, "name", statement.base.type.name)
-		assert(union)
+		local union = table.findwith(semantics.compounds, "name", statement.base.type.name)
+		assert(union and union.tag == "union")
 
 		-- Set value
 		local tagValue = unionTagValue(union, statement.variant)
@@ -717,11 +712,13 @@ struct _smol_Int {
 
 	-- Build the struct scope map
 	local structScope = {}
-	for _, class in ipairs(semantics.classes) do
-		structScope[class.name] = classStructName(class.name)
-	end
-	for _, union in ipairs(semantics.unions) do
-		structScope[union.name] = unionStructName(union.name)
+	for _, compound in ipairs(semantics.compounds) do
+		assert(compound.tag == "class" or compound.tag == "union")
+		if compound.tag == "class" then
+			structScope[compound.name] = classStructName(compound.name)
+		elseif compound.tag == "union" then
+			structScope[compound.name] = unionStructName(compound.name)
+		end
 	end
 	structScope = freeze(structScope)
 
@@ -751,66 +748,70 @@ struct _smol_Int {
 	end
 
 	-- Generate a struct for each class
-	for _, class in ipairs(semantics.classes) do
-		table.insert(code, "// class " .. class.name)
-		local structName = classStructName(class.name)
-		table.insert(code, "struct _" .. structName .. " {")
+	for _, class in ipairs(semantics.compounds) do
+		if class.tag == "class" then
+			table.insert(code, "// class " .. class.name)
+			local structName = classStructName(class.name)
+			table.insert(code, "struct _" .. structName .. " {")
 
-		-- Add a foreign field
-		table.insert(code, "\tvoid* foreign;")
+			-- Add a foreign field
+			table.insert(code, "\tvoid* foreign;")
 
-		-- Generate all value fields
-		for _, field in ipairs(class.fields) do
-			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
-		end
-
-		-- Generate all constraint fields
-		for i, generic in ipairs(class.generics) do
-			for j, constraint in ipairs(generic.constraints) do
-				local t = interfaceStructName(constraint.interface.name) .. "*"
-				-- XXX: constraint key
-				local key = "#" .. i .. "_" .. j
-				table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+			-- Generate all value fields
+			for _, field in ipairs(class.fields) do
+				table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
 			end
-		end
 
-		table.insert(code, "};")
-		forwardDeclareStruct("_" .. structName, structName)
-		table.insert(code, "")
+			-- Generate all constraint fields
+			for i, generic in ipairs(class.generics) do
+				for j, constraint in ipairs(generic.constraints) do
+					local t = interfaceStructName(constraint.interface.name) .. "*"
+					-- XXX: constraint key
+					local key = "#" .. i .. "_" .. j
+					table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+				end
+			end
+
+			table.insert(code, "};")
+			forwardDeclareStruct("_" .. structName, structName)
+			table.insert(code, "")
+		end
 	end
 
 	-- Generate a tagged union for each union
-	for _, union in ipairs(semantics.unions) do
-		-- Open struct definition
-		table.insert(code, "// union " .. union.name)
-		local structName = unionStructName(union.name)
+	for _, union in ipairs(semantics.compounds) do
+		if union.tag == "union" then
+			-- Open struct definition
+			table.insert(code, "// union " .. union.name)
+			local structName = unionStructName(union.name)
 
-		-- TODO: Generate a union rather than a struct
-		table.insert(code, "struct _" .. structName .. "{")
+			-- TODO: Generate a union rather than a struct
+			table.insert(code, "struct _" .. structName .. "{")
 
-		-- Generate tag
-		assert(#union.fields < 64)
-		table.insert(code, "\tunsigned " .. TAG_FIELD .. ";")
+			-- Generate tag
+			assert(#union.fields < 64)
+			table.insert(code, "\tunsigned " .. TAG_FIELD .. ";")
 
-		-- Generate all value fields
-		for _, field in ipairs(union.fields) do
-			table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. unionFieldName(field.name) .. ";")
-		end
-
-		-- Generate all constraint fields
-		for i, generic in ipairs(union.generics) do
-			for j, constraint in ipairs(generic.constraints) do
-				local t = interfaceStructName(constraint.interface.name) .. "*"
-				-- XXX: constraint key
-				local key = "#" .. i .. "_" .. j
-				table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+			-- Generate all value fields
+			for _, field in ipairs(union.fields) do
+				table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. unionFieldName(field.name) .. ";")
 			end
-		end
 
-		-- Close struct definition
-		table.insert(code, "};")
-		forwardDeclareStruct("_" .. structName, structName)
-		table.insert(code, "")
+			-- Generate all constraint fields
+			for i, generic in ipairs(union.generics) do
+				for j, constraint in ipairs(generic.constraints) do
+					local t = interfaceStructName(constraint.interface.name) .. "*"
+					-- XXX: constraint key
+					local key = "#" .. i .. "_" .. j
+					table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
+				end
+			end
+
+			-- Close struct definition
+			table.insert(code, "};")
+			forwardDeclareStruct("_" .. structName, structName)
+			table.insert(code, "")
+		end
 	end
 
 	local prototypeSequence = {}
@@ -823,7 +824,7 @@ struct _smol_Int {
 	end
 
 	-- Generate a constraint-building-function for each constraint
-	for _, definition in ipairs(table.concatted(semantics.classes, semantics.unions)) do
+	for _, definition in ipairs(semantics.compounds) do
 		for i, implement in ipairs(definition.implements) do
 			local requirements = {}
 			for key, constraint in spairs(definition.constraints) do
@@ -986,8 +987,7 @@ struct _smol_Int {
 		local fullName = func.definitionName .. "." .. func.name
 		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
 
-		local definition = table.findwith(semantics.classes, "name", func.definitionName)
-			or table.findwith(semantics.unions, "name", func.definitionName)
+		local definition = table.findwith(semantics.compounds, "name", func.definitionName)
 		assert(definition)
 		local thisType = cDefinitionType(definition)
 

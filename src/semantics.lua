@@ -368,7 +368,7 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS a variable or false
+-- RETURNS a variable or nil
 local function getFromScope(scope, name)
 	assertis(scope, listType(mapType("string", "object")))
 	assertis(name, "string")
@@ -436,25 +436,19 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 	assertis(generics, listType "TypeParameterIR")
 
 	assertis(environment, recordType {
-		allDefinitions = listType "object",
+		allDefinitions = listType "Definition",
 		containingSignature = "Signature",
 		thisVariable = choiceType(constantType(false), "VariableIR"),
 	})
 
-	local allDefinitions = environment.allDefinitions
-	local containingSignature = environment.containingSignature
-	assertis(allDefinitions, listType "Definition")
-	assertis(containingSignature, "Signature")
-
 	local parameter, pi = table.findwith(generics, "name", genericType.name)
-	assert(parameter)
 	assertis(parameter, recordType {
 		location = "Location",
 	})
 
 	local matches = {}
 	for ci, constraint in ipairs(parameter.constraints) do
-		local interface = interfaceDefinitionFromConstraint(constraint.interface, allDefinitions)
+		local interface = interfaceDefinitionFromConstraint(constraint.interface, environment.allDefinitions)
 		local signature = table.findwith(interface.signatures, "memberName", name)
 		if signature then
 			local constraintIR = {
@@ -463,7 +457,7 @@ local function findConstraintByMember(genericType, modifier, name, location, gen
 				location = constraint.location,
 				interface = constraint.interface,
 			}
-			if containingSignature.modifier == "method" then
+			if environment.containingSignature.modifier == "method" then
 				assert(environment.thisVariable)
 				constraintIR = {
 					tag = "this-constraint",
@@ -718,7 +712,7 @@ local function compileWhen(conditionExpression, thenBody, scope, subEnvironment)
 	}
 end
 
--- RETURNS a StatementIR
+-- RETURNS a ProofSt
 -- REQUIRES assertion has already been checked for type and value count
 local function generatePreconditionVerify(assertion, method, invocation, environment, context, checkLocation)
 	assertis(assertion, recordType {
@@ -787,7 +781,7 @@ local function generatePreconditionVerify(assertion, method, invocation, environ
 	return buildProof(out)
 end
 
--- RETURNS a StatementIR
+-- RETURNS a ProofSt
 -- REQUIRES assertion has already been checked for type and value count
 local function generatePostconditionAssume(assertion, method, invocation, environment, returnOuts)
 	assertis(assertion, recordType {
@@ -851,9 +845,11 @@ local NOT_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "memberName", "not"
 local OR_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "memberName", "or")
 local AND_SIGNATURE = table.findwith(BOOLEAN_DEF.signatures, "memberName", "and")
 
+-- RETURNS the string s if it contains only ASCII letters and digits
+-- RETURNS s enclosed in ASCII round parenthesis otherwise
 local function parened(s)
 	assertis(s, "string")
-	if s:find "%W" then
+	if s:find "[^a-zA-Z0-9]" then
 		return "(" .. s .. ")"
 	end
 	return s
@@ -935,8 +931,10 @@ local function closedUnionAssumption(union, var)
 end
 
 -- RETURNS a StatementIR, [VariableIR].
+-- The statement executes the expression, storing the results into the returned
+-- variables.
 -- VERIFIES each expression produces only a single value
--- VERIFEIS at most one of the expressions is impure
+-- VERIFIES at most one of the expressions is impure
 local function compileSubexpressions(expressions, purpose, location, scope, environment)
 	assertis(expressions, listType "ASTExpression")
 	assertis(location, "Location")
@@ -973,7 +971,8 @@ local function compileSubexpressions(expressions, purpose, location, scope, envi
 	return buildBlock(evaluation), freeze(outs)
 end
 
--- RETURNS a ProofSt
+-- RETURNS a ProofSt assuming the `ensures` holds for the given function
+-- invokation
 local function generateAssumeStatements(signature, info, environment)
 	assertis(signature, "Signature")
 	assertis(info, recordType {destinations = listType "VariableIR"})
@@ -1016,7 +1015,7 @@ local function generateAssumeStatements(signature, info, environment)
 	return buildProof(buildBlock(evaluation))
 end
 
--- RETURNS StatementIR, [VariableIR]
+-- RETURNS StatementIR, [VariableIR] invoking a method
 local function compileMethod(baseInstance, arguments, methodName, bang, location, environment)
 	assertis(baseInstance, "VariableIR")
 	assertis(arguments, listType "VariableIR")
@@ -2138,6 +2137,9 @@ function compileExpression(pExpression, scope, environment)
 	error("unknown expression tag")
 end
 
+-- RETURNS the type of an instance of the given class/union:
+-- Specifically, the returned type is the type of `this` in methods of that 
+-- class/union
 local function typeFromDefinition(definition)
 	assertis(definition, choiceType("ClassIR", "UnionIR"))
 
@@ -2158,7 +2160,8 @@ local function typeFromDefinition(definition)
 	}
 end
 
--- RETURNS a type-resolving function (Parsed Type => Type+)
+-- RETURNS a type-resolving function (Parsed Type => Type+) that also validates
+-- everything it receives
 local function makeTypeResolver(containingSignature, generics, allDefinitions)
 	assertis(containingSignature, "Signature")
 	assertis(generics, listType "any")
@@ -2175,21 +2178,12 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS a Semantics, an IR description of the program
-local function semanticsSmol(sources, main)
-	assertis(main, "string")
-
-	-- (1) Resolve the set of types and the set of packages that have been
-	-- defined
-	local isPackageDefined = {}
+-- RETURNS a map from full name to AST Definition
+local function sourcesToASTDefinitionMap(sources)
 	local definitionSourceByFullName = {}
 	for _, source in ipairs(sources) do
 		local package = source.package
 		assertis(package, "string")
-
-		-- Mark this package name as defined
-		-- Package names MAY be repeated between several sources
-		isPackageDefined[package] = true
 
 		-- Record the definition of all types in this package
 		for _, definition in ipairs(source.definitions) do
@@ -2204,8 +2198,14 @@ local function semanticsSmol(sources, main)
 			definitionSourceByFullName[fullName] = definition
 		end
 	end
+	return definitionSourceByFullName
+end
 
-	-- (2) Fully qualify all local type names
+-- RETURNS a list of all Definitions
+local function getAllDefinitionsFromSources(sources)
+	-- Get a listing of all declared types
+	local definitionSourceByFullName = sourcesToASTDefinitionMap(sources)
+
 	local allDefinitions = {}
 	for _, source in ipairs(sources) do
 		local package = source.package
@@ -2627,6 +2627,782 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
+	return allDefinitions
+end
+
+-- RETURNS a FunctionIR
+local function compileFunctionFromStruct(definition, containingSignature, allDefinitions)
+	assertis(definition, choiceType("ClassIR", "UnionIR"))
+	assertis(containingSignature, "Signature")
+	assertis(allDefinitions, listType "Definition")
+
+	local containerType = typeFromDefinition(definition)
+
+	local thisVariable = false
+	if containingSignature.modifier == "method" then
+		thisVariable = freeze {
+			name = "this",
+			type = containerType,
+			location = UNKNOWN_LOCATION,
+			description = "this",
+		}
+	end
+	local resolveType = makeTypeResolver(
+		containingSignature,
+		definition.generics,
+		allDefinitions
+	)
+
+	local environment = freeze {
+		resolveType = resolveType,
+		containerType = containerType,
+		containingSignature = containingSignature,
+		allDefinitions = allDefinitions,
+		thisVariable = thisVariable,
+		returnOuts = false,
+		ignoreEnsures = {},
+		verification = false,
+	}
+
+	local compileBlock
+
+	-- RETURNS a StatementIR
+	local function verifyForEnsures(scope, returnOuts, location)
+		assertis(returnOuts, listType "VariableIR")
+		assertis(scope, listType(mapType("string", "VariableIR")))
+		assertis(location, "Location")
+
+		local sequence = {}
+
+		-- Check that all ensured statements are true at this point
+		for i, ensures in ipairs(containingSignature.ensuresAST) do
+			local arguments = {}
+			for _, a in ipairs(containingSignature.parameters) do
+				table.insert(arguments, getFromScope(scope, a.name))
+			end
+
+			local sub = table.with(environment, "returnOuts", returnOuts)
+
+			local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.longName
+			local verify = generatePreconditionVerify(
+				ensures,
+				containingSignature,
+				{arguments = arguments, this = thisVariable, container = containerType,},
+				sub,
+				context,
+				location
+			)
+
+			assertis(verify, "StatementIR")
+			table.insert(sequence, verify)
+		end
+		return buildBlock(sequence)
+	end
+
+	-- RETURNS a StatementIR
+	local function compileStatement(pStatement, scope)
+		assertis(scope, listType(mapType("string", "VariableIR")))
+
+		if pStatement.tag == "var-statement" then
+			-- Allocate space for each variable on the left hand side
+			local declarations = {}
+			for _, pVariable in ipairs(pStatement.variables) do
+				-- Verify that the variable name is not in scope
+				local previous = getFromScope(scope, pVariable.name)
+				if previous then
+					Report.VARIABLE_DEFINED_TWICE {
+						first = previous.location,
+						second = pVariable.location,
+						name = pVariable.name,
+					}
+				end
+
+				-- Add the variable to the current scope
+				local variable = {
+					name = pVariable.name,
+					type = resolveType(pVariable.type),
+					location = pVariable.location,
+					description = false,
+				}
+
+				scope[#scope][variable.name] = variable
+				table.insert(declarations, {
+					tag = "local",
+					variable = variable,
+					returns = "no",
+				})
+			end
+
+			-- Evaluate the right hand side
+			local evaluation, values = compileExpression(pStatement.value, scope, environment)
+
+			-- Check the return types match the value types
+			if #values ~= #declarations then
+				Report.VARIABLE_DEFINITION_COUNT_MISMATCH {
+					location = pStatement.location,
+					expressionLocation = pStatement.value.location,
+					variableCount = #declarations,
+					valueCount = #values,
+				}
+			end
+
+			-- Move the evaluations into the destinations
+			local moves = {}
+			for i, declaration in ipairs(declarations) do
+				local variable = declaration.variable
+				if not areTypesEqual(variable.type, values[i].type) then
+					Report.TYPES_DONT_MATCH {
+						purpose = "variable `" .. variable.name .. "`",
+						expectedType = showType(variable.type),
+						expectedLocation = variable.location,
+						givenType = showType(values[i].type),
+						location = pStatement.value.location,
+					}
+				end
+
+				table.insert(moves, {
+					tag = "assign",
+					source = values[i],
+					destination = variable,
+					returns = "no",
+				})
+			end
+
+			assertis(declarations, listType "StatementIR")
+			assertis(evaluation, "StatementIR")
+			assertis(moves, listType "StatementIR")
+
+			-- Combine the three steps into a single sequence statement
+			local sequence = table.concatted(declarations, {evaluation}, moves)
+			return buildBlock(sequence)
+		elseif pStatement.tag == "return-statement" then
+			local sources = {}
+			local evaluation = {}
+			if #pStatement.values == 1 then
+				-- A single value must have exactly the target multiplicity
+				local subEvaluation, subsources = compileExpression(
+					pStatement.values[1],
+					scope,
+					environment
+				)
+
+				if #subsources ~= #containingSignature.returnTypes then
+					Report.RETURN_COUNT_MISMATCH {
+						signatureCount = #containingSignature.returnTypes,
+						returnCount = #subsources,
+						location = pStatement.location,
+					}
+				end
+
+				table.insert(evaluation, subEvaluation)
+				sources = subsources
+			elseif #pStatement.values == 0 then
+				-- Returning no values is equivalent to returning one unit
+				local unitVariable = generateVariable(
+					"unit_return",
+					UNIT_TYPE,
+					pStatement.location
+				)
+				local execution = buildBlock {
+					localSt(unitVariable),
+					{
+						tag = "unit",
+						destination = unitVariable,
+						returns = "no",
+					}
+				}
+				table.insert(evaluation, execution)
+				table.insert(sources, unitVariable)
+			else
+				-- If multiple values are given, each must be a 1-tuple
+				for _, value in ipairs(pStatement.values) do
+					local subevaluation, subsources = compileExpression(
+						value,
+						scope,
+						environment
+					)
+					if #subsources ~= 1 then
+						Report.WRONG_VALUE_COUNT {
+							purpose = "expression in multiple-value return statement",
+							expectedCount = 1,
+							givenCount = #subsources,
+							location = value.location,
+						}
+					end
+
+					table.insert(sources, subsources[1])
+					table.insert(evaluation, subevaluation)
+				end
+			end
+
+			-- Generate an ensures
+			table.insert(evaluation, verifyForEnsures(scope, sources, pStatement.location))
+
+			local returnSt = {
+				tag = "return",
+				sources = sources,
+				returns = "yes",
+			}
+			table.insert(evaluation, returnSt)
+
+			local fullName = containingSignature.longName
+
+			-- Check return types
+			assert(#sources == #containingSignature.returnTypes)
+			for i, source in ipairs(sources) do
+				local expected = containingSignature.returnTypes[i]
+				if not areTypesEqual(source.type, expected) then
+					Report.TYPES_DONT_MATCH {
+						purpose = string.ordinal(i) .. " return value of " .. fullName,
+						expectedType = showType(expected),
+						givenType = showType(source.type),
+						expectedLocation = expected.location,
+						location = source.location,
+					}
+				end
+			end
+
+			return buildBlock(evaluation)
+		elseif pStatement.tag == "do-statement" then
+			local evaluation, out = compileExpression(pStatement.expression, scope, environment)
+			assert(#out ~= 0)
+			if #out > 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "do-statement expression",
+					expectedCount = 1,
+					givenCount = #out,
+					location = pStatement.location,
+				}
+			elseif not areTypesEqual(out[1].type, UNIT_TYPE) then
+				Report.EXPECTED_DIFFERENT_TYPE {
+					purpose = "do-statement expression",
+					expectedType = "Unit",
+					givenType = showType(out[1].type),
+					location = pStatement.expression.location,
+				}
+			end
+
+			return evaluation
+		elseif pStatement.tag == "if-statement" then
+			local conditionEvaluation, conditionOut = compileExpression(
+				pStatement.condition,
+				scope,
+				environment
+			)
+			assert(#conditionOut ~= 0)
+			checkSingleBoolean(
+				conditionOut,
+				"if-statement condition",
+				pStatement.condition.location
+			)
+
+			-- Builds the else-if-chain IR instructions.
+			-- The index is the index of the first else-if clause to include.
+			-- RETURNS an IRStatement that holds the compiled tail of the else.
+			local function compileElseChain(i)
+				if i > #pStatement.elseifs then
+					if pStatement["else"] then
+						local blockIR = compileBlock(pStatement["else"].body, scope)
+						assertis(blockIR, "StatementIR")
+						return blockIR
+					else
+						return buildBlock({})
+					end
+				end
+				local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(
+					pStatement.elseifs[i].condition,
+					scope,
+					environment
+				)
+				assert(#elseIfConditionOut ~= 0)
+				checkSingleBoolean(elseIfConditionOut, "else-if-statement condition")
+
+				local bodyThen = compileBlock(pStatement.elseifs[i].body, scope)
+				local bodyElse = compileElseChain(i + 1)
+				local ifSt = freeze {
+					tag = "if",
+					returns = unclear(bodyThen.returns, bodyElse.returns),
+					condition = elseIfConditionOut[1],
+					bodyThen = bodyThen,
+					bodyElse = bodyElse,
+				}
+				assertis(elseIfConditionEvaluation, "StatementIR")
+				assertis(ifSt, "StatementIR")
+				return buildBlock({elseIfConditionEvaluation, ifSt})
+			end
+
+			local bodyThen = compileBlock(pStatement.body, scope)
+			local bodyElse = compileElseChain(1)
+
+			local ifSt = freeze {
+				tag = "if",
+				returns = unclear(bodyThen.returns, bodyElse.returns),
+				condition = conditionOut[1],
+				bodyThen = bodyThen,
+				bodyElse = bodyElse,
+			}
+
+			assertis(conditionEvaluation, "StatementIR")
+			assertis(ifSt, "StatementIR")
+			return buildBlock({conditionEvaluation, ifSt})
+		elseif pStatement.tag == "match-statement" then
+			-- Evaluate the base expression
+			local baseEvaluation, baseOuts = compileExpression(
+				pStatement.base,
+				scope,
+				environment
+			)
+			if #baseOuts ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "match-statement expression",
+					expectedCount = 1,
+					givenCount = #baseOuts,
+					location = pStatement.base.location,
+				}
+			end
+
+			local base = baseOuts[1]
+			assertis(base, "VariableIR")
+
+			-- Check that the base is a union
+			if base.type.tag ~= "concrete-type+" then
+				Report.TYPE_MUST_BE_UNION {
+					purpose = "expression in match-statement",
+					givenType = showType(base.type),
+					location = pStatement.base.location,
+				}
+			end
+			local definition = definitionFromType(base.type, allDefinitions)
+			if definition.tag ~= "union" then
+				Report.TYPE_MUST_BE_UNION {
+					purpose = "expression in match-statement",
+					givenType = showType(base.type),
+					location = pStatement.base.location,
+				}
+			end
+			assertis(definition, "UnionIR")
+
+			-- Check that the fields exist and are distinct
+			local unionSubstituter = getSubstituterFromConcreteType(base.type, allDefinitions)
+			local cases = {}
+			for _, case in ipairs(pStatement.cases) do
+				-- Create a subscope
+				table.insert(scope, {})
+				local sequence = {}
+
+				-- Verify that the variable name is not in scope
+				local previous = getFromScope(scope, case.head.variable)
+				if previous then
+					Report.VARIABLE_DEFINED_TWICE {
+						first = previous.location,
+						second = case.head.location,
+						name = case.head.variable,
+					}
+				end
+
+				-- Get the field
+				local field = table.findwith(definition.fields, "name", case.head.variant)
+				if not field then
+					Report.NO_SUCH_VARIANT {
+						container = showType(base.type),
+						name = case.head.variable,
+						location = case.head.location,
+					}
+				end
+				local previous = table.findwith(cases, "variant", field.name)
+				if previous then
+					Report.VARIANT_USED_TWICE {
+						variant = field.name,
+						firstLocation = previous.location,
+						secondLocation = case.head.location,
+					}
+				end
+
+				-- Add the variable to the current scope
+				local variable = {
+					name = case.head.variable,
+					type = unionSubstituter(field.type),
+					location = case.head.location,
+					description = false,
+				}
+
+				scope[#scope][variable.name] = variable
+				table.insert(sequence, {
+					tag = "local",
+					variable = variable,
+					returns = "no",
+				})
+
+				table.insert(sequence, {
+					tag = "variant",
+					variant = case.head.variant,
+					base = base,
+					destination = variable,
+					returns = "no",
+					variantDefinition = field,
+				})
+
+				local sub = compileBlock(case.body, scope)
+				table.insert(sequence, sub)
+
+				table.remove(scope)
+				table.insert(cases, freeze {
+					variant = field.name,
+					location = case.head.location,
+					statement = buildBlock(sequence),
+				})
+			end
+
+			-- Sort cases by the field order
+			table.sort(cases, function(a, b)
+				local va = table.findwith(definition.fields, "name", a.variant)
+				local vb = table.findwith(definition.fields, "name", b.variant)
+				local ia = table.indexof(definition.fields, va)
+				local ib = table.indexof(definition.fields, vb)
+				return ia < ib
+			end)
+
+			-- Check exhaustivity
+			local unhandledVariants = {}
+			for _, field in ipairs(definition.fields) do
+				if not table.findwith(cases, "variant", field.name) then
+					table.insert(unhandledVariants, field.name)
+				end
+			end
+
+			local verification
+
+			-- Check for inexhaustivity
+			if #unhandledVariants ~= 0 then
+				local seq = {
+					closedUnionAssumption(definition, base),
+				}
+
+				for _, variant in ipairs(unhandledVariants) do
+					local isBad = generateVariable(
+						"isBad_" .. variant,
+						BOOLEAN_TYPE,
+						pStatement.location
+					)
+					table.insert(seq, localSt(isBad))
+					table.insert(seq, {
+						tag = "isa",
+						base = base,
+						destination = isBad,
+						variant = variant,
+						returns = "no",
+					})
+
+					local isNotBadSt, isNotBad = irMethod(
+						pStatement.location,
+						NOT_SIGNATURE,
+						isBad,
+						{}
+					)
+					table.insert(seq, isNotBadSt)
+
+					table.insert(seq, {
+						tag = "verify",
+						variable = isNotBad,
+						checkLocation = pStatement.location,
+						conditionLocation = pStatement.location,
+						reason = "exhaustivity of match",
+						returns = "no",
+					})
+				end
+				verification = buildProof(buildBlock(seq))
+			else
+				verification = buildProof(closedUnionAssumption(definition, base))
+			end
+
+			-- Determine if this match returns or not
+			local noCount, yesCount = 0, 0
+			for _, case in ipairs(cases) do
+				if case.statement.returns == "yes" then
+					yesCount = yesCount + 1
+				elseif case.statement.returns == "no" then
+					noCount = noCount + 1
+				else
+					assert(case.statement.returns == "maybe")
+				end
+			end
+			local returns
+			if noCount == #cases then
+				returns = "no"
+			elseif yesCount == #cases then
+				returns = "yes"
+			else
+				returns = "maybe"
+			end
+
+			local match = freeze {
+				tag = "match",
+				base = base,
+				cases = cases,
+				returns = returns,
+			}
+			return buildBlock {baseEvaluation, verification, match}
+		elseif pStatement.tag == "assign-statement" then
+			local out = {}
+
+			-- Evaluate the right-hand-side
+			local valueEvaluation, valueOut = compileExpression(
+				pStatement.value,
+				scope,
+				environment
+			)
+			if #valueOut ~= #pStatement.variables then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "assignment statement",
+					expectedCount = #pStatement.variables,
+					givenCount = #valueOut,
+					location = pStatement.value.location,
+				}
+			end
+			table.insert(out, valueEvaluation)
+
+			-- Check the left hand side
+			for i, pVariable in ipairs(pStatement.variables) do
+				assertis(pVariable, "string")
+				local variable = getFromScope(scope, pVariable)
+				if not variable then
+					Report.NO_SUCH_VARIABLE {
+						name = pVariable,
+						location = pStatement.location,
+					}
+				elseif not areTypesEqual(valueOut[i].type, variable.type) then
+					Report.TYPES_DONT_MATCH {
+						purpose = string.ordinal(i) .. " value in the assignment statement",
+						expectedType = showType(variable.type),
+						expectedLocation = variable.location,
+						givenType = showType(valueOut[i].type),
+					}
+				end
+				table.insert(out, freeze {
+					tag = "assign",
+					source = valueOut[i],
+					destination = variable,
+					returns = "no",
+				})
+			end
+
+			return buildBlock(out)
+		elseif pStatement.tag == "assert-statement" then
+			-- Evaluate the right-hand-side
+			assert(environment.verification == false)
+			local valueEvaluation, valueOut = compileExpression(
+				pStatement.expression,
+				scope,
+				table.with(environment, "verification", true)
+			)
+			if #valueOut ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "assert statement",
+					expectedCount = 1,
+					givenCount = #valueOut,
+					location = pStatement.expression.location,
+				}
+			elseif not areTypesEqual(valueOut[1].type, BOOLEAN_TYPE) then
+				Report.TYPES_DONT_MATCH {
+					purpose = "expression in assert statement",
+					expectedType = "Boolean",
+					expectedLocation = pStatement.expression.location,
+					location = pStatement.expression.location,
+					givenType = showType(valueOut[1].type),
+				}
+			end
+
+			if not isExprPure(pStatement.expression) then
+				Report.BANG_NOT_ALLOWED {
+					context = "assert",
+					location = pStatement.location,
+				}
+			end
+
+			local verify = {
+				tag = "verify",
+				variable = valueOut[1],
+				checkLocation = pStatement.location,
+				conditionLocation = pStatement.location,
+				reason = "the asserted condition",
+				returns = "no",
+			}
+			assertis(verify, "VerifySt")
+
+			local assume = {
+				tag = "assume",
+				variable = valueOut[1],
+				returns = "no",
+				location = pStatement.location,
+			}
+			assertis(assume, "AssumeSt")
+
+			return buildProof(buildBlock {
+				valueEvaluation,
+				verify,
+				assume,
+			})
+		end
+		error("TODO: compileStatement")
+	end
+
+	-- RETURNS a BlockSt
+	compileBlock = function(pBlock, scope)
+		assertis(scope, listType(mapType("string", "VariableIR")))
+
+		-- Open a new scope
+		table.insert(scope, {})
+
+		local statements = {}
+		local returned = "no"
+		for i, pStatement in ipairs(pBlock.statements) do
+			-- This statement is unreachable, because the previous
+			-- always returns
+			if returned == "yes" then
+				Report.UNREACHABLE_STATEMENT {
+					cause = statements[i - 1].location,
+					reason = "always returns",
+					unreachable = pStatement.location,
+				}
+			end
+
+			local statement = compileStatement(pStatement, scope)
+			assertis(statement, "StatementIR")
+
+			if statement.returns == "yes" then
+				returned = "yes"
+			elseif statement.returns == "maybe" then
+				returned = "maybe"
+			end
+			table.insert(statements, statement)
+		end
+		assertis(statements, listType "StatementIR")
+
+		-- Close the current scope
+		table.remove(scope)
+
+		return freeze {
+			tag = "block",
+			statements = statements,
+			returns = returned,
+			location = pBlock.location,
+		}
+	end
+
+	-- Collect static functions' type parameters from the containing class
+	local generics = {}
+	if containingSignature.modifier == "static" then
+		generics = definition.generics
+	end
+
+	-- Create the initial scope with the function's parameters
+	local functionScope = {{}}
+	for _, parameter in ipairs(containingSignature.parameters) do
+		functionScope[1][parameter.name] = parameter
+	end
+
+	-- Initialize a "this" variable
+	local initialization = buildBlock {}
+	if containingSignature.modifier == "method" then
+		initialization = buildBlock {
+			localSt(thisVariable),
+			{
+				tag = "this",
+				destination = thisVariable,
+				returns = "no",
+			},
+		}
+	end
+
+	-- Create assumptions for all of the hypotheses in `requires` clauses
+	local assumptions = {}
+	for _, requires in ipairs(containingSignature.requiresAST) do
+		assertis(environment.containerType, "Type+")
+		table.insert(assumptions, generatePostconditionAssume(
+			requires,
+			containingSignature,
+			{this = thisVariable, arguments = containingSignature.parameters},
+			environment,
+			false
+		))
+	end
+
+	local body = false
+	if not containingSignature.foreign then
+		body = buildBlock {
+			initialization,
+			buildBlock(assumptions),
+			compileBlock(containingSignature.body, functionScope)
+		}
+		assertis(body, "StatementIR")
+		if body.returns ~= "yes" then
+			-- An implicit return of unit must be added
+			local returns = {}
+			for _, returnType in ipairs(containingSignature.returnTypes) do
+				table.insert(returns, showType(returnType))
+			end
+			returns = table.concat(returns, ", ")
+
+			if returns ~= "Unit" then
+				-- But only for unit functions
+				Report.FUNCTION_DOESNT_RETURN {
+					name = containingSignature.longName,
+					modifier = containingSignature.modifier,
+					location = containingSignature.body.location,
+					returns = returns,
+				}
+			end
+
+			-- Returning no values is equivalent to returning one unit
+			local unitVariable = generateVariable(
+				"unit_return",
+				UNIT_TYPE,
+				containingSignature.body.location
+			)
+			unitVariable = table.with(unitVariable, "description", "unit")
+			local returnSt = {
+				tag = "unit",
+				destination = unitVariable,
+				returns = "no",
+			}
+
+			-- Check post conditions
+			body = buildBlock {
+				body,
+				localSt(unitVariable),
+				verifyForEnsures(
+					functionScope,
+					{unitVariable},
+					containingSignature.body.location
+				),
+				returnSt
+			}
+		end
+	end
+
+	return freeze {
+		name = containingSignature.memberName,
+		definitionName = definition.name,
+
+		-- Function's generics exclude those on the `this` instance
+		generics = generics,
+
+		parameters = containingSignature.parameters,
+		returnTypes = containingSignature.returnTypes,
+
+		body = body,
+		signature = containingSignature,
+	}
+end
+
+-- RETURNS a Semantics, an IR description of the program
+local function semanticsSmol(sources, main)
+	assertis(main, "string")
+
+	-- (1) Resolve the set of types and the set of packages that have been
+	-- defined, and then fully qualify all local type names
+	local allDefinitions = getAllDefinitionsFromSources(sources)
+
 	allDefinitions = freeze(allDefinitions)
 	assertis(allDefinitions, listType "Definition")
 
@@ -2915,773 +3691,7 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- (5) Compile all code bodies
-
-	-- RETURNS a FunctionIR
-	local function compileFunctionFromStruct(definition, containingSignature)
-		assertis(definition, choiceType("ClassIR", "UnionIR"))
-		assertis(containingSignature, "Signature")
-
-		local containerType = typeFromDefinition(definition)
-
-		local thisVariable = false
-		if containingSignature.modifier == "method" then
-			thisVariable = freeze {
-				name = "this",
-				type = containerType,
-				location = UNKNOWN_LOCATION,
-				description = "this",
-			}
-		end
-		local resolveType = makeTypeResolver(
-			containingSignature,
-			definition.generics,
-			allDefinitions
-		)
-
-		local environment = freeze {
-			resolveType = resolveType,
-			containerType = containerType,
-			containingSignature = containingSignature,
-			allDefinitions = allDefinitions,
-			thisVariable = thisVariable,
-			returnOuts = false,
-			ignoreEnsures = {},
-			verification = false,
-		}
-
-		local compileBlock
-
-		-- RETURNS a StatementIR
-		local function verifyForEnsures(scope, returnOuts, location)
-			assertis(returnOuts, listType "VariableIR")
-			assertis(scope, listType(mapType("string", "VariableIR")))
-			assertis(location, "Location")
-
-			local sequence = {}
-
-			-- Check that all ensured statements are true at this point
-			for i, ensures in ipairs(containingSignature.ensuresAST) do
-				local arguments = {}
-				for _, a in ipairs(containingSignature.parameters) do
-					table.insert(arguments, getFromScope(scope, a.name))
-				end
-
-				local sub = table.with(environment, "returnOuts", returnOuts)
-
-				local context = "the " .. string.ordinal(i) .. " `ensures` condition for " .. containingSignature.longName
-				local verify = generatePreconditionVerify(
-					ensures,
-					containingSignature,
-					{arguments = arguments, this = thisVariable, container = containerType,},
-					sub,
-					context,
-					location
-				)
-
-				assertis(verify, "StatementIR")
-				table.insert(sequence, verify)
-			end
-			return buildBlock(sequence)
-		end
-
-		-- RETURNS a StatementIR
-		local function compileStatement(pStatement, scope)
-			assertis(scope, listType(mapType("string", "VariableIR")))
-
-			if pStatement.tag == "var-statement" then
-				-- Allocate space for each variable on the left hand side
-				local declarations = {}
-				for _, pVariable in ipairs(pStatement.variables) do
-					-- Verify that the variable name is not in scope
-					local previous = getFromScope(scope, pVariable.name)
-					if previous then
-						Report.VARIABLE_DEFINED_TWICE {
-							first = previous.location,
-							second = pVariable.location,
-							name = pVariable.name,
-						}
-					end
-
-					-- Add the variable to the current scope
-					local variable = {
-						name = pVariable.name,
-						type = resolveType(pVariable.type),
-						location = pVariable.location,
-						description = false,
-					}
-
-					scope[#scope][variable.name] = variable
-					table.insert(declarations, {
-						tag = "local",
-						variable = variable,
-						returns = "no",
-					})
-				end
-
-				-- Evaluate the right hand side
-				local evaluation, values = compileExpression(pStatement.value, scope, environment)
-
-				-- Check the return types match the value types
-				if #values ~= #declarations then
-					Report.VARIABLE_DEFINITION_COUNT_MISMATCH {
-						location = pStatement.location,
-						expressionLocation = pStatement.value.location,
-						variableCount = #declarations,
-						valueCount = #values,
-					}
-				end
-
-				-- Move the evaluations into the destinations
-				local moves = {}
-				for i, declaration in ipairs(declarations) do
-					local variable = declaration.variable
-					if not areTypesEqual(variable.type, values[i].type) then
-						Report.TYPES_DONT_MATCH {
-							purpose = "variable `" .. variable.name .. "`",
-							expectedType = showType(variable.type),
-							expectedLocation = variable.location,
-							givenType = showType(values[i].type),
-							location = pStatement.value.location,
-						}
-					end
-
-					table.insert(moves, {
-						tag = "assign",
-						source = values[i],
-						destination = variable,
-						returns = "no",
-					})
-				end
-
-				assertis(declarations, listType "StatementIR")
-				assertis(evaluation, "StatementIR")
-				assertis(moves, listType "StatementIR")
-
-				-- Combine the three steps into a single sequence statement
-				local sequence = table.concatted(declarations, {evaluation}, moves)
-				return buildBlock(sequence)
-			elseif pStatement.tag == "return-statement" then
-				local sources = {}
-				local evaluation = {}
-				if #pStatement.values == 1 then
-					-- A single value must have exactly the target multiplicity
-					local subEvaluation, subsources = compileExpression(
-						pStatement.values[1],
-						scope,
-						environment
-					)
-
-					if #subsources ~= #containingSignature.returnTypes then
-						Report.RETURN_COUNT_MISMATCH {
-							signatureCount = #containingSignature.returnTypes,
-							returnCount = #subsources,
-							location = pStatement.location,
-						}
-					end
-
-					table.insert(evaluation, subEvaluation)
-					sources = subsources
-				elseif #pStatement.values == 0 then
-					-- Returning no values is equivalent to returning one unit
-					local unitVariable = generateVariable(
-						"unit_return",
-						UNIT_TYPE,
-						pStatement.location
-					)
-					local execution = buildBlock {
-						localSt(unitVariable),
-						{
-							tag = "unit",
-							destination = unitVariable,
-							returns = "no",
-						}
-					}
-					table.insert(evaluation, execution)
-					table.insert(sources, unitVariable)
-				else
-					-- If multiple values are given, each must be a 1-tuple
-					for _, value in ipairs(pStatement.values) do
-						local subevaluation, subsources = compileExpression(
-							value,
-							scope,
-							environment
-						)
-						if #subsources ~= 1 then
-							Report.WRONG_VALUE_COUNT {
-								purpose = "expression in multiple-value return statement",
-								expectedCount = 1,
-								givenCount = #subsources,
-								location = value.location,
-							}
-						end
-
-						table.insert(sources, subsources[1])
-						table.insert(evaluation, subevaluation)
-					end
-				end
-
-				-- Generate an ensures
-				table.insert(evaluation, verifyForEnsures(scope, sources, pStatement.location))
-
-				local returnSt = {
-					tag = "return",
-					sources = sources,
-					returns = "yes",
-				}
-				table.insert(evaluation, returnSt)
-
-				local fullName = containingSignature.longName
-
-				-- Check return types
-				assert(#sources == #containingSignature.returnTypes)
-				for i, source in ipairs(sources) do
-					local expected = containingSignature.returnTypes[i]
-					if not areTypesEqual(source.type, expected) then
-						Report.TYPES_DONT_MATCH {
-							purpose = string.ordinal(i) .. " return value of " .. fullName,
-							expectedType = showType(expected),
-							givenType = showType(source.type),
-							expectedLocation = expected.location,
-							location = source.location,
-						}
-					end
-				end
-
-				return buildBlock(evaluation)
-			elseif pStatement.tag == "do-statement" then
-				local evaluation, out = compileExpression(pStatement.expression, scope, environment)
-				assert(#out ~= 0)
-				if #out > 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "do-statement expression",
-						expectedCount = 1,
-						givenCount = #out,
-						location = pStatement.location,
-					}
-				elseif not areTypesEqual(out[1].type, UNIT_TYPE) then
-					Report.EXPECTED_DIFFERENT_TYPE {
-						purpose = "do-statement expression",
-						expectedType = "Unit",
-						givenType = showType(out[1].type),
-						location = pStatement.expression.location,
-					}
-				end
-
-				return evaluation
-			elseif pStatement.tag == "if-statement" then
-				local conditionEvaluation, conditionOut = compileExpression(
-					pStatement.condition,
-					scope,
-					environment
-				)
-				assert(#conditionOut ~= 0)
-				checkSingleBoolean(
-					conditionOut,
-					"if-statement condition",
-					pStatement.condition.location
-				)
-
-				-- Builds the else-if-chain IR instructions.
-				-- The index is the index of the first else-if clause to include.
-				-- RETURNS an IRStatement that holds the compiled tail of the else.
-				local function compileElseChain(i)
-					if i > #pStatement.elseifs then
-						if pStatement["else"] then
-							local blockIR = compileBlock(pStatement["else"].body, scope)
-							assertis(blockIR, "StatementIR")
-							return blockIR
-						else
-							return buildBlock({})
-						end
-					end
-					local elseIfConditionEvaluation, elseIfConditionOut = compileExpression(
-						pStatement.elseifs[i].condition,
-						scope,
-						environment
-					)
-					assert(#elseIfConditionOut ~= 0)
-					checkSingleBoolean(elseIfConditionOut, "else-if-statement condition")
-
-					local bodyThen = compileBlock(pStatement.elseifs[i].body, scope)
-					local bodyElse = compileElseChain(i + 1)
-					local ifSt = freeze {
-						tag = "if",
-						returns = unclear(bodyThen.returns, bodyElse.returns),
-						condition = elseIfConditionOut[1],
-						bodyThen = bodyThen,
-						bodyElse = bodyElse,
-					}
-					assertis(elseIfConditionEvaluation, "StatementIR")
-					assertis(ifSt, "StatementIR")
-					return buildBlock({elseIfConditionEvaluation, ifSt})
-				end
-
-				local bodyThen = compileBlock(pStatement.body, scope)
-				local bodyElse = compileElseChain(1)
-
-				local ifSt = freeze {
-					tag = "if",
-					returns = unclear(bodyThen.returns, bodyElse.returns),
-					condition = conditionOut[1],
-					bodyThen = bodyThen,
-					bodyElse = bodyElse,
-				}
-
-				assertis(conditionEvaluation, "StatementIR")
-				assertis(ifSt, "StatementIR")
-				return buildBlock({conditionEvaluation, ifSt})
-			elseif pStatement.tag == "match-statement" then
-				-- Evaluate the base expression
-				local baseEvaluation, baseOuts = compileExpression(
-					pStatement.base,
-					scope,
-					environment
-				)
-				if #baseOuts ~= 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "match-statement expression",
-						expectedCount = 1,
-						givenCount = #baseOuts,
-						location = pStatement.base.location,
-					}
-				end
-
-				local base = baseOuts[1]
-				assertis(base, "VariableIR")
-
-				-- Check that the base is a union
-				if base.type.tag ~= "concrete-type+" then
-					Report.TYPE_MUST_BE_UNION {
-						purpose = "expression in match-statement",
-						givenType = showType(base.type),
-						location = pStatement.base.location,
-					}
-				end
-				local definition = definitionFromType(base.type, allDefinitions)
-				if definition.tag ~= "union" then
-					Report.TYPE_MUST_BE_UNION {
-						purpose = "expression in match-statement",
-						givenType = showType(base.type),
-						location = pStatement.base.location,
-					}
-				end
-				assertis(definition, "UnionIR")
-
-				-- Check that the fields exist and are distinct
-				local unionSubstituter = getSubstituterFromConcreteType(base.type, allDefinitions)
-				local cases = {}
-				for _, case in ipairs(pStatement.cases) do
-					-- Create a subscope
-					table.insert(scope, {})
-					local sequence = {}
-
-					-- Verify that the variable name is not in scope
-					local previous = getFromScope(scope, case.head.variable)
-					if previous then
-						Report.VARIABLE_DEFINED_TWICE {
-							first = previous.location,
-							second = case.head.location,
-							name = case.head.variable,
-						}
-					end
-
-					-- Get the field
-					local field = table.findwith(definition.fields, "name", case.head.variant)
-					if not field then
-						Report.NO_SUCH_VARIANT {
-							container = showType(base.type),
-							name = case.head.variable,
-							location = case.head.location,
-						}
-					end
-					local previous = table.findwith(cases, "variant", field.name)
-					if previous then
-						Report.VARIANT_USED_TWICE {
-							variant = field.name,
-							firstLocation = previous.location,
-							secondLocation = case.head.location,
-						}
-					end
-
-					-- Add the variable to the current scope
-					local variable = {
-						name = case.head.variable,
-						type = unionSubstituter(field.type),
-						location = case.head.location,
-						description = false,
-					}
-
-					scope[#scope][variable.name] = variable
-					table.insert(sequence, {
-						tag = "local",
-						variable = variable,
-						returns = "no",
-					})
-
-					table.insert(sequence, {
-						tag = "variant",
-						variant = case.head.variant,
-						base = base,
-						destination = variable,
-						returns = "no",
-						variantDefinition = field,
-					})
-
-					local sub = compileBlock(case.body, scope)
-					table.insert(sequence, sub)
-
-					table.remove(scope)
-					table.insert(cases, freeze {
-						variant = field.name,
-						location = case.head.location,
-						statement = buildBlock(sequence),
-					})
-				end
-
-				-- Sort cases by the field order
-				table.sort(cases, function(a, b)
-					local va = table.findwith(definition.fields, "name", a.variant)
-					local vb = table.findwith(definition.fields, "name", b.variant)
-					local ia = table.indexof(definition.fields, va)
-					local ib = table.indexof(definition.fields, vb)
-					return ia < ib
-				end)
-
-				-- Check exhaustivity
-				local unhandledVariants = {}
-				for _, field in ipairs(definition.fields) do
-					if not table.findwith(cases, "variant", field.name) then
-						table.insert(unhandledVariants, field.name)
-					end
-				end
-
-				local verification
-
-				-- Check for inexhaustivity
-				if #unhandledVariants ~= 0 then
-					local seq = {
-						closedUnionAssumption(definition, base),
-					}
-
-					for _, variant in ipairs(unhandledVariants) do
-						local isBad = generateVariable(
-							"isBad_" .. variant,
-							BOOLEAN_TYPE,
-							pStatement.location
-						)
-						table.insert(seq, localSt(isBad))
-						table.insert(seq, {
-							tag = "isa",
-							base = base,
-							destination = isBad,
-							variant = variant,
-							returns = "no",
-						})
-
-						local isNotBadSt, isNotBad = irMethod(
-							pStatement.location,
-							NOT_SIGNATURE,
-							isBad,
-							{}
-						)
-						table.insert(seq, isNotBadSt)
-
-						table.insert(seq, {
-							tag = "verify",
-							variable = isNotBad,
-							checkLocation = pStatement.location,
-							conditionLocation = pStatement.location,
-							reason = "exhaustivity of match",
-							returns = "no",
-						})
-					end
-					verification = buildProof(buildBlock(seq))
-				else
-					verification = buildProof(closedUnionAssumption(definition, base))
-				end
-
-				-- Determine if this match returns or not
-				local noCount, yesCount = 0, 0
-				for _, case in ipairs(cases) do
-					if case.statement.returns == "yes" then
-						yesCount = yesCount + 1
-					elseif case.statement.returns == "no" then
-						noCount = noCount + 1
-					else
-						assert(case.statement.returns == "maybe")
-					end
-				end
-				local returns
-				if noCount == #cases then
-					returns = "no"
-				elseif yesCount == #cases then
-					returns = "yes"
-				else
-					returns = "maybe"
-				end
-
-				local match = freeze {
-					tag = "match",
-					base = base,
-					cases = cases,
-					returns = returns,
-				}
-				return buildBlock {baseEvaluation, verification, match}
-			elseif pStatement.tag == "assign-statement" then
-				local out = {}
-
-				-- Evaluate the right-hand-side
-				local valueEvaluation, valueOut = compileExpression(
-					pStatement.value,
-					scope,
-					environment
-				)
-				if #valueOut ~= #pStatement.variables then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "assignment statement",
-						expectedCount = #pStatement.variables,
-						givenCount = #valueOut,
-						location = pStatement.value.location,
-					}
-				end
-				table.insert(out, valueEvaluation)
-
-				-- Check the left hand side
-				for i, pVariable in ipairs(pStatement.variables) do
-					assertis(pVariable, "string")
-					local variable = getFromScope(scope, pVariable)
-					if not variable then
-						Report.NO_SUCH_VARIABLE {
-							name = pVariable,
-							location = pStatement.location,
-						}
-					elseif not areTypesEqual(valueOut[i].type, variable.type) then
-						Report.TYPES_DONT_MATCH {
-							purpose = string.ordinal(i) .. " value in the assignment statement",
-							expectedType = showType(variable.type),
-							expectedLocation = variable.location,
-							givenType = showType(valueOut[i].type),
-						}
-					end
-					table.insert(out, freeze {
-						tag = "assign",
-						source = valueOut[i],
-						destination = variable,
-						returns = "no",
-					})
-				end
-
-				return buildBlock(out)
-			elseif pStatement.tag == "assert-statement" then
-				-- Evaluate the right-hand-side
-				assert(environment.verification == false)
-				local valueEvaluation, valueOut = compileExpression(
-					pStatement.expression,
-					scope,
-					table.with(environment, "verification", true)
-				)
-				if #valueOut ~= 1 then
-					Report.WRONG_VALUE_COUNT {
-						purpose = "assert statement",
-						expectedCount = 1,
-						givenCount = #valueOut,
-						location = pStatement.expression.location,
-					}
-				elseif not areTypesEqual(valueOut[1].type, BOOLEAN_TYPE) then
-					Report.TYPES_DONT_MATCH {
-						purpose = "expression in assert statement",
-						expectedType = "Boolean",
-						expectedLocation = pStatement.expression.location,
-						location = pStatement.expression.location,
-						givenType = showType(valueOut[1].type),
-					}
-				end
-
-				if not isExprPure(pStatement.expression) then
-					Report.BANG_NOT_ALLOWED {
-						context = "assert",
-						location = pStatement.location,
-					}
-				end
-
-				local verify = {
-					tag = "verify",
-					variable = valueOut[1],
-					checkLocation = pStatement.location,
-					conditionLocation = pStatement.location,
-					reason = "the asserted condition",
-					returns = "no",
-				}
-				assertis(verify, "VerifySt")
-
-				local assume = {
-					tag = "assume",
-					variable = valueOut[1],
-					returns = "no",
-					location = pStatement.location,
-				}
-				assertis(assume, "AssumeSt")
-
-				return buildProof(buildBlock {
-					valueEvaluation,
-					verify,
-					assume,
-				})
-			end
-			error("TODO: compileStatement")
-		end
-
-		-- RETURNS a BlockSt
-		compileBlock = function(pBlock, scope)
-			assertis(scope, listType(mapType("string", "VariableIR")))
-
-			-- Open a new scope
-			table.insert(scope, {})
-
-			local statements = {}
-			local returned = "no"
-			for i, pStatement in ipairs(pBlock.statements) do
-				-- This statement is unreachable, because the previous
-				-- always returns
-				if returned == "yes" then
-					Report.UNREACHABLE_STATEMENT {
-						cause = statements[i - 1].location,
-						reason = "always returns",
-						unreachable = pStatement.location,
-					}
-				end
-
-				local statement = compileStatement(pStatement, scope)
-				assertis(statement, "StatementIR")
-
-				if statement.returns == "yes" then
-					returned = "yes"
-				elseif statement.returns == "maybe" then
-					returned = "maybe"
-				end
-				table.insert(statements, statement)
-			end
-			assertis(statements, listType "StatementIR")
-
-			-- Close the current scope
-			table.remove(scope)
-
-			return freeze {
-				tag = "block",
-				statements = statements,
-				returns = returned,
-				location = pBlock.location,
-			}
-		end
-
-		-- Collect static functions' type parameters from the containing class
-		local generics = {}
-		if containingSignature.modifier == "static" then
-			generics = definition.generics
-		end
-
-		-- Create the initial scope with the function's parameters
-		local functionScope = {{}}
-		for _, parameter in ipairs(containingSignature.parameters) do
-			functionScope[1][parameter.name] = parameter
-		end
-
-		-- Initialize a "this" variable
-		local initialization = buildBlock {}
-		if containingSignature.modifier == "method" then
-			initialization = buildBlock {
-				localSt(thisVariable),
-				{
-					tag = "this",
-					destination = thisVariable,
-					returns = "no",
-				},
-			}
-		end
-
-		-- Create assumptions for all of the hypotheses in `requires` clauses
-		local assumptions = {}
-		for _, requires in ipairs(containingSignature.requiresAST) do
-			assertis(environment.containerType, "Type+")
-			table.insert(assumptions, generatePostconditionAssume(
-				requires,
-				containingSignature,
-				{this = thisVariable, arguments = containingSignature.parameters},
-				environment,
-				false
-			))
-		end
-
-		local body = false
-		if not containingSignature.foreign then
-			body = buildBlock {
-				initialization,
-				buildBlock(assumptions),
-				compileBlock(containingSignature.body, functionScope)
-			}
-			assertis(body, "StatementIR")
-			if body.returns ~= "yes" then
-				-- An implicit return of unit must be added
-				local returns = {}
-				for _, returnType in ipairs(containingSignature.returnTypes) do
-					table.insert(returns, showType(returnType))
-				end
-				returns = table.concat(returns, ", ")
-
-				if returns ~= "Unit" then
-					-- But only for unit functions
-					Report.FUNCTION_DOESNT_RETURN {
-						name = containingSignature.longName,
-						modifier = containingSignature.modifier,
-						location = containingSignature.body.location,
-						returns = returns,
-					}
-				end
-
-				-- Returning no values is equivalent to returning one unit
-				local unitVariable = generateVariable(
-					"unit_return",
-					UNIT_TYPE,
-					containingSignature.body.location
-				)
-				unitVariable = table.with(unitVariable, "description", "unit")
-				local returnSt = {
-					tag = "unit",
-					destination = unitVariable,
-					returns = "no",
-				}
-
-				-- Check post conditions
-				body = buildBlock {
-					body,
-					localSt(unitVariable),
-					verifyForEnsures(
-						functionScope,
-						{unitVariable},
-						containingSignature.body.location
-					),
-					returnSt
-				}
-			end
-		end
-
-		return freeze {
-			name = containingSignature.memberName,
-			definitionName = definition.name,
-
-			-- Function's generics exclude those on the `this` instance
-			generics = generics,
-
-			parameters = containingSignature.parameters,
-			returnTypes = containingSignature.returnTypes,
-
-			body = body,
-			signature = containingSignature,
-		}
-	end
-
-	local classes = {}
-	local unions = {}
+	local compounds = {}
 	local interfaces = {}
 	local functions = {}
 
@@ -3689,16 +3699,12 @@ local function semanticsSmol(sources, main)
 	for _, definition in ipairs(allDefinitions) do
 		if definition.tag == "class" or definition.tag == "union" then
 			for _, signature in ipairs(definition.signatures) do
-				local func = compileFunctionFromStruct(definition, signature)
+				local func = compileFunctionFromStruct(definition, signature, allDefinitions)
 				assertis(func, "FunctionIR")
 
 				table.insert(functions, func)
 			end
-			if definition.tag == "class" then
-				table.insert(classes, definition)
-			else
-				table.insert(unions, definition)
-			end
+			table.insert(compounds, definition)
 		elseif definition.tag == "interface" then
 			table.insert(interfaces, definition)
 		else
@@ -3712,8 +3718,8 @@ local function semanticsSmol(sources, main)
 	if main == "skip" then
 		main = false
 	else
-		local mainClass = table.findwith(classes, "name", main)
-		if not mainClass then
+		local mainClass = table.findwith(compounds, "name", main)
+		if not mainClass or mainClass.tag ~= "class" then
 			Report.NO_MAIN {
 				name = main,
 			}
@@ -3735,9 +3741,8 @@ local function semanticsSmol(sources, main)
 	end
 
 	return freeze {
-		classes = classes,
 		builtins = BUILTIN_DEFINITIONS,
-		unions = unions,
+		compounds = compounds,
 		interfaces = interfaces,
 		functions = functions,
 		main = main,
@@ -3746,7 +3751,4 @@ end
 
 return {
 	semantics = semanticsSmol,
-	showType = showType,
-	showInterfaceType = showInterfaceType,
-	definitionFromType = definitionFromType,
 }
