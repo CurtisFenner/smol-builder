@@ -548,39 +548,7 @@ local function minimizeSet(set, isGood)
 	return reduced
 end
 
--- Finds (locally weakest) version of the assignment that is unsatisfiable
--- according to the theory as a CNF
--- RETURNS a CNF that is a tautology which represents a weak explanation of
--- "why" the given assignment is a contradiction
-local function unsatisfiableCoreClause(theory, assignment, order)
-	assertis(theory, "Theory")
-	assertis(assignment, mapType(theory.assertion_t, "boolean"))
-	assertis(order, listType(theory.assertion_t))
-	assert(#order == #table.keys(assignment))
-
-	if theory:isSatisfiable(assignment) then
-		return {}
-	end
-
-	-- Make a shallow copy, to slowly reduce
-	local reduced = {}
-	for k, v in pairs(assignment) do
-		reduced[k] = v
-	end
-
-	local core = minimizeSet(assignment, function(reduced)
-		return not theory:isSatisfiable(reduced)
-	end)
-
-	local tautologyOut = {}
-	for k, v in pairs(core) do
-		table.insert(tautologyOut, {k, not v})
-	end
-
-	return {tautologyOut}
-end
-
--- RETURNS a (tautological) CNF
+-- RETURNS a CNF implied from the given CNF
 -- Produces a core referring to quantified statements dervied from
 -- contradictions between their instantiations
 local function reduceQuantifiedContradiction(theory, additional, quantifierAssignment, pruningClauses)
@@ -607,7 +575,7 @@ local function reduceQuantifiedContradiction(theory, additional, quantifierAssig
 		return c:isContradiction()
 	end)
 
-	-- The model is a contradiction; negating it produces a tautology that
+	-- The model is a contradiction; negating it produces an implied clause that
 	-- restricts the future search space
 	local notThis = {}
 	for k, v in pairs(core) do
@@ -627,11 +595,8 @@ local function cnfSAT(theory, cnf, meta, model)
 	assertis(model, "TheoryModel")
 
 	local stack = {}
-	local watch = Stopwatch.new(string.format("cnfSAT(%d)", cnf:size()), 1)
 
 	while true do
-		watch:tick()
-
 		if false then
 			-- Debug printing
 			local assignment = cnf:getAssignment()
@@ -656,9 +621,7 @@ local function cnfSAT(theory, cnf, meta, model)
 		end
 
 		if cnf:isTautology() then
-			watch:before "theory:isSatisfiable"
 			local out, conflicting = model:isSatisfiable()
-			watch:after "theory:isSatisfiable"
 			if not out then
 				assert(conflicting)
 
@@ -671,21 +634,23 @@ local function cnfSAT(theory, cnf, meta, model)
 				cnf:addClause(coreClause)
 			else
 				-- Expand quantified statements using the theory
-				watch:before "additionalClauses"
 				local additional, newMeta = theory:additionalClauses(model, meta)
-				watch:after "additionalClauses"
 
 				local currentAssignment = cnf:getAssignment()
 				if next(additional) == nil then
-					-- There are no quantifiers to expand; we are done!
-					watch:finish()
+					-- There are no quantifiers to expand:
+					-- we have found a satisfaction
 					return currentAssignment
 				end
 
-				-- Expand the additions
+				-- Expand the additions to CNF
+				print("TODO: replace these with implications")
 				local expansionClauses = {}
 				local newClauses = {}
 				for quantified, results in pairs(additional) do
+					-- For disjunctive clause w,
+					-- x => w === ~x or w
+					-- which is also a disjunctive clause
 					expansionClauses[quantified] = {}
 					for _, result in ipairs(results) do
 						local addCNF = toCNF(theory, result, true, {})
@@ -696,42 +661,36 @@ local function cnfSAT(theory, cnf, meta, model)
 					end
 				end
 
-				-- Recursively solve the new SAT problem
+				-- Recursively solve the new SAT problem, including the clauses
+				-- from quantifier instantiations
 				local newCNF = CNF.new(theory, newClauses, currentAssignment)
-				watch:before "subsat"
 				local sat = cnfSAT(theory, newCNF, newMeta, model)
-				watch:after "subsat"
 				if sat then
 					-- Even after expanding quantifiers, the formula remained
 					-- satisfiable
-					watch:finish()
 					return currentAssignment
 				end
 
-				-- XXX: After doing unit-prop, it's a contradiction.
+				-- The "proof" that cnfSAT makes for unsatisfiable is enough
+				-- additional clauses so that unit propagation results in a
+				-- contradiction.
 				newCNF:forceAssignments()
 				assert(newCNF:isContradiction())
 
 				-- Reduce the current assignment using the above contradiction
+				local before = os.clock()
 				local e = reduceQuantifiedContradiction(
 					theory,
 					expansionClauses,
 					currentAssignment,
 					newCNF:learnedClauses()
 				)
+				print(os.clock() - before, "seconds spent on reducing quantified contradiction")
+
+				-- Learn about which quantifiers conflict with each other
+				assert(#e ~= 0)
 				for _, clause in ipairs(e) do
 					cnf:addClause(clause)
-				end
-
-				if #e == 0 then
-					-- Reject the current assignment in its entirety
-					-- Because the current assignment is a contradiction, its
-					-- negation is a tautology
-					local notCurrent = {}
-					for k, v in pairs(currentAssignment) do
-						table.insert(notCurrent, {k, not v})
-					end
-					cnf:addClause(notCurrent)
 				end
 			end
 		elseif cnf:isContradiction() then
@@ -740,7 +699,6 @@ local function cnfSAT(theory, cnf, meta, model)
 			while true do
 				if #stack == 0 then
 					-- There are no choices to undo
-					watch:finish()
 					return false
 				end
 
@@ -771,9 +729,7 @@ local function cnfSAT(theory, cnf, meta, model)
 				implied = implied,
 			})
 			cnf:assign(term, prefer)
-			watch:before "model assigned"
 			model = model:assigned(term, prefer)
-			watch:after "model assigned"
 		end
 	end
 end
