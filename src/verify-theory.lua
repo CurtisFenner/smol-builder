@@ -381,7 +381,10 @@ function theory:additionalClauses(model, meta)
 	for term, truth in model._quantifiers:traverse() do
 		if term.tag == "forall" then
 			if not meta[term.unique] then
-				out[term] = quantifierClauses(model, term, truth)
+				out[term] = {
+					[true] = quantifierClauses(model, term, true),
+					[false] = quantifierClauses(model, term, false),
+				}
 				newMeta[term.unique] = true
 			else
 				-- This quantifier has already been instantiated

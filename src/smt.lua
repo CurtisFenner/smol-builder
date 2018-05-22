@@ -31,7 +31,7 @@ REGISTER_TYPE("Theory", recordType {
 	canonKey = "function",
 
 	-- argument: (self, simpleModel, cnf, additionalInfo)
-	-- RETURNS [assertion_t], additionalInfo
+	-- RETURNS {assertion_t => {true, false => [assertion_t]}}, additionalInfo
 	-- additionalInfo is used to manage recursive instantiations, and may be
 	-- returned as nil
 	additionalClauses = "function",
@@ -132,6 +132,7 @@ function CNF.new(theory, clauses, rawAssignment)
 		local canonicalized = instance:canonicalize(k)
 		assert(nil == instance._assignment[canonicalized], "not canonicalized")
 		instance._assignment[canonicalized] = v
+		instance._index[k] = instance._index[k] or {}
 	end
 
 	-- Index the clauses
@@ -548,44 +549,6 @@ local function minimizeSet(set, isGood)
 	return reduced
 end
 
--- RETURNS a CNF implied from the given CNF
--- Produces a core referring to quantified statements dervied from
--- contradictions between their instantiations
-local function reduceQuantifiedContradiction(theory, additional, quantifierAssignment, pruningClauses)
-	local before = os.clock()
-
-	for key in pairs(additional) do
-		assert(quantifierAssignment[key] ~= nil)
-	end
-
-	local core = minimizeSet(quantifierAssignment, function(reduced)
-		-- Re-generate the problem
-		local clauses = {table.unpack(pruningClauses)}
-		for key, instantiatedClauses in pairs(additional) do
-			if reduced[key] ~= nil then
-				for _, clause in ipairs(instantiatedClauses) do
-					table.insert(clauses, clause)
-				end
-			end
-		end
-
-		-- Check if the reduced version is still a contradiction
-		local c = CNF.new(theory, clauses, reduced)
-		c:forceAssignments()
-		return c:isContradiction()
-	end)
-
-	-- The model is a contradiction; negating it produces an implied clause that
-	-- restricts the future search space
-	local notThis = {}
-	for k, v in pairs(core) do
-		assert(quantifierAssignment[k] ~= nil)
-		table.insert(notThis, {k, not v})
-	end
-
-	return {notThis}
-end
-
 -- RETURNS a truth assignment of theory terms {[term] => boolean} that satisfies
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no such satisfaction exists
@@ -644,19 +607,18 @@ local function cnfSAT(theory, cnf, meta, model)
 				end
 
 				-- Expand the additions to CNF
-				print("TODO: replace these with implications")
-				local expansionClauses = {}
 				local newClauses = {}
-				for quantified, results in pairs(additional) do
+				for quantified, branch in pairs(additional) do
 					-- For disjunctive clause w,
 					-- x => w === ~x or w
 					-- which is also a disjunctive clause
-					expansionClauses[quantified] = {}
-					for _, result in ipairs(results) do
-						local addCNF = toCNF(theory, result, true, {})
-						for _, clause in ipairs(addCNF) do
-							table.insert(expansionClauses[quantified], clause)
-							table.insert(newClauses, clause)
+					for truth, results in pairs(branch) do
+						for _, result in ipairs(results) do
+							local addCNF = toCNF(theory, result, true, {})
+							for _, clause in ipairs(addCNF) do
+								local implication = {{quantified, not truth}, table.unpack(clause)}
+								table.insert(newClauses, implication)
+							end
 						end
 					end
 				end
@@ -678,20 +640,33 @@ local function cnfSAT(theory, cnf, meta, model)
 				assert(newCNF:isContradiction())
 
 				-- Reduce the current assignment using the above contradiction
-				local before = os.clock()
-				local e = reduceQuantifiedContradiction(
-					theory,
-					expansionClauses,
-					currentAssignment,
-					newCNF:learnedClauses()
-				)
-				print(os.clock() - before, "seconds spent on reducing quantified contradiction")
+				local assignmentCore = minimizeSet(currentAssignment, function(m)
+					-- Reset the new CNF
+					for k in pairs(newCNF:getAssignment()) do
+						newCNF:unassign(k)
+					end
+
+					-- Do the partial assignment
+					for k, v in pairs(m) do
+						newCNF:assign(k, v)
+					end
+
+					-- Do unit propagation
+					newCNF:forceAssignments()
+					return newCNF:isContradiction()
+				end)
+
+				-- Negate the core contradictory map to get a new clause
+				local learnedClause = {}
+				for k, v in pairs(assignmentCore) do
+					table.insert(learnedClause, {k, not v})
+				end
 
 				-- Learn about which quantifiers conflict with each other
-				assert(#e ~= 0)
-				for _, clause in ipairs(e) do
-					cnf:addClause(clause)
+				if #learnedClause == 0 then
+					return false
 				end
+				cnf:addClause(learnedClause)
 			end
 		elseif cnf:isContradiction() then
 			-- Some assignment made by the SAT solver is bad
@@ -905,11 +880,10 @@ function plaintheory:additionalClauses(model, meta)
 		if not meta[key] then
 			if type(key) == "table" and key[1] == "d" then
 				newMeta[key] = true
-				if value then
-					out[key] = {key[2]}
-				else
-					out[key] = {{"not", key[2]}}
-				end
+				out[key] = {
+					[true] = {key[2]},
+					[false] = {{"not", key[2]}},
+				}
 			end
 		end
 	end
