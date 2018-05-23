@@ -1,6 +1,6 @@
 -- A SMT Solver
 
-local Map = import "map.lua"
+local Map = import "data/map.lua"
 local ansi = import "ansi.lua"
 local Stopwatch = import "stopwatch.lua"
 

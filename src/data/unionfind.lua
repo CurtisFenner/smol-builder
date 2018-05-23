@@ -1,7 +1,7 @@
 -- Persistent union-find (disjoint set) data structure
 
-local Rope = import "rope.lua"
-local Map = import "map.lua"
+local Rope = import "data/rope.lua"
+local Map = import "data/map.lua"
 
 local UnionFind = {}
 UnionFind.__index = UnionFind

@@ -4,9 +4,9 @@ local theory = {
 	assertion_t = "Assertion",
 }
 
-local Rope = import "rope.lua"
-local Map = import "map.lua"
-local UnionFind = import "unionfind.lua"
+local Rope = import "data/rope.lua"
+local Map = import "data/map.lua"
+local UnionFind = import "data/unionfind.lua"
 
 local common = import "common.lua"
 local showType = common.showType
