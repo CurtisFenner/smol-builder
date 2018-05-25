@@ -1,0 +1,13 @@
+package test;
+
+interface I {
+	method foo() Unit
+	ensures new().good();
+
+	method good() Boolean ensures return;
+}
+
+class Test {
+	static main() Unit {
+	}
+}

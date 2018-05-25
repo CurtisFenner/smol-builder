@@ -137,6 +137,13 @@ end
 local T_IDENTIFIER = TOKEN("identifier", "lexeme")
 local T_TYPENAME = TOKEN("typename", "lexeme")
 local T_GENERIC = TOKEN("generic", "name")
+local TR_GENERIC = parser.map(
+	T_GENERIC,
+	function(x)
+		return {tag = "generic", name = x}
+	end,
+	true
+)
 local T_INTEGER_LITERAL = TOKEN("integer-literal", "value")
 local T_STRING_LITERAL = TOKEN("string-literal", "value")
 local T_OPERATOR = TOKEN("operator", "lexeme")
@@ -159,9 +166,9 @@ local parsers = {
 
 	-- Represents a package declaration
 	["package"] = parser.composite {
-		tag = "***package",
+		tag = "package",
 		{"_", K_PACKAGE},
-		{"#name", T_IDENTIFIER, "an identifier"},
+		{"name", T_IDENTIFIER, "an identifier"},
 		{"_", K_SEMICOLON, "`;` to finish package declaration"},
 	},
 
@@ -169,9 +176,9 @@ local parsers = {
 	["import"] = parser.composite {
 		tag = "import",
 		{"_", K_IMPORT},
-		{"package", T_IDENTIFIER, "an imported package name"},
+		{"packageName", T_IDENTIFIER, "an imported package name"},
 		{
-			"class",
+			"definitionName",
 
 			-- string | false
 			parser.optional(parser.composite {
@@ -253,6 +260,7 @@ local parsers = {
 		{"_", K_CURLY_OPEN, "`{` to begin interface body"},
 		{"signatures", parser.query "interface-signature*"},
 		{"_", K_CURLY_CLOSE, "`}` to end interface body"},
+		{"implements", parser.constant {}},
 	},
 
 	-- Represents a generics definition
@@ -261,7 +269,7 @@ local parsers = {
 		{"_", K_SQUARE_OPEN},
 		{
 			"parameters",
-			parser.delimited(T_GENERIC, "1+", ",", "generic parameter"),
+			parser.delimited(TR_GENERIC, "1+", ",", "generic parameter"),
 			"generic parameter variables",
 		},
 		{"constraints", parserOtherwise(parser.query "generic-constraints?", {})},
@@ -276,7 +284,7 @@ local parsers = {
 
 	["generic-constraint"] = parser.composite {
 		tag = "constraint",
-		{"parameter", T_GENERIC},
+		{"parameter", TR_GENERIC},
 		{"_", K_IS, "`is` after generic parameter"},
 		{"constraint", parser.named "concrete-type", "a type constrain after `is`"},
 	},
@@ -292,13 +300,7 @@ local parsers = {
 		K_SELF,
 
 		-- User defined types
-		parser.map(
-			T_GENERIC,
-			function(x)
-				return {tag = "generic", name = x}
-			end,
-			true
-		),
+		TR_GENERIC,
 		parser.named "concrete-type",
 	},
 

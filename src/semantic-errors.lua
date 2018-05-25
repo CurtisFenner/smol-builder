@@ -1,59 +1,69 @@
 local Report = {}
 
-function Report.TYPE_DEFINED_TWICE(first, second)
-	assertis(first.name, "string")
-	assertis(second.name, "string")
-	assert(first.name == second.name)
-
-	local name = first.name
+function Report.DEFINITION_DEFINED_TWICE(p)
+	assertis(p, recordType {
+		fullName = "string",
+		firstLocation = "Location",
+		secondLocation = "Location",
+	})
 
 	quit(
-		"The type `",
-		name,
-		"` was already defined ",
-		first.location,
-		"\nHowever, you are attempting to redefine it ",
-		second.location
-	)
-end
-
-function Report.GENERIC_DEFINED_TWICE(p)
-	quit(
-		"The generic variable `#",
-		p.name,
-		"` was already defined ",
+		"A definition for `",
+		p.fullName,
+		"` was already made ",
 		p.firstLocation,
 		"\nHowever, you are attempting to redefine it ",
 		p.secondLocation
 	)
 end
 
-function Report.MEMBER_DEFINED_TWICE(p)
+function Report.IMPORT_PACKAGE_TWICE(p)
 	quit(
-		"The member `" .. p.name .. "` was already defined ",
+		"The package `", p.packageName, "` was already imported ",
 		p.firstLocation,
-		"\nHowever, you are attempting to redefine it ",
+		"\nHowever, you try to import it again ",
 		p.secondLocation
+)
+end
+
+function Report.SELF_OUTSIDE_INTERFACE(p)
+	quit(
+		"A `#Self` type can only be used in an interface, but is mentioned ",
+		p.location
 	)
 end
 
-function Report.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
+function Report.WRONG_ARITY(p)
+	assertis(p.definitionLocation, "Location")
+
 	quit(
-		"The type `",
+		"The definition `",
 		p.name,
-		"` was first brought into scope ",
-		p.firstLocation,
-		"\nHowever, you try to bring the name `",
-		p.name,
-		"` into scope again ",
-		p.secondLocation
+		"` was defined ",
+		p.definitionLocation,
+		"to take exactly ",
+		p.expectedArity,
+		" type arguments.",
+		"\nHowever, you provide ",
+		p.givenArity,
+		" ",
+		p.location
 	)
 end
 
-function Report.UNKNOWN_TYPE_IMPORTED(p)
+function Report.INTERFACE_USED_AS_TYPE(p)
+	quit(
+		"The definition for `",
+		p.interface,
+		"` is an interface, so you cannot use it as a type as you are ",
+		p.location
+	)
+end
+
+function Report.UNKNOWN_DEFINITION_IMPORTED(p)
 	p = freeze(p)
 	quit(
-		"A type called `",
+		"A definition called `",
 		p.name,
 		"` has not been defined.",
 		"\nHowever, you are trying to import it ",
@@ -72,6 +82,14 @@ function Report.UNKNOWN_PACKAGE_USED(p)
 	)
 end
 
+function Report.UNKNOWN_DEFINITION_USED(p)
+	quit(
+		"No definition called `" .. p.name .. "` has been defined in scope.",
+		"\nHowever, you are trying to use it ",
+		p.location
+	)
+end
+
 function Report.UNKNOWN_GENERIC_USED(p)
 	quit(
 		"A generic variable called `#" .. p.name .. "` has not been defined.",
@@ -80,21 +98,60 @@ function Report.UNKNOWN_GENERIC_USED(p)
 	)
 end
 
-function Report.UNKNOWN_TYPE_USED(p)
+function Report.GENERIC_DEFINED_TWICE(p)
 	quit(
-		"No type called `" .. p.name .. "` has been defined.",
-		"\nHowever, you are trying to use it ",
+		"The generic variable `#",
+		p.name,
+		"` was already defined ",
+		p.firstLocation,
+		"\nHowever, you are attempting to redefine it ",
+		p.secondLocation
+	)
+end
+
+function Report.CONSTRAINTS_MUST_BE_INTERFACES(p)
+	quit(
+		"Constraints must be interfaces.",
+		"\nHowever, the ",
+		p.is,
+		" `",
+		p.typeShown,
+		"` is used as a constraint ",
 		p.location
 	)
 end
 
-function Report.UNKNOWN_LOCAL_TYPE_USED(p)
+function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 	quit(
-		"There is no type called `" .. p.name .. "` in scope.",
-		"\nHowever, you are trying to use it ",
+		"The type `",
+		p.container,
+		"` requires its ",
+		string.ordinal(p.nth),
+		" type-parameter to implement ",
+		p.constraint,
+		" ",
+		p.cause,
+		"\nHowever, the type `",
+		p.type,
+		"` does not implement the interface `",
+		p.constraint,
+		"` ",
 		p.location
 	)
 end
+
+--------------------------------------------------------------------------------
+
+function Report.MEMBER_DEFINED_TWICE(p)
+	quit(
+		"The member `" .. p.name .. "` was already defined ",
+		p.firstLocation,
+		"\nHowever, you are attempting to redefine it ",
+		p.secondLocation
+	)
+end
+
+
 
 function Report.INTERFACE_REQUIRES_MEMBER(p)
 	quit(
@@ -110,24 +167,6 @@ function Report.INTERFACE_REQUIRES_MEMBER(p)
 		p.interface,
 		"` ",
 		p.memberLocation
-	)
-end
-
-function Report.WRONG_ARITY(p)
-	assertis(p.definitionLocation, "Location")
-
-	quit(
-		"The type `",
-		p.name,
-		"` was defined ",
-		p.definitionLocation,
-		"to take exactly ",
-		p.expectedArity,
-		" type arguments.",
-		"\nHowever, you provide ",
-		p.givenArity,
-		" ",
-		p.location
 	)
 end
 
@@ -274,37 +313,6 @@ function Report.INTERFACE_RETURN_TYPE_MISMATCH(p)
 	)
 end
 
-function Report.CONSTRAINTS_MUST_BE_INTERFACES(p)
-	quit(
-		"Constraints must be interfaces.",
-		"\nHowever, the ",
-		p.is,
-		" `",
-		p.typeShown,
-		"` is used as a constraint ",
-		p.location
-	)
-end
-
-function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
-	quit(
-		"The type `",
-		p.container,
-		"` requires its ",
-		string.ordinal(p.nth),
-		" type-parameter to implement ",
-		p.constraint,
-		" ",
-		p.cause,
-		"\nHowever, the type `",
-		p.type,
-		"` does not implement the interface `",
-		p.constraint,
-		"` ",
-		p.location
-	)
-end
-
 function Report.VARIABLE_DEFINITION_COUNT_MISMATCH(p)
 	quit(
 		p.valueCount,
@@ -326,16 +334,6 @@ function Report.VARIABLE_DEFINED_TWICE(p)
 		p.name,
 		"` ",
 		p.second
-	)
-end
-
-function Report.INTERFACE_USED_AS_VALUE(p)
-	quit(
-		"The definition for `",
-		p.interface,
-		"` is an interface,",
-		" so you cannot use it as the type of a variable or value as you are ",
-		p.location
 	)
 end
 
@@ -646,6 +644,14 @@ end
 
 function Report.EVALUATION_ORDER(p)
 	quit("The evaluation order of an expression is not defined ", p.location)
+end
+
+function Report.USE_NEW_IN_INTERFACE(p)
+	quit(
+		"Interfaces do not have constructors.\n",
+		"However, you try to use `new()` ",
+		p.location
+	)
 end
 
 return Report

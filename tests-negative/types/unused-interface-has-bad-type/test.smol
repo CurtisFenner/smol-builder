@@ -1,0 +1,17 @@
+package test;
+import core;
+
+class F[#T | #T is core:Eq] {
+
+}
+
+interface Unused {
+	// Since Test does not implement Eq, it should not be accepted as a type
+	// parameter to F.
+	method shouldreject() F[Test];
+}
+
+class Test {
+	static main() Unit {
+	}
+}

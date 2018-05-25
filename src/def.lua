@@ -20,7 +20,7 @@ REGISTER_TYPE("Token", recordType {
 -- Type Definitions ------------------------------------------------------------
 
 REGISTER_TYPE("Semantics", recordType {
-	classes = listType "ClassIR",
+	compounds = listType(choiceType("ClassIR", "UnionIR")),
 	interfaces = listType "InterfaceIR",
 	builtins = listType(recordType {
 		tag = constantType "builtin",
@@ -28,7 +28,6 @@ REGISTER_TYPE("Semantics", recordType {
 		signatures = listType "Signature",
 		type = "KeywordType+",
 	}),
-	unions = listType "UnionIR",
 	functions = listType "FunctionIR",
 	main = choiceType("string", constantType(false)),
 })
@@ -387,38 +386,55 @@ REGISTER_TYPE("ConstraintIR", choiceType(
 
 --------------------------------------------------------------------------------
 
-REGISTER_TYPE("Type+", choiceType("ConcreteType+", "KeywordType+", "GenericType+", "SelfType+"))
+REGISTER_TYPE("Kind", choiceType("TypeKind", "ConstraintKind"))
 
-REGISTER_TYPE("InterfaceType+", recordType {
-	tag = constantType "interface-type",
-	name = "string",
-	arguments = listType "Type+",
-	location = "Location",
+REGISTER_TYPE("TypeKind", choiceType(
+	"CompoundTypeKind",
+	"SelfTypeKind",
+	"GenericTypeKind",
+	"KeywordTypeKind"
+))
+
+REGISTER_TYPE("CompoundTypeKind", recordType {
+	tag = constantType "compound-type",
+	role = constantType "type",
+	packageName = "string",
+	definitionName = "string",
+	arguments = listType("TypeKind"),
 })
 
-REGISTER_TYPE("ConcreteType+", recordType {
-	tag = constantType "concrete-type+",
-	name = "string",
-	arguments = listType "Type+",
-	location = "Location",
+REGISTER_TYPE("SelfTypeKind", recordType {
+	tag = constantType "self-type",
+	role = constantType "type",
 })
 
-REGISTER_TYPE("KeywordType+", recordType {
-	tag = constantType "keyword-type+",
+REGISTER_TYPE("GenericTypeKind", recordType {
+	tag = constantType "generic-type",
+	role = constantType "type",
 	name = "string",
-	location = "Location",
 })
 
-REGISTER_TYPE("GenericType+", recordType {
-	tag = constantType "generic+",
-
-	-- e.g., "Foo" for `#Foo`
+REGISTER_TYPE("KeywordTypeKind", recordType {
+	tag = constantType "keyword-type",
+	role = constantType "type",
 	name = "string",
-
-	location = "Location",
 })
 
-REGISTER_TYPE("SelfType+", recordType {
-	tag = constantType "self-type+",
-	location = "Location",
+REGISTER_TYPE("ConstraintKind", choiceType(
+	"InterfaceConstraintKind",
+	"KeywordConstraintKind"
+))
+
+REGISTER_TYPE("InterfaceConstraintKind", recordType {
+	tag = constantType "interface-constraint",
+	role = constantType "constraint",
+	packageName = "string",
+	definitionName = "string",
+	arguments = listType("TypeKind"),
+})
+
+REGISTER_TYPE("KeywordConstraintKind", recordType {
+	tag = constantType "keyword-constraint",
+	role = constantType "constraint",
+	name = "string",
 })
