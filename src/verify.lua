@@ -26,7 +26,6 @@ local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
 local typeOfAssertion = common.typeOfAssertion
 
 local excerpt = common.excerpt
-local variableDescription = common.variableDescription
 
 local assertionExprString = common.assertionExprString
 local showType = common.showType

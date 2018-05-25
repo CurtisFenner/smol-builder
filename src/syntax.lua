@@ -200,7 +200,6 @@ local parsers = {
 	-- Represents a class
 	["class-definition"] = parser.composite {
 		tag = "class-definition",
-		{"foreign", parser.query "`foreign`?"},
 		{"_", K_CLASS},
 		{"name", T_TYPENAME, "a type name"},
 		{

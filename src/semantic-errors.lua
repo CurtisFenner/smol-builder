@@ -140,8 +140,6 @@ function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 	)
 end
 
---------------------------------------------------------------------------------
-
 function Report.MEMBER_DEFINED_TWICE(p)
 	quit(
 		"The member `" .. p.name .. "` was already defined ",
@@ -151,6 +149,21 @@ function Report.MEMBER_DEFINED_TWICE(p)
 	)
 end
 
+function Report.VARIABLE_DEFINED_TWICE(p)
+	quit(
+		"The variable `",
+		p.name,
+		"` is first defined ",
+		p.first,
+		"While it is still in scope, you attempt to define another variable ",
+		"with the same name `",
+		p.name,
+		"` ",
+		p.second
+	)
+end
+
+--------------------------------------------------------------------------------
 
 
 function Report.INTERFACE_REQUIRES_MEMBER(p)
@@ -320,20 +333,6 @@ function Report.VARIABLE_DEFINITION_COUNT_MISMATCH(p)
 		p.variableCount,
 		" variable(s) are defined ",
 		p.location
-	)
-end
-
-function Report.VARIABLE_DEFINED_TWICE(p)
-	quit(
-		"The variable `",
-		p.name,
-		"` is first defined ",
-		p.first,
-		"While it is still in scope, you attempt to define another variable ",
-		"with the same name `",
-		p.name,
-		"` ",
-		p.second
 	)
 end
 

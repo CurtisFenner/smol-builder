@@ -87,7 +87,7 @@ REGISTER_TYPE("Signature", recordType {
 	longName = "string",
 
 	parameters = listType "VariableIR",
-	returnTypes = listType "Type+",
+	returnTypes = listType "TypeKind",
 	modifier = choiceType(constantType "static", constantType "method"),
 	foreign = "boolean",
 	bang = "boolean",
@@ -359,7 +359,7 @@ EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
 
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
-	type = "Type+",
+	type = "TypeKind",
 	location = "Location",
 	description = choiceType(constantType(false), "string"),
 })

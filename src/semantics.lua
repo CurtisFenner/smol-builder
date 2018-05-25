@@ -6,7 +6,6 @@ local showType = common.showType
 local areTypesEqual = common.areTypesEqual
 local areInterfaceTypesEqual = common.areInterfaceTypesEqual
 local excerpt = common.excerpt
-local variableDescription = common.variableDescription
 
 local BOOLEAN_DEF = table.findwith(common.BUILTIN_DEFINITIONS, "name", "Boolean")
 local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
@@ -569,7 +568,7 @@ local function semanticsSmol(sources, main)
 	-- generic constraints) themselves don't violate any constraints
 	for _, package in pairs(definitionMap) do
 		for _, definition in pairs(package) do
-			local context = {
+			definition.resolverContext = {
 				-- #Self is only allowed in Interface definitions
 				selfAllowed = definition.definition.tag == "interface-definition" and definition.kind,
 
@@ -581,18 +580,157 @@ local function semanticsSmol(sources, main)
 
 			-- Check the well-formedness of each implements claim
 			for _, claimAST in ipairs(definition.definition.implements) do
-				definition.resolver(claimAST, context)
+				definition.resolver(claimAST, definition.resolverContext)
 			end
 
 			-- Check the well-formedness of each interface constraint
 			for _, constraint in ipairs(definition.definition.generics.constraints) do
-				definition.resolver(constraint.constraint, context)
+				definition.resolver(constraint.constraint, definition.resolverContext)
+			end
+		end
+	end
+
+	-- Collection and check the members of each definition
+	for _, package in pairs(definitionMap) do
+		for _, definition in pairs(package) do
+			-- RETURNS a valid Signature
+			local function checkedSignature(signatureAST)
+				if signatureAST.tag == "foreign-method-definition" then
+					local s = checkSignature(signatureAST.signature)
+					s.foreign = true
+					return s
+				end
+
+				-- Get the list of parameters
+				local parameters = {}
+				for _, p in ipairs(signatureAST.parameters) do
+					-- Check if the name is repeated
+					local previous = table.findwith(parameters, "name", p.name)
+					if previous then
+						Report.VARIABLE_DEFINED_TWICE {
+							name = p.name,
+							first = previous.definitionLocation,
+							second = p.location,
+						}
+					end
+
+					-- Check the type
+					local type = definition.resolver(p.type, definition.resolverContext)
+					if type.role ~= "type" then
+						Report.INTERFACE_USED_AS_TYPE {
+							interface = showConstraintKind(type),
+							location = p.type.location,
+						}
+					end
+
+					table.insert(parameters, {
+						name = p.name,
+						type = type,
+						definitionLocation = p.location,
+					})
+				end
+
+				return {
+					modifier = signatureAST.modifier,
+					memberName = signatureAST.name,
+					foreign = false,
+					bang = not not signatureAST.bang,
+					parameters = parameters,
+					returnTypes = table.map(
+						definition.resolver,
+						signatureAST.returnTypes,
+						definition.resolverContext
+					),
+
+					-- To be processed after all signatures are known
+					requiresASTs = signatureAST.requires,
+					ensuresASTs = signatureAST.ensures,
+
+					-- These are only filled for builtins
+					logic = false,
+					eval = false,
+				}
+			end
+
+			if definition.definition.tag == "class-definition" or definition.definition.tag == "union-definition" then
+				-- Get a map of field members
+				local fieldMap = {}
+				for _, fieldAST in ipairs(definition.definition.fields) do
+					if fieldMap[fieldAST.name] then
+						Report.MEMBER_DEFINED_TWICE {
+							name = fieldAST.name,
+							firstLocation = fieldMap[fieldAST.name].definitionLocation,
+							secondLocation = fieldAST.location,
+						}
+					end
+
+					-- Check that the type is in fact a type
+					local type = definition.resolver(fieldAST.type, definition.resolverContext)
+					if type.role ~= "type" then
+						Report.INTERFACE_USED_AS_TYPE {
+							interface = showConstraintKind(type),
+							location = fieldAST.type.location,
+						}
+					end
+
+					fieldMap[fieldAST.name] = {
+						name = fieldAST.name,
+						type = type,
+						definitionLocation = fieldAST.location,
+					}
+				end
+
+				-- Get a map of function members
+				local functionMap = {}
+				for _, methodAST in ipairs(definition.definition.methods) do
+					-- Check if this name is fresh
+					local signature = checkedSignature(methodAST.signature)
+					local previous = fieldMap[signature.memberName] or functionMap[signature.memberName]
+					if previous then
+						Report.MEMBER_DEFINED_TWICE {
+							name = signature.memberName,
+							firstLocation = previous.definitionLocation,
+							secondLocation = signature.definitionLocation,
+						}
+					end
+
+					functionMap[signature.memberName] = {
+						signature = signature,
+						bodyAST = not signature.foreign and methodAST.body,
+						definitionLocation = methodAST.signature.location,
+					}
+				end
+
+				definition.fieldMap = fieldMap
+				definition.functionMap = functionMap
+			elseif definition.definition.tag == "interface-definition" then
+				-- Get a map of function members
+				local functionMap = {}
+				for _, signatureAST in ipairs(definition.definition.signatures) do
+					-- Check if this name is fresh
+					local signature = checkedSignature(signatureAST)
+					if functionMap[signature.memberName] then
+						Report.MEMBER_DEFINED_TWICE {
+							name = signature.memberName,
+							firstLocation = functionMap[signature.memberName].definitionLocation,
+							secondLocation = signatureAST.location,
+						}
+					end
+
+					functionMap[signature.memberName] = {
+						signature = signature,
+						definitionLocation = signatureAST.location,
+					}
+				end
+				definition.functionMap = functionMap
+			else
+				error("bad definition tag")
 			end
 		end
 	end
 
 	-- Compile the remainder
-	
+
 
 	return freeze {
 		builtins = common.BUILTIN_DEFINITIONS,
