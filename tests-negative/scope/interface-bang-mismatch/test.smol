@@ -1,0 +1,16 @@
+package test;
+
+interface I {
+	method pure() Int;
+}
+
+class C is I {
+	method pure!() Int {
+		return 1;
+	}
+}
+
+class Test {
+	static main() Unit {
+	}
+}

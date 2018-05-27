@@ -163,9 +163,6 @@ function Report.VARIABLE_DEFINED_TWICE(p)
 	)
 end
 
---------------------------------------------------------------------------------
-
-
 function Report.INTERFACE_REQUIRES_MEMBER(p)
 	quit(
 		"The class/union `",
@@ -179,11 +176,55 @@ function Report.INTERFACE_REQUIRES_MEMBER(p)
 		" member `" .. p.memberName .. "` which is required by the interface `",
 		p.interface,
 		"` ",
-		p.memberLocation
+		p.interfaceLocation
 	)
 end
 
-function Report.INTERFACE_REQUIRES_MODIFIER(p)
+function Report.INTERFACE_MODIFIER_MISMATCH(p)
+	quit(
+		"The class/union `",
+		p.class,
+		"` claims to implement interface",
+		" `",
+		p.interface,
+		"` ",
+		p.claimLocation,
+		"\nThe interface `",
+		p.interface,
+		"` defines a ",
+		p.interfaceModifier,
+		" member called `",
+		p.memberName,
+		"` ",
+		p.interfaceLocation,
+		"\nHowever, `",
+		p.class,
+		"` defines `",
+		p.memberName,
+		"` to be a ",
+		p.classModifier,
+		" ",
+		p.classLocation
+	)
+end
+
+function Report.INTERFACE_BANG_MISMATCH(p)
+	quit(
+		"The class/union `",
+		p.class,
+		"` claims to implement interface `",
+		p.interface,
+		"` ",
+		p.claimLocation,
+		"\nHowever, `" .. p.class .. "` implements the ",
+		p.modifier,
+		"`" .. p.memberName .. "` ",
+		not p.expectedBang and "with" or "without",
+		" an action `!`, which disagrees with the interface."
+	)
+end
+
+function Report.INTERFACE_COUNT_MISMATCH(p)
 	quit(
 		"The class/union `",
 		p.class,
@@ -194,137 +235,59 @@ function Report.INTERFACE_REQUIRES_MODIFIER(p)
 		"\nThe interface `",
 		p.interface,
 		"` defines a ",
-		p.interfaceModifier,
-		" member called `",
-		p.name,
-		"` ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.name,
-		"` to be a ",
-		p.classModifier,
-		" ",
-		p.classLocation
-	)
-end
-
-function Report.INTERFACE_PARAMETER_COUNT_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.name,
+		p.modifier,
+		" called `",
+		p.memberName,
 		"` with ",
 		p.interfaceCount,
-		" parameter(s) ",
+		" " .. p.thing .. "(s) ",
 		p.interfaceLocation,
 		"\nHowever, `",
 		p.class,
 		"` defines `",
-		p.name,
+		p.memberName,
 		"` with ",
 		p.classCount,
-		" parameter(s)",
+		" " .. p.thing .. "(s) ",
 		p.classLocation
 	)
 end
 
-function Report.INTERFACE_PARAMETER_TYPE_MISMATCH(p)
+function Report.INTERFACE_TYPE_MISMATCH(p)
 	quit(
 		"The class/union `",
 		p.class,
 		"` claims to implement interface",
 		" `",
 		p.interface,
-		"`.",
+		"` ",
+		p.claimLocation,
 		"\nThe interface `",
 		p.interface,
-		"` defines a member called `",
-		p.name,
+		"` defines a ",
+		p.modifier,
+		" called `",
+		p.memberName,
 		"` with the ",
 		string.ordinal(p.index),
-		" parameter of type `",
+		" " .. p.thing .. " of type `",
 		p.interfaceType,
 		"` ",
 		p.interfaceLocation,
 		"\nHowever, `",
 		p.class,
 		"` defines `",
-		p.name,
+		p.memberName,
 		"` with the ",
 		string.ordinal(p.index),
-		" parameter of type `",
+		" " .. p.thing .." of type `",
 		p.classType,
 		"` ",
 		p.classLocation
 	)
 end
 
-function Report.INTERFACE_RETURN_COUNT_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.member,
-		"` with ",
-		p.interfaceCount,
-		" return value(s) ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.member,
-		"` with ",
-		p.classCount,
-		" return values(s) ",
-		p.classLocation
-	)
-end
-
-function Report.INTERFACE_RETURN_TYPE_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.member,
-		"` with the ",
-		string.ordinal(p.index),
-		" return-value of type `",
-		p.interfaceType,
-		"` ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.member,
-		"` with the ",
-		string.ordinal(p.index),
-		" return-value of type `",
-		p.classType,
-		"` ",
-		p.classLocation
-	)
-end
+--------------------------------------------------------------------------------
 
 function Report.VARIABLE_DEFINITION_COUNT_MISMATCH(p)
 	quit(

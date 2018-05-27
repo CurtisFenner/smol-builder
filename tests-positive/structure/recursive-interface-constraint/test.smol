@@ -1,0 +1,8 @@
+package test;
+
+interface I[#T | #T is I[#T]] {
+}
+
+class Test {
+	static main() Unit {}
+}

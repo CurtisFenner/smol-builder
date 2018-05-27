@@ -3,7 +3,6 @@
 local Report = import "semantic-errors.lua"
 local common = import "common.lua"
 local showType = common.showType
-local areTypesEqual = common.areTypesEqual
 local areInterfaceTypesEqual = common.areInterfaceTypesEqual
 local excerpt = common.excerpt
 
@@ -48,6 +47,14 @@ local function showConstraintKind(c)
 	error "unknown ConstraintKind tag"
 end
 
+-- RETURNS whether or not two given types are the same
+local function areTypesEqual(a, b)
+	assertis(a, "TypeKind")
+	assertis(b, "TypeKind")
+
+	return showTypeKind(a) == showTypeKind(b)
+end
+
 -- RETURNS a Kind with the same structure, buch each GenericTypeKind replaced
 -- with a TypeKind from the map
 -- REQUIRES each GenericTypeKind mentioned by the kind is present in the map
@@ -75,7 +82,9 @@ local function substituteGenerics(kind, map)
 			arguments = table.map(substituteGenerics, kind.arguments, map),
 		}
 	elseif kind.tag == "self-type" then
-		error "TODO: How should #Self be substitute?"
+		assertis(map.Self, "TypeKind")
+
+		return map.Self
 	end
 
 	-- All other Kinds are non-recursive
@@ -338,7 +347,7 @@ local function makeDefinitionASTResolver(info, definitionMap)
 						substitutionMap[n] = argument.arguments[i]
 					end
 					for _, implement in ipairs(argumentDefinition.implements) do
-						table.insert(present, substituteGenerics(implement, substitutionMap))
+						table.insert(present, substituteGenerics(implement.constraint, substitutionMap))
 					end
 				end
 
@@ -367,7 +376,7 @@ local function makeDefinitionASTResolver(info, definitionMap)
 		-- Determine if this a ConstraintKind or a TypeKind based on the tag of
 		-- the definition
 		local tag, role
-		if definition.definition.tag == "interface-definition" then
+		if definition.tag == "interface-definition" then
 			tag = "interface-constraint"
 			role = "constraint"
 		else
@@ -435,6 +444,7 @@ local function semanticsSmol(sources, main)
 
 			-- Record the existence of this definition
 			definitionMap[packageName][definition.name] = {
+				tag = definition.tag,
 				packageName = packageName,
 				fullName = packageName .. ":" .. definition.name,
 				importsByName = importsByName,
@@ -459,7 +469,7 @@ local function semanticsSmol(sources, main)
 
 			-- Get the tag and role based on the definition tag
 			local tag, role
-			if definition.definition.tag == "interface-definition" then
+			if definition.tag == "interface-definition" then
 				tag = "interface-constraint"
 				role = "constraint"
 			else
@@ -504,7 +514,7 @@ local function semanticsSmol(sources, main)
 
 			local context = {
 				-- #Self is only allowed in Interface definitions
-				selfAllowed = definition.definition.tag == "interface-definition" and definition.kind,
+				selfAllowed = definition.tag == "interface-definition" and definition.kind,
 
 				-- We do not yet know which generics are in scope with which
 				-- constraints
@@ -556,10 +566,16 @@ local function semanticsSmol(sources, main)
 					}
 				end
 
-				table.insert(claims, claim)
+				table.insert(claims, {
+					claimLocation = claimAST.location,
+					constraint = claim,
+				})
 			end
 			
-			assertis(claims, listType "ConstraintKind")
+			assertis(claims, listType(recordType{
+				claimLocation = "Location",
+				constraint = "ConstraintKind",
+			}))
 			definition.implements = claims
 		end
 	end
@@ -570,7 +586,7 @@ local function semanticsSmol(sources, main)
 		for _, definition in pairs(package) do
 			definition.resolverContext = {
 				-- #Self is only allowed in Interface definitions
-				selfAllowed = definition.definition.tag == "interface-definition" and definition.kind,
+				selfAllowed = definition.tag == "interface-definition" and definition.kind,
 
 				-- We do not yet know which generics are in scope with which
 				-- constraints
@@ -631,7 +647,7 @@ local function semanticsSmol(sources, main)
 				end
 
 				return {
-					modifier = signatureAST.modifier,
+					modifier = signatureAST.modifier.lexeme,
 					memberName = signatureAST.name,
 					foreign = false,
 					bang = not not signatureAST.bang,
@@ -652,7 +668,7 @@ local function semanticsSmol(sources, main)
 				}
 			end
 
-			if definition.definition.tag == "class-definition" or definition.definition.tag == "union-definition" then
+			if definition.tag == "class-definition" or definition.tag == "union-definition" then
 				-- Get a map of field members
 				local fieldMap = {}
 				for _, fieldAST in ipairs(definition.definition.fields) do
@@ -703,7 +719,7 @@ local function semanticsSmol(sources, main)
 
 				definition.fieldMap = fieldMap
 				definition.functionMap = functionMap
-			elseif definition.definition.tag == "interface-definition" then
+			elseif definition.tag == "interface-definition" then
 				-- Get a map of function members
 				local functionMap = {}
 				for _, signatureAST in ipairs(definition.definition.signatures) do
@@ -725,6 +741,158 @@ local function semanticsSmol(sources, main)
 				definition.functionMap = functionMap
 			else
 				error("bad definition tag")
+			end
+		end
+	end
+
+	-- Check that each type actually implements the methods they claim to
+	-- NOTE: This does NOT check that requires/ensures is acceptable, which will
+	-- be checked when the method implementation is compiled
+	for _, package in pairs(definitionMap) do
+		for _, definition in pairs(package) do
+			if definition.tag == "class-definition" or definition.tag == "union-definition" then
+				for _, implement in ipairs(definition.implements) do
+					local constraint = implement.constraint
+					if constraint.tag == "interface-constraint" then
+						local interfaceDefinition = definitionMap[constraint.packageName][constraint.definitionName]
+						local substitutionMap = {
+							Self = definition.kind,
+						}
+
+						-- The interface's signatures need to be transformed to
+						-- substitute generics for the specified arguments
+						for i, argument in ipairs(constraint.arguments) do
+							substitutionMap[interfaceDefinition.genericConstraintMap.order[i]] = argument
+						end
+
+						-- Check each signature
+						for name, f in pairs(interfaceDefinition.functionMap) do
+							-- Check for a function member of the same name
+							local matching = definition.functionMap[name]
+							if not matching then
+								Report.INTERFACE_REQUIRES_MEMBER {
+									claimLocation = implement.claimLocation,
+									class = definition.fullName,
+									interface = showConstraintKind(constraint),
+									memberName = name,
+									interfaceLocation = f.definitionLocation,
+								}
+							end
+
+							-- Check that the modifiers match
+							if matching.signature.modifier ~= f.signature.modifier then
+								Report.INTERFACE_MODIFIER_MISMATCH {
+									claimLocation = implement.claimLocation,
+									class = definition.fullName,
+									interface = showConstraintKind(constraint),
+									memberName = name,
+									interfaceLocation = f.definitionLocation,
+									classLocation = matching.definitionLocation,
+
+									-- Explain modifier mismatch
+									interfaceModifier = f.signature.modifier,
+									classModifier = matching.signature.modifier,
+								}
+							end
+
+							-- Check that the bangs match
+							if matching.signature.bang ~= f.signature.bang then
+								Report.INTERFACE_BANG_MISMATCH {
+									claimLocation = implement.claimLocation,
+									class = definition.fullName,
+									interface = showConstraintKind(constraint),
+									memberName = name,
+									modifier = f.signature.modifier,
+									interfaceLocation = f.definitionLocation,
+									classLocation = matching.definitionLocation,
+
+									-- Explain bang mismatch
+									expectedBang = f.signature.bang,
+								}
+							end
+
+							-- Check that the parameter types match
+							if #matching.signature.parameters ~= #f.signature.parameters then
+								Report.INTERFACE_COUNT_MISMATCH {
+									claimLocation = implement.claimLocation,
+									class = definition.fullName,
+									interface = showConstraintKind(constraint),
+									memberName = name,
+									modifier = f.signature.modifier,
+									interfaceLocation = f.definitionLocation,
+									classLocation = matching.definitionLocation,
+
+									-- Explain count mismatch
+									thing = "parameter",
+									classCount = #matching.signature.parameters,
+									interfaceCount = #f.signature.parameters,
+								}
+							end
+							for i, a in ipairs(matching.signature.parameters) do
+								local expected = substituteGenerics(f.signature.parameters[i].type, substitutionMap)
+								if not areTypesEqual(a.type, expected) then
+									Report.INTERFACE_TYPE_MISMATCH {
+										claimLocation = implement.claimLocation,
+										class = definition.fullName,
+										interface = showConstraintKind(constraint),
+										memberName = name,
+										modifier = f.signature.modifier,
+										interfaceLocation = f.definitionLocation,
+										classLocation = matching.definitionLocation,
+
+										-- Explain type mismatch
+										thing = "parameter",
+										index = i,
+										interfaceType = showTypeKind(expected),
+										classType = showTypeKind(a.type),
+									}
+								end
+							end
+
+							-- Check that the return types match
+							if #matching.signature.returnTypes ~= #f.signature.returnTypes then
+								Report.INTERFACE_COUNT_MISMATCH {
+									claimLocation = implement.claimLocation,
+									class = definition.fullName,
+									interface = showConstraintKind(constraint),
+									memberName = name,
+									modifier = f.signature.modifier,
+									interfaceLocation = f.definitionLocation,
+									classLocation = matching.definitionLocation,
+
+									-- Explain count mismatch
+									thing = "return type",
+									classCount = #matching.signature.returnTypes,
+									interfaceCount = #f.signature.returnTypes,
+								}
+							end
+							for i, r in ipairs(matching.signature.returnTypes) do
+								local expected = substituteGenerics(f.signature.returnTypes[i], substitutionMap)
+								if not areTypesEqual(r, expected) then
+									Report.INTERFACE_TYPE_MISMATCH {
+										claimLocation = implement.claimLocation,
+										class = definition.fullName,
+										interface = showConstraintKind(constraint),
+										memberName = name,
+										modifier = f.signature.modifier,
+										interfaceLocation = f.definitionLocation,
+										classLocation = matching.definitionLocation,
+
+										-- Explain type mismatch
+										thing = "return type",
+										index = i,
+										interfaceType = showTypeKind(expected),
+										classType = showTypeKind(r),
+									}
+								end
+							end
+						end
+					elseif constraint.tag == "keyword-constraint" then
+						error("TODO: keyword-constraint")
+					else
+						error("unknown constraint type")
+					end
+				end
 			end
 		end
 	end
