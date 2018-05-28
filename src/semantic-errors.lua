@@ -287,93 +287,72 @@ function Report.INTERFACE_TYPE_MISMATCH(p)
 	)
 end
 
---------------------------------------------------------------------------------
-
-function Report.VARIABLE_DEFINITION_COUNT_MISMATCH(p)
+function Report.UNREACHABLE_STATEMENT(p)
 	quit(
-		p.valueCount,
-		" value(s) are provided but ",
-		p.variableCount,
-		" variable(s) are defined ",
+		"Statements following a `return` can never be reached.",
+		"\nThis makes an unreachable point in your code ",
 		p.location
 	)
 end
 
-function Report.WRONG_VALUE_COUNT(p)
+function Report.TYPE_MISMATCH(p)
+	if #p.given ~= #p.expected then
+		quit(
+			"There were " .. #p.expected .. " " .. p.purpose .. " expected",
+			" ",
+			p.expectedLocation,
+			"\nHowever, " .. #p.given .. " " .. p.purpose .. " were supplied ",
+			p.givenLocation
+		)
+	end
+
+	for i in ipairs(p.given) do
+		if p.given[i] ~= p.expected[i] then
+			quit(
+				"The " .. string.ordinal(i) .. " " .. p.purpose,
+				" should be ",
+				p.expected[i],
+				" as defined ",
+				p.expectedLocation,
+				"\nHowever, the " .. string.ordinal(i) .. " " .. p.purpose,
+				" was ",
+				p.given[i],
+				" ",
+				p.givenLocation
+			)
+		end
+	end
+
+	error "unreachable"
+end
+
+function Report.EVALUATION_ORDER(p)
 	quit(
-		"The ",
-		p.purpose,
-		" needs ",
-		p.expectedCount,
-		" value(s),",
-		" but was given ",
-		p.givenCount,
-		" ",
-		p.location
+		"The evaluation order of an expressions.",
+		"\nThe first is ",
+		p.first,
+		"\nThe second is ",
+		p.second
 	)
 end
 
-function Report.TYPES_DONT_MATCH(p)
-	assertis(p.expectedType, "string")
-	assertis(p.givenType, "string")
-	assertis(p.location, "Location")
-	assertis(p.purpose, "string")
-	quit(
-		"The ",
-		p.purpose,
-		" expects `",
-		p.expectedType,
-		"` as defined ",
-		p.expectedLocation,
-		"\nHowever, you pass a `",
-		p.givenType,
-		"` ",
-		p.location
-	)
-end
-
-function Report.EXPECTED_DIFFERENT_TYPE(p)
-	assertis(p.expectedType, "string")
-	assertis(p.givenType, "string")
-	assertis(p.location, "Location")
-	assertis(p.purpose, "string")
-	quit(
-		"The ",
-		p.purpose,
-		" expects `",
-		p.expectedType,
-		"` but was given `",
-		p.givenType,
-		"` ",
-		p.location
-	)
-end
-
-function Report.EQ_TYPE_MISMATCH(p)
-	quit(
-		"The operands of `==` must be of the same type.",
-		"\nHowever, the left operand to `==` is of type `",
-		p.leftType,
-		"` while the right operand is of type `",
-		p.rightType,
-		"` ",
-		p.location
-	)
-end
-
-function Report.NO_SUCH_FIELD(p)
+function Report.NO_SUCH_MEMBER(p)
 	quit(
 		"The type `",
 		p.container,
-		"` does not have a field called `",
+		"` does not have a " .. p.memberType .. " called `",
 		p.name,
 		"`",
-		"\nHowever, you try to access `",
+		"\nHowever, you try to use `",
 		p.name,
 		"` ",
 		p.location
 	)
 end
+
+--------------------------------------------------------------------------------
+
+
 
 function Report.NO_SUCH_VARIANT(p)
 	quit(
@@ -604,9 +583,6 @@ function Report.QUANTIFIER_USED_IN_IMPLEMENTATION(p)
 	)
 end
 
-function Report.EVALUATION_ORDER(p)
-	quit("The evaluation order of an expression is not defined ", p.location)
-end
 
 function Report.USE_NEW_IN_INTERFACE(p)
 	quit(

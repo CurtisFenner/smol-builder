@@ -77,7 +77,7 @@ REGISTER_TYPE("FunctionIR", recordType {
 	parameters = listType "VariableIR",
 	generics = listType "TypeParameterIR",
 	returnTypes = listType "Type+",
-	body = choiceType(constantType(false), "BlockSt"),
+	body = choiceType(constantType(false), "StatementIR"),
 	signature = "Signature",
 	definitionName = "string",
 })
@@ -91,8 +91,8 @@ REGISTER_TYPE("Signature", recordType {
 	modifier = choiceType(constantType "static", constantType "method"),
 	foreign = "boolean",
 	bang = "boolean",
-	requiresAST = listType "ASTExpression",
-	ensuresAST = listType "ASTExpression",
+	requiresASTs = listType "ASTExpression",
+	ensuresASTs = listType "ASTExpression",
 	logic = choiceType(
 		constantType(false),
 		mapType("boolean", listType(listType(choiceType("boolean", constantType "*"))))
@@ -111,21 +111,19 @@ REGISTER_TYPE("maybe", choiceType(constantType "yes", constantType "no", constan
 REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	-- Execution
 	"AssignSt",
-	"BlockSt",
+	"SequenceSt",
 	"BooleanLoadSt",
 	"FieldSt",
-	"GenericMethodCallSt",
-	"GenericStaticCallSt",
+	"DynamicCallSt",
+	"StaticCallSt",
 	"IsASt",
 	"LocalSt",
 	"MatchSt",
-	"MethodCallSt",
 	"NewClassSt",
 	"NewUnionSt",
 	"IntLoadSt",
 	"ReturnSt",
 	"IfSt",
-	"StaticCallSt",
 	"StringLoadSt",
 	"ThisSt",
 	"UnitSt",
@@ -169,13 +167,13 @@ EXTEND_TYPE("ProofSt", "AbstractStatementIR", recordType {
 	returns = constantType "no",
 })
 
-EXTEND_TYPE("BlockSt", "AbstractStatementIR", recordType {
-	tag = constantType "block",
+EXTEND_TYPE("SequenceSt", "AbstractStatementIR", recordType {
+	tag = constantType "sequence",
 	statements = listType "StatementIR",
 })
 
 EXTEND_TYPE("StringLoadSt", "AbstractStatementIR", recordType {
-	tag = constantType "string",
+	tag = constantType "string-load",
 	destination = "VariableIR",
 	string = "string",
 	returns = constantType "no",
@@ -213,7 +211,7 @@ EXTEND_TYPE("IfSt", "AbstractStatementIR", recordType {
 })
 
 EXTEND_TYPE("IntLoadSt", "AbstractStatementIR", recordType {
-	tag = constantType "int",
+	tag = constantType "int-load",
 	number = "number",
 	destination = "VariableIR",
 	returns = constantType "no",
@@ -243,31 +241,14 @@ EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
 
 EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "static-call",
-	constraints = mapType("string", "ConstraintIR"),
-	baseType = "Type+",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	signature = "Signature",
-
-	-- XXX: delete this
-	staticName = "nil",
 })
 
-EXTEND_TYPE("MethodCallSt", "AbstractStatementIR", recordType {
-	tag = constantType "method-call",
-	baseInstance = "VariableIR",
-	arguments = listType "VariableIR",
-	destinations = listType "VariableIR",
-	returns = constantType "no",
-	signature = "Signature",
-
-	-- XXX: delete
-	methodName = "nil",
-})
-
-EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
-	tag = constantType "generic-method-call",
+EXTEND_TYPE("DynamicCallSt", "AbstractStatementIR", recordType {
+	tag = constantType "dynamic-call",
 	baseInstance = "VariableIR",
 	constraint = "ConstraintIR",
 	arguments = listType "VariableIR",
@@ -277,18 +258,6 @@ EXTEND_TYPE("GenericMethodCallSt", "AbstractStatementIR", recordType {
 
 	-- XXX: delete this
 	methodName = "nil",
-})
-
-EXTEND_TYPE("GenericStaticCallSt", "AbstractStatementIR", recordType {
-	tag = constantType "generic-static-call",
-	constraint = "ConstraintIR",
-	arguments = listType "VariableIR",
-	destinations = listType "VariableIR",
-	returns = constantType "no",
-	signature = "Signature",
-
-	-- XXX: delete this
-	staticName = "nil",
 })
 
 EXTEND_TYPE("BooleanLoadSt", "AbstractStatementIR", recordType {
@@ -360,8 +329,6 @@ EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
 REGISTER_TYPE("VariableIR", recordType {
 	name = "string",
 	type = "TypeKind",
-	location = "Location",
-	description = choiceType(constantType(false), "string"),
 })
 
 REGISTER_TYPE("ConstraintIR", choiceType(

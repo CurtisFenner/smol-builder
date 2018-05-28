@@ -689,11 +689,11 @@ local function verifyStatement(statement, scope, semantics)
 		local assertion = variantAssertion(statement)
 		assignRaw(scope, statement.destination, assertion)
 		return
-	elseif statement.tag == "int" then
+	elseif statement.tag == "int-load" then
 		-- Integer literal
 		assignRaw(scope, statement.destination, valueInt(statement.number))
 		return
-	elseif statement.tag == "string" then
+	elseif statement.tag == "string-load" then
 		-- String literal
 		assignRaw(scope, statement.destination, valueString(statement.string))
 		return

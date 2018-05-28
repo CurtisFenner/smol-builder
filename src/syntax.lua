@@ -595,7 +595,7 @@ local parsers = {
 		tag = "new-expression",
 		{"_", K_NEW},
 		{"_", K_ROUND_OPEN, "`(` after `new`"},
-		{"arguments", parser.query "named-argument,0+"},
+		{"fields", parser.query "named-argument,0+"},
 		{"_", K_ROUND_CLOSE, "`)` to end `new` expression"},
 	},
 
