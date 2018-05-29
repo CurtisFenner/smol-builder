@@ -11,11 +11,37 @@ local excerpt = common.excerpt
 local BOOLEAN_DEF = table.findwith(common.BUILTIN_DEFINITIONS, "name", "Boolean")
 local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
 
+local UNIT_TYPE = {
+	tag = "keyword-type",
+	role = "type",
+	name = "Unit",
+}
+
+local BOOLEAN_TYPE = {
+	tag = "keyword-type",
+	role = "type",
+	name = "Boolean",
+}
+
+local INT_TYPE = {
+	tag = "keyword-type",
+	role = "type",
+	name = "Int",
+}
+
 local STRING_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "String",
 }
+
+
+
+local SELF_TYPE = {
+	tag = "self-type",
+	role = "type",
+}
+
 
 -- RETURNS a description of the given TypeKind as a string of Smol code
 local function showTypeKind(t)
@@ -407,12 +433,7 @@ local function sequenceSt(statements)
 
 	local returns = "no"
 	for _, s in ipairs(statements) do
-		-- Check if this is reachable
-		if returns == "yes" then
-			Report.UNREACHABLE_STATEMENT {
-				location = s.location,
-			}
-		end
+		assert(returns ~= "yes")
 
 		if s.returns == "maybe" then
 			returns = "maybe"
@@ -425,9 +446,6 @@ local function sequenceSt(statements)
 		tag = "sequence",
 		returns = returns,
 		statements = statements,
-
-		-- TODO: replace with correct solution
-		location = statements[1] and statements[1].location or UNKNOWN_LOCATION,
 	}
 end
 
@@ -480,6 +498,9 @@ end
 -- impure is true if executing this expression could have observable side
 -- effects (because it contains a `!` action)
 local function compileExpression(expressionAST, scope, context)
+	assertis(expressionAST, recordType {
+		tag = "string",
+	})
 	assertis(context, recordType {
 		returnTypes = listType "TypeKind",
 		canUseBang = "boolean",
@@ -501,7 +522,6 @@ local function compileExpression(expressionAST, scope, context)
 			{
 				tag = "local",
 				variable = destination,
-				location = expressionAST.location,
 				returns = "no",
 			},
 			{
@@ -512,7 +532,235 @@ local function compileExpression(expressionAST, scope, context)
 			},
 		}
 		return sequenceSt(code), {destination}, false
+	elseif expressionAST.tag == "int-literal" then
+		local destination = {
+			name = vendUniqueIdentifier(),
+			type = INT_TYPE,
+		}
+
+		local code = {
+			{
+				tag = "local",
+				variable = destination,
+				returns = "no",
+			},
+			{
+				tag = "int-load",
+				destination = destination,
+				number = expressionAST.value,
+				returns = "no",
+			},
+		}
+		return sequenceSt(code), {destination}, false
+	elseif expressionAST.tag == "identifier" then
+		-- TODO
+		local variable = scope:get(expressionAST.name)
+		if not variable then
+			Report.NO_SUCH_VARIABLE {
+				name = expressionAST.name,
+				location = expressionAST.location,
+			}
+		end
+
+		return sequenceSt {}, {variable}, false
+	elseif expressionAST.tag == "keyword" then
+		if expressionAST.keyword == "unit" then
+			local destination = {
+				name = vendUniqueIdentifier(),
+				type = UNIT_TYPE,
+			}
+			local code = {
+				{
+					tag = "local",
+					variable = destination,
+					returns = "no",
+				},
+				{
+					tag = "unit",
+					destination = destination,
+					returns = "no",
+				}
+			}
+
+			return sequenceSt(code), {destination}, false
+		elseif expressionAST.keyword == "this" then
+			if not scope:get("this") then
+				Report.THIS_USED_OUTSIDE_METHOD {
+					location = expressionAST.location,
+				}
+			end
+
+			return sequenceSt {}, {scope:get("this")}, false
+		end
+		error(show(expressionAST))
+	elseif expressionAST.tag == "field-access" then
+		local code = {}
+		local baseCode, bases, impure = compileExpression(expressionAST.base, scope, context)
+		table.insert(code, baseCode)
+
+		-- Check that there is exactly one base
+		if #bases ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				givenCount = #bases,
+				expectedCount = 1,
+				purpose = "field base",
+				givenLocation = expressionAST.location,
+			}
+		end
+
+		-- Check that the type is a class/union
+		local baseType = bases[1].type
+		if baseType.tag ~= "compound-type" then
+			Report.TYPE_MUST_BE {
+				givenType = showTypeKind(baseType),
+				purpose = "a field access base",
+				givenLocation = expressionAST.location,
+			}
+		end
+
+		local definition = context.definitionMap[baseType.packageName][baseType.definitionName]
+		assert(definition)
+		local field = definition.fieldMap[expressionAST.field]
+
+		-- Check if the field exists
+		if not field then
+			Report.NO_SUCH_MEMBER {
+				memberType = "field",
+				container = showTypeKind(baseType),
+				name = expressionAST.field,
+				location = expressionAST.location,
+			}
+		end
+
+		-- Create destination variable
+		local destination = {
+			name = vendUniqueIdentifier(),
+			type = field.type,
+		}
+		table.insert(code, {
+			tag = "local",
+			variable = destination,
+			returns = "no",
+		})
+
+		if definition.tag == "class-definition" then
+			-- Accessing a field on a class is free
+			table.insert(code, {
+				tag = "field",
+				name = expressionAST.field,
+				base = bases[1],
+				destination = destination,
+				returns = "no",
+			})
+
+			return sequenceSt(code), {destination}, impure
+		else
+			-- Accessing a field on a union is only allowed when we know the
+			-- variant
+			assert(definition.tag == "union-definition")
+			print("TODO: Check that the variant is correct")
+
+			table.insert(code, {
+				tag = "variant",
+				variant = expressionAST.field,
+				base = bases[1],
+				destination = destination,
+				returns = "no",
+			})
+
+			return sequenceSt(code), {destination}, impure
+		end
+	elseif expressionAST.tag == "isa" then
+		local code = {}
+		local baseCode, bases, impure = compileExpression(expressionAST.base, scope, context)
+		table.insert(code, baseCode)
+
+		local variant = expressionAST.variant
+
+		-- Check that exactly one value is given as base
+		if #bases ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				givenCount = #bases,
+				expectedCount = 1,
+				purpose = "the base of `isa " .. variant,
+				givenLocation = expressionAST.location,
+			}
+		end
+
+		-- Check that the type is a union type
+		local baseType = bases[1].type
+		if baseType.tag ~= "compound-type" then
+			Report.TYPE_MUST_BE {
+				givenType = showTypeKind(baseType),
+				purpose = "an `isa` expression base",
+				givenLocation = expressionAST.location,
+			}
+		end
+		
+		local definition = context.definitionMap[baseType.packageName][baseType.definitionName]
+		assert(definition)
+		if definition.tag ~= "union-definition" then
+			Report.TYPE_MUST_BE {
+				givenType = showTypeKind(baseType),
+				purpose = "an `isa` expression base",
+				givenLocation = expressionAST.location,
+			}
+		elseif not definition.fieldMap[variant] then
+			Report.NO_SUCH_MEMBER {
+				memberType = "variant",
+				container = showTypeKind(baseType),
+				name = variant,
+				location = expressionAST.location,
+			}
+		end
+
+		-- Create destination variable
+		local destination = {
+			name = vendUniqueIdentifier(),
+			type = BOOLEAN_TYPE,
+		}
+		table.insert(code, {
+			tag = "local",
+			variable = destination,
+			returns = "no",
+		})
+
+		table.insert(code, {
+			tag = "isa",
+			base = bases[1],
+			destination = destination,
+			variant = variant,
+			returns = "no",
+		})
+
+		return sequenceSt(code), {destination}, impure
+	elseif expressionAST.tag == "binary" then
+		local methodName = common.OPERATOR_ALIAS[expressionAST.operator]
+		if not methodName then
+			Report.UNKNOWN_OPERATOR_USED {
+				operator = expressionAST.operator,
+				location = expressionAST.location,
+			}
+		end
+
+		-- Simply re-write this syntactically as a method call
+		local rewrite = {
+			tag = "method-call",
+			bang = false,
+			base = expressionAST.left,
+			methodName = methodName,
+			arguments = {expressionAST.right},
+			location = expressionAST.location,
+		}
+		return compileExpression(rewrite, scope, context)
 	elseif expressionAST.tag == "new-expression" then
+		-- Check if new is allowed here
+		if not context.newType then
+			Report.NEW_IN_INTERFACE {
+				location = expressionAST.location,
+			}
+		end
+
 		assert(context.newType.tag == "compound-type")
 		local packageName = context.newType.packageName
 		local definitionName = context.newType.definitionName
@@ -529,23 +777,23 @@ local function compileExpression(expressionAST, scope, context)
 				tag = "local",
 				variable = outVariable,
 				returns = "no",
-				location = expressionAST.location,
 			}
 		}
 
 		local providedAt = {}
-		local fields = {}
+		local fieldAssignment = {}
+		local initializationLocation = {}
 		local impure = false
-		for key, fieldAST in ipairs(expressionAST.fields) do
+		for _, fieldAST in ipairs(expressionAST.fields) do
 			-- Compile the argument
 			local c, outs, i = compileExpression(fieldAST.value, scope, context)
 
-			local field = definition.fieldMap[key]
+			local field = definition.fieldMap[fieldAST.name]
 			if not field then
 				Report.NO_SUCH_MEMBER {
 					memberType = "field",
-					container = packageName .. ":" .. definitionName,
-					name = key,
+					container = showTypeKind(context.newType),
+					name = fieldAST.name,
 					location = fieldAST.location,
 				}
 			end
@@ -553,7 +801,7 @@ local function compileExpression(expressionAST, scope, context)
 			checkTypes {
 				given = outs,
 				expected = {field.type},
-				purpose = "initialization of `" .. key .. "` field",
+				purpose = "initialization of `" .. fieldAST.name .. "` field",
 				givenLocation = fieldAST.location,
 				expectedLocation = field.definitionLocation,
 			}
@@ -569,9 +817,181 @@ local function compileExpression(expressionAST, scope, context)
 					impure = fieldAST.location
 				end
 			end
+
+			-- Check if it's duplicated
+			if fieldAssignment[fieldAST.name] then
+				Report.DUPLICATE_INITIALIZATION {
+					purpose = "field `" .. fieldAST.name .. "`",
+					first = initializationLocation[fieldAST.name],
+					second = fieldAST.location,
+				}
+			end
+			initializationLocation[fieldAST.name] = fieldAST.location
+			fieldAssignment[fieldAST.name] = outs[1]
 		end
 
-		return code, {outVariable}, impure
+		if definition.tag == "class-definition" then
+			-- Check that each field is assigned
+			for key in pairs(definition.fieldMap) do
+				if not fieldAssignment[key] then
+					Report.MISSING_INITIALIZATION {
+						purpose = "field `" .. key .. "`",
+						location = expressionAST.location,
+					}
+				end
+			end
+
+			table.insert(code, {
+				tag = "new-class",
+				fields = fieldAssignment,
+				destination = outVariable,
+				returns = "no",
+			})
+		elseif definition.tag == "union-definition" then
+			-- Check that only one field is assigned
+			if #table.keys(fieldAssignment) == 0 then
+				Report.MISSING_INITIALIZATION {
+					purpose = "union tag",
+					location = expressionAST.location,
+				}
+			elseif 2 <= #table.keys(fieldAssignment) then
+				Report.DUPLICATE_INITIALIZATION {
+					purpose = "union tag",
+					first = expressionAST.location,
+					second = expressionAST.location,
+				}
+			end
+
+			table.insert(code, {
+				tag = "new-union",
+				field = next(fieldAssignment),
+				value = fieldAssignment[next(fieldAssignment)],
+				destination = outVariable,
+				returns = "no",
+			})
+		end
+
+		return sequenceSt(code), {outVariable}, impure
+	elseif expressionAST.tag == "method-call" then
+		local code = {}
+		local baseCode, bases, impureBase = compileExpression(expressionAST.base, scope, context)
+		table.insert(code, baseCode)
+		
+		-- Check that exactly one method base is given
+		if #bases ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "method base",
+				givenCount = #bases,
+				expectedCount = 1,
+				givenLocation = expressionAST.base.location,
+			}
+		end
+
+		-- Compile the arguments
+		local arguments = {bases[1]}
+		local impure = impureBase and expressionAST.base.location
+		for _, ast in ipairs(expressionAST.arguments) do
+			local c, outs, i = compileExpression(ast, scope, context)
+			table.insert(code, c)
+
+			for _, o in ipairs(outs) do
+				table.insert(arguments, o)
+			end
+
+			if i then
+				if impure then
+					Report.EVALUATION_ORDER {
+						first = impure,
+						second = ast.location,
+					}
+				end
+				impure = ast.location
+			end
+		end
+
+		local baseType = bases[1].type
+		if baseType.tag == "self-type" then
+			-- TODO: In Interface contracts, #Self is allowed as a regular
+			-- type parameter!
+			error "TODO"
+		elseif baseType.tag == "generic-type" then
+			error "TODO"
+		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
+			local definition
+			if baseType.tag == "compound-type" then
+				definition = context.definitionMap[baseType.packageName][baseType.definitionName]
+			else
+				definition = common.builtinDefinitions[baseType.name]
+				assert(definition, "no built in for " .. baseType.name)
+			end
+			assert(definition)
+			assert(definition.tag == "class-definition" or definition.tag == "union-definition")
+
+			-- Get the member
+			local member = definition.functionMap[expressionAST.methodName]
+			if not member or member.signature.modifier ~= "method" then
+				Report.NO_SUCH_MEMBER {
+					memberType = "method",
+					container = showTypeKind(baseType),
+					name = expressionAST.methodName,
+					location = expressionAST.location,
+				}
+			end
+
+			-- Check the types
+			-- NOTE: Signature's parameters INCLUDES `this`, so arguments MUST
+			-- include base
+			local expected = table.map(table.getter "type", member.signature.parameters)
+			checkTypes {
+				given = arguments,
+				expected = expected,
+				purpose = "argument(s) to method " .. showTypeKind(baseType) .. "." .. expressionAST.methodName,
+				givenLocation = expressionAST.location,
+				expectedLocation = member.definitionLocation,
+			}
+
+			-- Check bang
+			if not member.signature.bang ~= not expressionAST.bang then
+				Report.BANG_MISMATCH {
+					given = member.signature.bang and "without a `!`" or "with a `!`",
+					expects = member.signature.bang and "a `!` action" or " apure function",
+					fullName = member.signature.fullName,
+					location = expressionAST.location,
+					signatureLocation = member.definitionLocation,
+				}
+			elseif member.signature.bang and not context.canUseBang then
+				Report.BANG_NOT_ALLOWED {
+					context = member.signature.modifier .. " `" .. member.signature.fullName .. "`",
+					location = expressionAST.location,
+				}
+			end
+
+			-- Get destinations
+			local destinations = {}
+			for _, returnType in ipairs(member.signature.returnTypes) do
+				local destination = {
+					name = vendUniqueIdentifier(),
+					type = returnType,
+				}
+				table.insert(code, {
+					tag = "local",
+					variable = destination,
+					returns = "no",
+				})
+				table.insert(destinations, destination)
+			end
+
+			local call = {
+				tag = "static-call",
+				arguments = arguments,
+				signature = member.signature,
+				destinations = destinations,
+				returns = "no",
+			}
+			assertis(call, "StaticCallSt")
+			table.insert(code, call)
+			return sequenceSt(code), destinations, impure or member.signature.bang
+		end
 	elseif expressionAST.tag == "static-call" then
 		local baseType = context.typeResolver(expressionAST.baseType, context.typeResolverContext)
 
@@ -594,19 +1014,18 @@ local function compileExpression(expressionAST, scope, context)
 						first = impure,
 						second = ast.location,
 					}
-				else
-					impure = ast.location
 				end
+				impure = ast.location
 			end
 		end
 
 		if baseType.tag == "self-type" then
-			Report.SELF_OUTSIDE_INTERFACE {
-				location = expressionAST.baseType.location,
-			}
-		elseif baseType.tag == "keyword-type" then
+			-- TODO: In Interface contracts, #Self is allowed as a regular
+			-- type parameter!
 			error "TODO"
 		elseif baseType.tag == "generic-type" then
+			error "TODO"
+		elseif baseType.tag == "keyword-type" then
 			error "TODO"
 		elseif baseType.tag == "compound-type" then
 			local definition = context.definitionMap[baseType.packageName][baseType.definitionName]
@@ -618,7 +1037,7 @@ local function compileExpression(expressionAST, scope, context)
 			if not member or member.signature.modifier ~= "static" then
 				Report.NO_SUCH_MEMBER {
 					memberType = "static",
-					container = baseType.packageName .. ":" .. baseType.definitionName,
+					container = showTypeKind(baseType),
 					name = expressionAST.funcName,
 					location = expressionAST.location,
 				}
@@ -635,6 +1054,20 @@ local function compileExpression(expressionAST, scope, context)
 			}
 
 			-- Check bang
+			if not member.signature.bang ~= not expressionAST.bang then
+				Report.BANG_MISMATCH {
+					given = member.signature.bang and "without a `!`" or "with a `!`",
+					expects = member.signature.bang and "a `!` action" or " apure function",
+					fullName = member.signature.fullName,
+					location = expressionAST.location,
+					signatureLocation = member.definitionLocation,
+				}
+			elseif member.signature.bang and not context.canUseBang then
+				Report.BANG_NOT_ALLOWED {
+					context = method.signature.modifier .. " `" .. method.signature.fullName .. "`",
+					location = expressionAST.location,
+				}
+			end
 
 			-- Get destinations
 			local destinations = {}
@@ -647,7 +1080,6 @@ local function compileExpression(expressionAST, scope, context)
 					tag = "local",
 					variable = destination,
 					returns = "no",
-					location = expressionAST.location,
 				})
 				table.insert(destinations, destination)
 			end
@@ -689,14 +1121,69 @@ local function compileStatement(statementAST, scope, context)
 	if statementAST.tag == "block" then
 		local statements = {}
 		local scopePrime = scope
-		for _, s in ipairs(statementAST.statements) do
+		for i, s in ipairs(statementAST.statements) do
 			-- Compile the statement
 			local statement, newScope = compileStatement(s, scopePrime, context)
 			scopePrime = newScope
 			table.insert(statements, statement)
+
+			if statement.returns == "yes" and i ~= #statementAST.statements then
+				Report.UNREACHABLE_STATEMENT {
+					location = statementAST.statements[i + 1].location,
+				}
+			end
 		end
 		
 		return sequenceSt(statements), scopePrime
+	elseif statementAST.tag == "var-statement" then
+		local code = {}
+		local rhs, results = compileExpression(statementAST.value, scope, context)
+		table.insert(code, rhs)
+		local destinations = {}
+
+		-- Add the new variables to the scope
+		local scopePrime = scope
+		for _, varAST in ipairs(statementAST.variables) do
+			if scopePrime:get(varAST.name) then
+				Report.VARIABLE_DEFINED_TWICE {
+					name = varAST.name,
+					first = scopePrime:get(varAST.name).definitionLocation,
+					second = varAST.location,
+				}
+			end
+
+			local destination = {
+				type = context.typeResolver(varAST.type, context.typeResolverContext),
+				name = varAST.name,
+				definitionLocation = varAST.location,
+			}
+			table.insert(destinations, destination)
+			scopePrime = scopePrime:with(varAST.name, destination)
+		end
+
+		checkTypes {
+			purpose = "variable assignment",
+			given = results,
+			expected = table.map(table.getter "type", destinations),
+			givenLocation = statementAST.value.location,
+			expectedLocation = statementAST.location,
+		}
+
+		for i in ipairs(results) do
+			table.insert(code, {
+				tag = "local",
+				variable = destinations[i],
+				returns = "no",
+			})
+			table.insert(code, {
+				tag = "assign",
+				source = results[i],
+				destination = destinations[i],
+				returns = "no",
+			})
+		end
+
+		return sequenceSt(code), scopePrime
 	elseif statementAST.tag == "return-statement" then
 		local code = {}
 		local toReturn = {}
@@ -705,7 +1192,8 @@ local function compileStatement(statementAST, scope, context)
 		local impure = false
 		for _, a in ipairs(statementAST.values) do
 			local c, outs, i = compileExpression(a, scope, context)
-			assert(type(i) == "boolean")
+			assertis(c, "StatementIR")
+			assert(i ~= nil)
 			table.insert(code, c)
 
 			for _, out in ipairs(outs) do
@@ -720,18 +1208,28 @@ local function compileStatement(statementAST, scope, context)
 						second = a.location,
 					}
 				else
-					impure = i
+					impure = a.location
 				end
 			end
 		end
 
-		if #types == 0 then
+		if #toReturn == 0 then
 			-- `return;` is short for `return unit;`
-			types = {{
-				tag = "keyword-type",
-				role = "type",
-				name = "Unit",
-			}}
+			local unit = {
+				name = vendUniqueIdentifier(),
+				type = UNIT_TYPE,
+			}
+			table.insert(code, {
+				tag = "local",
+				variable = unit,
+				returns = "no",
+			})
+			table.insert(code, {
+				tag = "unit",
+				destination = unit,
+				returns = "no",
+			})
+			table.insert(toReturn, unit)
 		end
 
 		checkTypes {
@@ -757,6 +1255,204 @@ local function compileStatement(statementAST, scope, context)
 
 		local c, outs, i = compileExpression(statementAST.expression, scope, context)
 		return c, scope
+	elseif statementAST.tag == "if-statement" then
+		local code = {}
+		local conditionCode, conditions = compileExpression(statementAST.condition, scope, context)
+		table.insert(code, conditionCode)
+
+		-- Check that the condition is a boolean
+		checkTypes {
+			given = conditions,
+			expected = {BOOLEAN_TYPE},
+			purpose = "if condition",
+			givenLocation = statementAST.condition.location,
+			expectedLocation = statementAST.condition.location,
+		}
+
+		-- Compile then body, ignoring scope (scope ends)
+		local body = compileStatement(statementAST.body, scope, context)
+
+		-- Compile else/elseifs back to front, nesting
+		local elseSt
+		if statementAST.elseClause then
+			-- Ignore new scope (scope ends)
+			elseSt = compileStatement(statementAST.elseClause.body, scope, context)
+		else
+			elseSt = sequenceSt {}
+		end
+
+		for i = #statementAST.elseifClauses, 1, -1 do
+			local clause = statementAST.elseifClauses[i]
+			local conditionCode, conditions = compileExpression(clause.condition, scope, context)
+
+			-- Check that the condition is a boolean
+			checkTypes {
+				given = conditions,
+				expected = {BOOLEAN_TYPE},
+				purpose = "if condition",
+				givenLocation = clause.condition.location,
+				expectedLocation = clause.condition.location,
+			}
+
+			-- Ignore new scope (scope ends)
+			local body = compileStatement(clause.body, scope, context)
+
+			local returns
+			if body.returns == elseSt.returns then
+				returns = body.returns
+			else
+				returns = "maybe"
+			end
+
+			elseSt = sequenceSt {
+				conditionCode,
+				{
+					tag = "if",
+					condition = conditions[1],
+					bodyThen = body,
+					bodyElse = elseSt,
+					returns = returns,
+				}
+			}
+		end
+
+		local returns
+		if body.returns == elseSt.returns then
+			returns = body.returns
+		else
+			returns = "maybe"
+		end
+
+		table.insert(code, {
+			tag = "if",
+			condition = conditions[1],
+			bodyThen = body,
+			bodyElse = elseSt,
+			returns = returns,
+		})
+
+		return sequenceSt(code), scope
+	elseif statementAST.tag == "match-statement" then
+		-- Compile the base
+		local code = {}
+		local baseCode, bases = compileExpression(statementAST.base, scope, context)
+		table.insert(code, baseCode)
+		if #bases ~= 1 then
+			Report.WRONG_VALUE_COUNT {
+				purpose = "match statement",
+				givenCount = #bases,
+				expectedCount = 1,
+				givenLocation = statementAST.base.location,
+			}
+		end
+
+		-- Check that the base is a union instance
+		local baseType = bases[1].type
+		if baseType.tag ~= "compound-type" then
+			Report.TYPE_MUST_BE {
+				givenType = showTypeKind(baseType),
+				purpose = "a match statement base",
+				givenLocation = statementAST.base.location,
+			}
+		end
+
+		local definition = context.definitionMap[baseType.packageName][baseType.definitionName]
+		assert(definition)
+		if definition.tag ~= "union-definition" then
+			Report.TYPE_MUST_BE {
+				givenType = showTypeKind(baseType),
+				purpose = "a match statement base",
+				givenLocation = statementAST.base.location,
+			}
+		end
+
+		-- Compile each case
+		local handledCases = {}
+		local caseList = {}
+		local nos = 0
+		local yeses = 0
+		for _, caseAST in ipairs(statementAST.cases) do
+			local variant = caseAST.head.variant
+			if not definition.fieldMap[variant] then
+				Report.NO_SUCH_MEMBER {
+					memberType = "variant",
+					name = variant,
+					container = showTypeKind(baseType),
+					location = caseAST.head.location,
+				}
+			end
+
+			-- Check that the variable name is fresh
+			local variable = caseAST.head.variable
+			if scope:get(variable) then
+				Report.VARIABLE_DEFINED_TWICE {
+					name = variable,
+					first = scope:get(variable).definitionLocation,
+					second = caseAST.head.location,
+				}
+			end
+
+			-- Check that no variant is handled twice
+			if handledCases[variant] then
+				Report.VARIANT_USED_TWICE {
+					variant = variant,
+					firstLocation = handledCases[variant].location,
+					secondLocation = caseAST.head.location,
+				}
+			end
+			handledCases[variant] = caseAST.head.location
+			
+
+			local subscope = scope:with(variable, {
+				name = variable,
+				type = definition.fieldMap[variant].type,
+				definitionLocation = caseAST.head.location,
+			})
+
+			local body = compileStatement(caseAST.body, subscope, context)
+
+			if body.returns == "yes" then
+				yeses = yeses + 1
+			elseif body.returns == "no" then
+				nos = nos + 1
+			else
+				yeses = yeses + 0.5
+				nos = nos + 0.5
+			end
+
+			table.insert(caseList, {
+				variant = variant,
+				statement = body,
+			})
+		end
+
+		-- Handle exhaustivity
+		for variant in pairs(definition.fieldMap) do
+			if not handledCases[variant] then
+				print("TODO: check that this variant is not possible")
+			end
+		end
+
+		local returns
+		if nos == 0 then
+			returns = "yes"
+		elseif yeses == 0 then
+			returns = "no"
+		else
+			returns = "maybe"
+		end
+
+		table.insert(code, {
+			tag = "match",
+			base = bases[1],
+			cases = caseList,
+			returns = returns,
+		})
+
+		return sequenceSt(code), scope
+	elseif statementAST.tag == "assert-statement" then
+		print("TODO: assertStatement")
+		return sequenceSt {}, scope
 	end
 
 	error("compileStatement: " .. statementAST.tag)
@@ -981,6 +1677,14 @@ local function semanticsSmol(sources, main)
 			local function checkedSignature(signatureAST)
 				-- Get the list of parameters
 				local parameters = {}
+
+				if signatureAST.modifier.lexeme == "method" then
+					table.insert(parameters, {
+						name = "this",
+						type = definition.tag == "interface-definition" and SELF_TYPE or definition.kind,
+					})
+				end
+
 				for _, p in ipairs(signatureAST.parameters) do
 					-- Check if the name is repeated
 					local previous = table.findwith(parameters, "name", p.name)
@@ -1320,11 +2024,12 @@ local function semanticsSmol(sources, main)
 
 					-- Create the initial (argument) scope
 					local scope = Map.new()
-					for _, argument in ipairs(f.signature.parameters) do
-						scope = scope:with(argument.name, {
-							type = argument.type,
+					for _, parameter in ipairs(f.signature.parameters) do
+						scope = scope:with(parameter.name, {
+							name = parameter.name,
+							type = parameter.type,
 							final = true,
-							definitionLocation = argument.definitionLocation,
+							definitionLocation = parameter.definitionLocation,
 						})
 					end
 

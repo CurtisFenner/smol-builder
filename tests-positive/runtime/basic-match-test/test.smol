@@ -18,19 +18,19 @@ union Un {
 class Test {
 	static main!() Unit {
 		match Un.makeA(7) {
-			case n a {
+			case n is a {
 				do core:Out.println!("a" ++ core:ASCII.formatInt(n));
 			}
-			case n b {
+			case n is b {
 				do core:Out.println!("b" ++ core:ASCII.formatInt(n));
 			}
 		}
 
 		match Un.makeB(9) {
-			case n a {
+			case n is a {
 				do core:Out.println!("a" ++ core:ASCII.formatInt(n));
 			}
-			case n b {
+			case n is b {
 				do core:Out.println!("b" ++ core:ASCII.formatInt(n));
 			}
 		}

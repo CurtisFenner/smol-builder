@@ -12,10 +12,10 @@ union U {
 class Test {
 	static main!() Unit {
 		match U.makeA() {
-			case a a {
+			case a is a {
 
 			}
-			case a a {
+			case a is a {
 
 			}
 		}

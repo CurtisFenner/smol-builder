@@ -350,20 +350,41 @@ function Report.NO_SUCH_MEMBER(p)
 	)
 end
 
---------------------------------------------------------------------------------
-
-
-
-function Report.NO_SUCH_VARIANT(p)
+function Report.BANG_NOT_ALLOWED(p)
 	quit(
-		"The type `",
-		p.container,
-		"` does not have a variant called `",
-		p.name,
-		"`",
-		"\nHowever, you try to access variant `",
-		p.name,
-		"` ",
+		"A `!` action is not allowed in ",
+		p.context,
+		".",
+		"\nHowever, you try to invoke one ",
+		p.location
+	)
+end
+
+function Report.BANG_MISMATCH(p)
+	assert(p.given ~= p.expected)
+
+	local expects
+	local given
+	if p.expected then
+		expects = "a `!` " .. p.modifier .. " action"
+		given = "without a `!`"
+	else
+		expects = "a pure (no `!`) " .. p.modifier
+		given = "with a `!`"
+	end
+
+	quit(
+		"The ",
+		p.modifier,
+		" ",
+		p.fullName,
+		" is defined to be ",
+		expects,
+		" ",
+		p.signatureLocation,
+		"\nHowever, you try to call it ",
+		given,
+		" ",
 		p.location
 	)
 end
@@ -372,26 +393,66 @@ function Report.NO_SUCH_VARIABLE(p)
 	quit("There is no variable named `", p.name, "` in scope ", p.location)
 end
 
-function Report.NO_SUCH_METHOD(p)
+function Report.NEW_IN_INTERFACE(p)
 	quit(
-		"The type `",
-		p.type,
-		"` does not have a ",
-		p.modifier,
-		" called `",
-		p.name,
-		"`.",
-		"\nAvailable members include ",
-		"\n\t",
-		table.concat(p.alternatives, ", "),
-		"\nHowever, you try to call `",
-		p.type,
-		".",
-		p.name,
-		"` ",
+		"Interfaces do not have constructors.\n",
+		"However, you try to use `new()` ",
 		p.location
 	)
 end
+
+function Report.DUPLICATE_INITIALIZATION(p)
+	if p.first == p.second then
+		quit("The ", p.purpose, " is initialized twice ", p.location)
+	end
+	quit(
+		"The ",
+		p.purpose,
+		" is initialized twice. The first initialization is ",
+		p.first,
+		"\nThe second initialization is ",
+		p.second
+	)
+end
+
+function Report.MISSING_INITIALIZATION(p)
+	quit(
+		"The ",
+		p.purpose,
+		" is never initialized ",
+		p.location
+	)
+end
+
+function Report.WRONG_VALUE_COUNT(p)
+	quit(
+		"Expected ",
+		p.expectedCount,
+		" ",
+		p.purpose,
+		" but got ",
+		p.givenCount,
+		" ",
+		p.givenLocation
+	)
+end
+
+function Report.TYPE_MUST_BE(p)
+	quit(
+		"The type `",
+		p.givenType,
+		"` cannot be used as ",
+		p.purpose,
+		" as it is ",
+		p.givenLocation
+	)
+end
+
+function Report.THIS_USED_OUTSIDE_METHOD(p)
+	quit("You try to use `this` in a non-method function ", p.location)
+end
+
+--------------------------------------------------------------------------------
 
 function Report.CONFLICTING_INTERFACES(p)
 	quit(
@@ -436,18 +497,6 @@ function Report.TYPE_MUST_BE_UNION(p)
 	)
 end
 
-function Report.MISSING_VALUE(p)
-	quit(
-		"The ",
-		p.purpose,
-		" requires a value for field `",
-		p.name,
-		"`.",
-		"\nHowever, it is missing ",
-		p.location
-	)
-end
-
 function Report.FUNCTION_DOESNT_RETURN(p)
 	quit(
 		"The ",
@@ -457,45 +506,6 @@ function Report.FUNCTION_DOESNT_RETURN(p)
 		" does not always `return` ",
 		p.returns,
 		" as it says it does ",
-		p.location
-	)
-end
-
-function Report.BANG_MISMATCH(p)
-	assert(p.given ~= p.expected)
-
-	local expects
-	local given
-	if p.expected then
-		expects = "a `!` " .. p.modifier .. " action"
-		given = "without a `!`"
-	else
-		expects = "a pure (no `!`) " .. p.modifier
-		given = "with a `!`"
-	end
-
-	quit(
-		"The ",
-		p.modifier,
-		" ",
-		p.fullName,
-		" is defined to be ",
-		expects,
-		" ",
-		p.signatureLocation,
-		"\nHowever, you try to call it ",
-		given,
-		" ",
-		p.location
-	)
-end
-
-function Report.BANG_NOT_ALLOWED(p)
-	quit(
-		"A `!` action is not allowed in ",
-		p.context,
-		".",
-		"\nHowever, you try to invoke one ",
 		p.location
 	)
 end
@@ -524,10 +534,6 @@ function Report.UNKNOWN_OPERATOR_USED(p)
 		"` ",
 		p.location
 	)
-end
-
-function Report.THIS_USED_OUTSIDE_METHOD(p)
-	quit("You try to use `this` in a non-method function ", p.location)
 end
 
 function Report.VARIANT_USED_TWICE(p)
@@ -579,15 +585,6 @@ function Report.QUANTIFIER_USED_IN_IMPLEMENTATION(p)
 		"\nHowever, you use `",
 		p.quantifier,
 		"` ",
-		p.location
-	)
-end
-
-
-function Report.USE_NEW_IN_INTERFACE(p)
-	quit(
-		"Interfaces do not have constructors.\n",
-		"However, you try to use `new()` ",
 		p.location
 	)
 end

@@ -83,6 +83,7 @@ REGISTER_TYPE("FunctionIR", recordType {
 })
 
 REGISTER_TYPE("Signature", recordType {
+	-- TODO: Do we need memberName?
 	memberName = "string",
 	longName = "string",
 
@@ -220,23 +221,16 @@ EXTEND_TYPE("IntLoadSt", "AbstractStatementIR", recordType {
 EXTEND_TYPE("NewClassSt", "AbstractStatementIR", recordType {
 	tag = constantType "new-class",
 	fields = mapType("string", "VariableIR"),
-	type = "ConcreteType+",
-	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",
-	memberDefinitions = mapType("string", "VariableIR"),
-	location = "Location",
 })
 
 EXTEND_TYPE("NewUnionSt", "AbstractStatementIR", recordType {
 	tag = constantType "new-union",
-	type = "ConcreteType+",
 	field = "string",
 	value = "VariableIR",
-	constraints = mapType("string", "ConstraintIR"),
 	destination = "VariableIR",
 	returns = constantType "no",
-	variantDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
@@ -273,7 +267,6 @@ EXTEND_TYPE("FieldSt", "AbstractStatementIR", recordType {
 	base = "VariableIR",
 	destination = "VariableIR",
 	returns = constantType "no",
-	fieldDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("ThisSt", "AbstractStatementIR", recordType {
@@ -294,7 +287,6 @@ EXTEND_TYPE("VariantSt", "AbstractStatementIR", recordType {
 	base = "VariableIR",
 	variant = "string",
 	returns = constantType "no",
-	variantDefinition = "VariableIR",
 })
 
 EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {

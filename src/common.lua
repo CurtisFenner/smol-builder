@@ -118,40 +118,40 @@ end
 --------------------------------------------------------------------------------
 
 local STRING_TYPE = freeze {
-	tag = "keyword-type+",
+	tag = "keyword-type",
+	role = "type",
 	name = "String",
-	location = {begins = "???", ends = "???"},
 }
 
 local INT_TYPE = freeze {
-	tag = "keyword-type+",
+	tag = "keyword-type",
+	role = "type",
 	name = "Int",
-	location = {begins = "???", ends = "???"},
 }
 
 local BOOLEAN_TYPE = freeze {
-	tag = "keyword-type+",
+	tag = "keyword-type",
+	role = "type",
 	name = "Boolean",
-	location = {begins = "???", ends = "???"},
 }
 
 local UNIT_TYPE = freeze {
-	tag = "keyword-type+",
+	tag = "keyword-type",
+	role = "type",
 	name = "Unit",
-	location = {begins = "???", ends = "???"},
 }
 
 local NEVER_TYPE = freeze {
-	tag = "keyword-type+",
+	tag = "keyword-type",
+	role = "type",
 	name = "Never",
-	location = {begins = "???", ends = "???"},
 }
 
 -- TODO: This is not a real type!
 local SYMBOL_TYPE = freeze {
-	tag = "keyword-type+",
+	tag = "keyword-type",
+	role = "type",
 	name = "_Symbol",
-	location = {begins = "???", ends = "???"},
 }
 
 --------------------------------------------------------------------------------
@@ -287,153 +287,6 @@ local BOOLEAN_DEF = freeze {
 	},
 }
 
-local INT_DEF = freeze {
-	type = INT_TYPE,
-	name = "Int",
-	tag = "builtin",
-	signatures = {
-		{
-			memberName = "isPositive",
-			longName = "Int:isPositive",
-
-			parameters = {},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = false,
-			eval = function(n)
-				return n > 0
-			end,
-		},
-		{
-			memberName = "negate",
-			longName = "Int:negate",
-
-			parameters = {},
-			returnTypes = {INT_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = false,
-			eval = function(n)
-				return -n
-			end,
-		},
-		{
-			memberName = "lessThan",
-			longName = "Int:lessThan",
-
-			parameters = {dummy("right", INT_TYPE)},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {
-				-- Transitive
-				parseKind("ensures (forall (middle Int) return when (this < middle).and(middle < right))", "ensures"),
-
-				-- Antireflexive
-				parseKind("ensures return.not() when this == right", "ensures"),
-
-				-- Antisymmetric
-				parseKind("ensures return.not() when right < this", "ensures"),
-			},
-			requiresAST = {},
-			logic = false,
-			eval = function(a, b)
-				return a < b
-			end,
-		},
-		{
-			memberName = "eq",
-			longName = "Int:eq",
-
-			parameters = {dummy("right", INT_TYPE)},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = false,
-			eval = function(a, b)
-				return a == b
-			end,
-		},
-		{
-			memberName = "quotient",
-			longName = "Int:quotient",
-
-			parameters = {dummy("right", INT_TYPE)},
-			returnTypes = {INT_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = false,
-			eval = function(a, b)
-				return math.floor(a / b)
-			end,
-		},
-		{
-			memberName = "product",
-			longName = "Int:product",
-
-			parameters = {dummy("right", INT_TYPE)},
-			returnTypes = {INT_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = false,
-			eval = function(a, b)
-				return a * b
-			end,
-		},
-		{
-			memberName = "sum",
-			longName = "Int:sum",
-
-			parameters = {dummy("right", INT_TYPE)},
-			returnTypes = {INT_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {
-				parseKind("ensures this < return when 0 < right", "ensures"),
-			},
-			requiresAST = {},
-			logic = false,
-			eval = function(a, b)
-				return a + b
-			end,
-		},
-		{
-			memberName = "difference",
-			longName = "Int:difference",
-
-			parameters = {dummy("right", INT_TYPE)},
-			returnTypes = {INT_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = false,
-			eval = function(a, b)
-				return a - b
-			end,
-		},
-	},
-}
-
 local BUILTIN_DEFINITIONS = freeze {
 	{
 		type = STRING_TYPE,
@@ -474,7 +327,6 @@ local BUILTIN_DEFINITIONS = freeze {
 			}
 		},
 	},
-	INT_DEF,
 	BOOLEAN_DEF,
 	{
 		type = UNIT_TYPE,
@@ -719,7 +571,31 @@ end
 
 --------------------------------------------------------------------------------
 
-return freeze {
+local function simpleSignature(container, modifier, name, from, to, eval)
+	local ps = {}
+	for i, t in ipairs(from) do
+		table.insert(ps, {
+			type = t,
+			name = "arg" .. tostring(i),
+		})
+	end
+
+	return {
+		longName = container .. ":" .. name,
+		memberName = name,
+		returnTypes = to,
+		modifier = modifier,
+		parameters = ps,
+		foreign = true,
+		bang = false,
+		requiresASTs = {},
+		ensuresASTs = {},
+		logic = false,
+		eval = eval,
+	}
+end
+
+return {
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
 	BOOLEAN_TYPE = BOOLEAN_TYPE,
@@ -741,4 +617,97 @@ return freeze {
 	variableDescription = variableDescription,
 
 	showStatement = showStatement,
+
+	builtinDefinitions = {
+		Int = {
+			tag = "class-definition",
+
+			-- Functions
+			functionMap = {
+				-- method isPositive() Boolean
+				isPositive = {
+					signature = simpleSignature("Int", "method", "isPositive", {INT_TYPE}, {BOOLEAN_TYPE}, function(n)
+						return 0 < n
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method negate() Int
+				negate = {
+					signature = simpleSignature("Int", "method", "negate", {INT_TYPE}, {INT_TYPE}, function(n)
+						return -n
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method lessThan(Int) Boolean
+				lessThan = {
+					-- TODO: Add ensures/requires
+					signature = simpleSignature("Int", "method", "lessThan", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
+						return a < b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method eq(Int) Boolean
+				eq = {
+					signature = simpleSignature("Int", "method", "eq", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
+						return a == b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method quotient(Int) Int
+				quotient = {
+					signature = simpleSignature("Int", "method", "quotient", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return math.floor(a / b)
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method product(Int) Int
+				product = {
+					signature = simpleSignature("Int", "method", "product", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return a * b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method sum(Int) Int
+				-- TODO: ordered field axiom
+				sum = {
+					signature = simpleSignature("Int", "method", "sum", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return a + b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+
+				-- method difference(Int) Int
+				difference = {
+					signature = simpleSignature("Int", "method", "difference", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return a - b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+				},
+			},
+
+			-- No fields
+			fieldMap = {},
+
+			-- Int type
+			kind = {
+				tag = "keyword-type",
+				role = "type",
+				name = "Int",
+			},
+		}
+	}
 }

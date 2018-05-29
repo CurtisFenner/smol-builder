@@ -13,22 +13,22 @@ union Map[#K, #V | #K is core:Eq, #V is core:Eq] is core:Eq {
 	// This is because matching is (unfortunately) NOT private.
 	method eq(other Map[#K, #V]) Boolean {
 		match this {
-			case e1 empty {
+			case e1 is empty {
 				match other {
-					case e2 empty {
+					case e2 is empty {
 						return true;
 					}
-					case a2 addition {
+					case a2 is addition {
 						return false;
 					}
 				}
 			}
-			case a1 addition {
+			case a1 is addition {
 				match other {
-					case e2 empty {
+					case e2 is empty {
 						return false;
 					}
-					case a2 addition {
+					case a2 is addition {
 						return a1 == a2;
 					}
 				}
@@ -50,10 +50,10 @@ union Map[#K, #V | #K is core:Eq, #V is core:Eq] is core:Eq {
 	//when (this is addition).and((this.addition.getLeft().getLeft() == (key)).not())
 	{
 		match this {
-			case e empty {
+			case e is empty {
 				return core:Option[#V].makeNone();
 			}
-			case a addition {
+			case a is addition {
 				if a.getLeft().getLeft() == key {
 					return core:Option[#V].makeSome(a.getLeft().getRight());
 				}

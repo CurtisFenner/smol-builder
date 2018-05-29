@@ -6,10 +6,10 @@ union U {
 
 	method foo() Unit {
 		match this {
-			case alpha alpha {
+			case alpha is alpha {
 				assert this is alpha;
 			}
-			case beta beta {
+			case beta is beta {
 				assert this is beta;
 				return beta;
 			}

@@ -570,8 +570,8 @@ out, it does not need to be handled:
 		static handle(x Three) Unit
 		requires (x isa c).not() {
 			match x {
-				case a a {}
-				case b b {}
+				case a is a {}
+				case b is b {}
 				// OK with no c case
 			}
 		}

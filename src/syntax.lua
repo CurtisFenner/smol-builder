@@ -496,8 +496,21 @@ local parsers = {
 		{"_", K_IF},
 		{"condition", parser.named "expression", "expected a condition in `if` statement"},
 		{"body", parser.named "block", "expected a block to follow `if` condition"},
-		{"elseifs", parser.query "else-if-clause*"},
-		{"else", parser.query "else-clause?"},
+		{"elseifClauses", parser.query "else-if-clause*"},
+		{"elseClause", parser.query "else-clause?"},
+	},
+
+	["else-if-clause"] = parser.composite {
+		tag = "else-if-clause",
+		{"_", K_ELSEIF},
+		{"condition", parser.named "expression", "expected a condition in `elseif` clause"},
+		{"body", parser.named "block", "expected a block to follow `elseif` condition"},
+	},
+
+	["else-clause"] = parser.composite {
+		tag = "else-clause",
+		{"_", K_ELSE},
+		{"body", parser.named "block", "expected a block to follow `else`"},
 	},
 
 	["match-statement"] = parser.composite {
@@ -517,29 +530,17 @@ local parsers = {
 			parser.composite {
 				tag = "case-head",
 				{"variable", T_IDENTIFIER, "expected a variable name"},
+				{"_", K_IS, "expected `is`"},
 				{"variant", T_IDENTIFIER, "expected a union tag name"},
 			},
 		},
 		{"body", parser.named "block", "expected a block to follow case"},
 	},
 
-	["else-if-clause"] = parser.composite {
-		tag = "else-if-clause",
-		{"_", K_ELSEIF},
-		{"condition", parser.named "expression", "expected a condition in `elseif` clause"},
-		{"body", parser.named "block", "expected a block to follow `elseif` condition"},
-	},
-
-	["else-clause"] = parser.composite {
-		tag = "else-clause",
-		{"_", K_ELSE},
-		{"body", parser.named "block", "expected a block to follow `else`"},
-	},
-
 	["isa"] = parser.composite {
 		tag = "isa",
 		{"_", K_IS},
-		{"field", T_IDENTIFIER, "expected a variant identifier"},
+		{"variant", T_IDENTIFIER, "expected a variant identifier"},
 	},
 
 	-- Expressions!
@@ -551,7 +552,7 @@ local parsers = {
 			{"isa", parser.query "isa?"},
 		},
 		function(x)
-			-- XXX: no precedence yet; assume left-associative
+			-- XXX: no precedence yet; reject unparenthesized
 			local out = x.base
 			assertis(out.tag, "string")
 
@@ -575,7 +576,7 @@ local parsers = {
 				return freeze {
 					tag = "isa",
 					base = out,
-					variant = isa.field,
+					variant = isa.variant,
 				}
 			end
 
@@ -645,12 +646,15 @@ local parsers = {
 		}
 	},
 	["field-access"] = parser.composite {
-		tag = "field",
+		tag = "field-access",
 		{"_", K_DOT},
 		{"field", T_IDENTIFIER, "a field name"},
 	},
 
-	["access"] = parser.choice {parser.named "method-access", parser.named "field-access"},
+	["access"] = parser.choice {
+		parser.named "method-access",
+		parser.named "field-access",
+	},
 
 	["static-call"] = parser.composite {
 		tag = "static-call",

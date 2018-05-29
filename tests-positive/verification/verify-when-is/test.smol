@@ -7,7 +7,7 @@ class Test {
 	requires option is some
 	ensures option.some == return when option is some{
 		match option {
-			case some some {
+			case some is some {
 				return some;
 			}
 		}

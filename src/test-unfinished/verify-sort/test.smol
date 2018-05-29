@@ -43,7 +43,7 @@ union Sort {
 	method getDomainSort() Sort
 	requires this is fn {
 		match this {
-			case fn fn {
+			case fn is fn {
 				return fn.getDomainSort();
 			}
 		}
@@ -51,7 +51,7 @@ union Sort {
 	method getRangeSort() Sort
 	requires this is fn {
 		match this {
-			case fn fn {
+			case fn is fn {
 				return fn.getRangeSort();
 			}
 		}
@@ -59,22 +59,22 @@ union Sort {
 
 	method eq(other Sort) Boolean {
 		match this {
-			case f1 fn {
+			case f1 is  {
 				match other {
-					case f2 fn {
+					case f2 is fn {
 						return f1 == f2;
 					}
-					case n2 named {
+					case n2 is named {
 						return false;
 					}
 				}
 			}
-			case n1 named {
+			case n1 is named {
 				match other {
-					case f2 fn {
+					case f2 is fn {
 						return false;
 					}
-					case n2 named {
+					case n2 is named {
 						return n1 == n2;
 					}
 				}
