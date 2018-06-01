@@ -5,6 +5,64 @@ local tokenization = import "tokenization.lua"
 local syntax = import "syntax.lua"
 local ansi = import "ansi.lua"
 
+--------------------------------------------------------------------------------
+
+-- RETURNS a description of the given TypeKind as a string of Smol code
+local function showTypeKind(t)
+	assertis(t, "TypeKind")
+
+	if t.tag == "compound-type" then
+		local base = t.packageName .. ":" .. t.definitionName
+		if #t.arguments == 0 then
+			return base
+		end
+		local arguments = table.map(showTypeKind, t.arguments)
+		return base .. "[" .. table.concat(arguments, ", ") .. "]"
+	elseif t.tag == "self-type" then
+		return "#Self"
+	elseif t.tag == "generic-type" then
+		return "#" .. t.name
+	elseif t.tag == "keyword-type" then
+		return t.name
+	end
+	error "unknown TypeKind tag"
+end
+
+-- RETURNS a description of the given ConstraintKind as a string of Smol code
+local function showConstraintKind(c)
+	assertis(c, "ConstraintKind")
+
+	if c.tag == "interface-constraint" then
+		local base = c.packageName .. ":" .. c.definitionName
+		if #c.arguments == 0 then
+			return base
+		end
+		local arguments = table.map(showTypeKind, c.arguments)
+		return base .. "[" .. table.concat(arguments, ", ") .. "]"
+	elseif c.tag == "keyword-constraint" then
+		return c.name
+	end
+	error "unknown ConstraintKind tag"
+end
+
+-- RETURNS whether or not two given types are the same
+local function areTypesEqual(a, b)
+	assertis(a, "TypeKind")
+	assertis(b, "TypeKind")
+
+	return showTypeKind(a) == showTypeKind(b)
+end
+
+-- RETURNS whether or not two given constraint kinds are the same
+local function areConstraintsEqual(a, b)
+	assertis(a, "ConstraintKind")
+	assertis(b, "ConstraintKind")
+
+	return showConstraintKind(a) == showConstraintKind(b)
+end
+
+--------------------------------------------------------------------------------
+
 -- RETURNS a parse object, or quits with a syntax error
 local function parseKind(s, k)
 	local tokens = tokenization(s, "<compiler-core>")
@@ -62,57 +120,6 @@ local function variableDescription(variable)
 
 	-- TODO: eliminate type
 	return excerpt(variable.location)
-end
-
--- RETURNS whether or not a and b are the same type
--- REQUIRES that type names cannot be shadowed and
--- that a and b come from the same (type) scope
-local function areTypesEqual(a, b)
-	assertis(a, "Type+")
-	assertis(b, "Type+")
-
-	if a.tag ~= b.tag then
-		return false
-	elseif a.tag == "concrete-type+" then
-		if a.name ~= b.name then
-			return false
-		elseif #a.arguments ~= #b.arguments then
-			-- XXX: should this be fixed before here?
-			return false
-		end
-		for k in ipairs(a.arguments) do
-			if not areTypesEqual(a.arguments[k], b.arguments[k]) then
-				return false
-			end
-		end
-		return true
-	elseif a.tag == "keyword-type+" then
-		return a.name == b.name
-	elseif a.tag == "generic+" then
-		return a.name == b.name
-	end
-	error("unknown type tag `" .. a.tag .. "`")
-end
-
--- RETURNS whether or not a and b are the same interface
--- REQUIRES that type names cannot be shadowed and
--- that a and b come from the same (type) scope
-local function areInterfaceTypesEqual(a, b)
-	assertis(a, "InterfaceType+")
-	assertis(b, "InterfaceType+")
-
-	if a.name ~= b.name then
-		return false
-	end
-	assert(#a.arguments == #b.arguments)
-
-	for k in ipairs(a.arguments) do
-		if not areTypesEqual(a.arguments[k], b.arguments[k]) then
-			return false
-		end
-	end
-
-	return true
 end
 
 --------------------------------------------------------------------------------
@@ -184,150 +191,7 @@ local function dummy(name, type)
 	}
 end
 
-local BOOLEAN_DEF = freeze {
-	type = BOOLEAN_TYPE,
-	name = "Boolean",
-	tag = "builtin",
-	signatures = {
-		{
-			memberName = "eq",
-			longName = "Boolean:eq",
-
-			parameters = {dummy("other", BOOLEAN_TYPE)},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{true, true}, {false, false}},
-				[false] = {{true, false}, {false, true}},
-			},
-			eval = function(a, b)
-				return a == b
-			end,
-		},
-		{
-			memberName = "and",
-			longName = "Boolean:and",
-
-			parameters = {dummy("right", BOOLEAN_TYPE)},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{true, true}},
-				[false] = {{false, false}, {false, true}, {true, false}},
-			},
-			eval = function(a, b)
-				return a and b
-			end,
-		},
-		{
-			memberName = "or",
-			longName = "Boolean:or",
-
-			parameters = {dummy("right", BOOLEAN_TYPE)},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{true, "*"}, {false, true}},
-				[false] = {{false, false}},
-			},
-			eval = function(a, b)
-				return a or b
-			end,
-		},
-		{
-			memberName = "implies",
-			longName = "Boolean:implies",
-
-			parameters = {dummy("right", BOOLEAN_TYPE)},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{false, "*"}, {true, true}},
-				[false] = {{true, false}},
-			},
-			eval = function(a, b)
-				return not a or b
-			end,
-		},
-		{
-			memberName = "not",
-			longName = "Boolean:not",
-
-			parameters = {},
-			returnTypes = {BOOLEAN_TYPE},
-			modifier = "method",
-			foreign = true,
-			bang = false,
-			ensuresAST = {},
-			requiresAST = {},
-			logic = {
-				[true] = {{false}},
-				[false] = {{true}},
-			},
-			eval = function(a)
-				return not a
-			end,
-		},
-	},
-}
-
 local BUILTIN_DEFINITIONS = freeze {
-	{
-		type = STRING_TYPE,
-		name = "String",
-		tag = "builtin",
-		signatures = {
-			{
-				memberName = "concatenate",
-				longName = "String:concatenate",
-
-				parameters = {dummy("right", STRING_TYPE)},
-				returnTypes = {STRING_TYPE},
-				modifier = "method",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a .. b
-				end,
-			},
-			{
-				memberName = "eq",
-				longName = "String:eq",
-
-				parameters = {dummy("right", STRING_TYPE)},
-				returnTypes = {BOOLEAN_TYPE},
-				modifier = "method",
-				foreign = true,
-				bang = false,
-				ensuresAST = {},
-				requiresAST = {},
-				logic = false,
-				eval = function(a, b)
-					return a == b
-				end,
-			}
-		},
-	},
-	BOOLEAN_DEF,
 	{
 		type = UNIT_TYPE,
 		name = "Unit",
@@ -343,24 +207,6 @@ local BUILTIN_DEFINITIONS = freeze {
 }
 
 --------------------------------------------------------------------------------
-
--- RETURNS a string of smol representing the given type
-local function showType(t)
-	assertis(t, "Type+")
-
-	if t.tag == "concrete-type+" then
-		if #t.arguments == 0 then
-			return t.name
-		end
-		local arguments = table.map(showType, t.arguments)
-		return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
-	elseif t.tag == "keyword-type+" then
-		return t.name
-	elseif t.tag == "generic+" then
-		return "#" .. t.name
-	end
-	error("unknown Type+ tag `" .. t.tag .. "`")
-end
 
 -- RETURNS a string (as executable Smol code)
 local function assertionExprString(a, grouped)
@@ -422,7 +268,7 @@ end
 
 --------------------------------------------------------------------------------
 
--- RETURNS a Type+
+-- RETURNS a TypeKind
 local function typeOfAssertion(assertion)
 	assertis(assertion, "Assertion")
 
@@ -500,7 +346,7 @@ local function showStatement(statement, indent)
 		table.insert(x, show(statement.reason))
 		return table.concat(x)
 	elseif statement.tag == "local" then
-		return pre .. " " .. statement.variable.name .. " " .. showType(statement.variable.type)
+		return pre .. " " .. statement.variable.name .. " " .. showTypeKind(statement.variable.type)
 	elseif statement.tag == "assign" then
 		return pre .. " " .. statement.destination.name .. " := " .. statement.source.name
 	elseif statement.tag == "isa" then
@@ -558,11 +404,11 @@ local function showStatement(statement, indent)
 			table.insert(rhs, k .. " -> " .. v.name)
 		end
 		rhs = table.concat(rhs, ", ")
-		local t = showType(statement.type)
+		local t = showTypeKind(statement.type)
 		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
 	elseif statement.tag == "new-union" then
 		local rhs = statement.field .. " -> " .. statement.value.name
-		local t = showType(statement.type)
+		local t = showTypeKind(statement.type)
 		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
 	else
 		return pre .. " <?>"
@@ -595,20 +441,27 @@ local function simpleSignature(container, modifier, name, from, to, eval)
 	}
 end
 
+local function p(name, t)
+	return {
+		name = name,
+		type = t,
+	}
+end
+
 return {
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
 	BOOLEAN_TYPE = BOOLEAN_TYPE,
 	UNIT_TYPE = UNIT_TYPE,
 	NEVER_TYPE = NEVER_TYPE,
-	BUILTIN_DEFINITIONS = BUILTIN_DEFINITIONS,
 	OPERATOR_ALIAS = OPERATOR_ALIAS,
 
 	-- Helpers
 	areTypesEqual = areTypesEqual,
-	areInterfaceTypesEqual = areInterfaceTypesEqual,
+	areConstraintsEqual = areConstraintsEqual,
 	assertionExprString = assertionExprString,
-	showType = showType,
+	showTypeKind = showTypeKind,
+	showConstraintKind = showConstraintKind,
 
 	typeOfAssertion = typeOfAssertion,
 
@@ -619,85 +472,150 @@ return {
 	showStatement = showStatement,
 
 	builtinDefinitions = {
-		Int = {
+		-- Boolean
+		Boolean = {
 			tag = "class-definition",
+			constraintArguments = {},
+			fieldMap = {},
+			kind = {
+				tag = "keyword-type",
+				role = "type",
+				name = "Boolean",
+			},
 
 			-- Functions
 			functionMap = {
-				-- method isPositive() Boolean
-				isPositive = {
-					signature = simpleSignature("Int", "method", "isPositive", {INT_TYPE}, {BOOLEAN_TYPE}, function(n)
-						return 0 < n
-					end),
-					bodyAST = false,
-					definitionLocation = BUILTIN_LOC,
-				},
-
-				-- method negate() Int
-				negate = {
-					signature = simpleSignature("Int", "method", "negate", {INT_TYPE}, {INT_TYPE}, function(n)
-						return -n
-					end),
-					bodyAST = false,
-					definitionLocation = BUILTIN_LOC,
-				},
-
-				-- method lessThan(Int) Boolean
-				lessThan = {
-					-- TODO: Add ensures/requires
-					signature = simpleSignature("Int", "method", "lessThan", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
-						return a < b
-					end),
-					bodyAST = false,
-					definitionLocation = BUILTIN_LOC,
-				},
-
-				-- method eq(Int) Boolean
+				-- method eq(Boolean) Boolean
 				eq = {
-					signature = simpleSignature("Int", "method", "eq", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
-						return a == b
-					end),
+					signature = {
+						foreign = true,
+						longName = "Boolean:eq",
+						memberName = "eq",
+						modifier = "method",
+						parameters = {p("left", BOOLEAN_TYPE), p("right", BOOLEAN_TYPE)},
+						returnTypes = {BOOLEAN_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = {
+							[true] = {{true, true}, {false, false}},
+							[false] = {{true, false}, {false, true}},
+						},
+						eval = function(a, b)
+							return a == b
+						end,
+					},
 					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method and(Boolean) Boolean
+				["and"] = {
+					signature = {
+						foreign = true,
+						longName = "Boolean:and",
+						memberName = "and",
+						modifier = "method",
+						parameters = {p("left", BOOLEAN_TYPE), p("right", BOOLEAN_TYPE)},
+						returnTypes = {BOOLEAN_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = {
+							[true] = {{true, true}},
+							[false] = {{false, false}, {false, true}, {true, false}},
+						},
+						eval = function(a, b)
+							return a and b
+						end,
+					},
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method or(Boolean) Boolean
+				["or"] = {
+					signature = {
+						foreign = true,
+						longName = "Boolean:or",
+						memberName = "or",
+						modifier = "method",
+						parameters = {p("left", BOOLEAN_TYPE), p("right", BOOLEAN_TYPE)},
+						returnTypes = {BOOLEAN_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = {
+							[true] = {{true, "*"}, {false, true}},
+							[false] = {{false, false}},
+						},
+						eval = function(a, b)
+							return a or b
+						end,
+					},
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method implies(Boolean) Boolean
+				["implies"] = {
+					signature = {
+						foreign = true,
+						longName = "Boolean:implies",
+						memberName = "implies",
+						modifier = "method",
+						parameters = {p("left", BOOLEAN_TYPE), p("right", BOOLEAN_TYPE)},
+						returnTypes = {BOOLEAN_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = {
+							[true] = {{false, "*"}, {true, true}},
+							[false] = {{true, false}},
+						},
+						eval = function(a, b)
+							return not a or b
+						end,
+					},
+					bodyAST = false,
+					constraintArguments = {},
 					definitionLocation = BUILTIN_LOC,
 				},
 
-				-- method quotient(Int) Int
-				quotient = {
-					signature = simpleSignature("Int", "method", "quotient", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-						return math.floor(a / b)
-					end),
+				-- method not(Boolean) Boolean
+				["not"] = {
+					signature = {
+						foreign = true,
+						longName = "Boolean:not",
+						memberName = "not",
+						modifier = "method",
+						parameters = {p("left", BOOLEAN_TYPE)},
+						returnTypes = {BOOLEAN_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = {
+							[true] = {{false}},
+							[false] = {{true}},
+						},
+						eval = function(a)
+							return not a
+						end,
+					},
 					bodyAST = false,
-					definitionLocation = BUILTIN_LOC,
-				},
-
-				-- method product(Int) Int
-				product = {
-					signature = simpleSignature("Int", "method", "product", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-						return a * b
-					end),
-					bodyAST = false,
-					definitionLocation = BUILTIN_LOC,
-				},
-
-				-- method sum(Int) Int
-				-- TODO: ordered field axiom
-				sum = {
-					signature = simpleSignature("Int", "method", "sum", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-						return a + b
-					end),
-					bodyAST = false,
-					definitionLocation = BUILTIN_LOC,
-				},
-
-				-- method difference(Int) Int
-				difference = {
-					signature = simpleSignature("Int", "method", "difference", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-						return a - b
-					end),
-					bodyAST = false,
+					constraintArguments = {},
 					definitionLocation = BUILTIN_LOC,
 				},
 			},
+		},
+
+		-- Int
+		Int = {
+			tag = "class-definition",
+			constraintArguments = {},
 
 			-- No fields
 			fieldMap = {},
@@ -708,6 +626,149 @@ return {
 				role = "type",
 				name = "Int",
 			},
-		}
+
+			-- Functions
+			functionMap = {
+				-- method isPositive() Boolean
+				isPositive = {
+					signature = simpleSignature("Int", "method", "isPositive", {INT_TYPE}, {BOOLEAN_TYPE}, function(n)
+						return 0 < n
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method negate() Int
+				negate = {
+					signature = simpleSignature("Int", "method", "negate", {INT_TYPE}, {INT_TYPE}, function(n)
+						return -n
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method lessThan(Int) Boolean
+				lessThan = {
+					-- TODO: Add ensures/requires
+					signature = simpleSignature("Int", "method", "lessThan", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
+						return a < b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method eq(Int) Boolean
+				eq = {
+					signature = simpleSignature("Int", "method", "eq", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
+						return a == b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method quotient(Int) Int
+				quotient = {
+					signature = simpleSignature("Int", "method", "quotient", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return math.floor(a / b)
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method product(Int) Int
+				product = {
+					signature = simpleSignature("Int", "method", "product", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return a * b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method sum(Int) Int
+				-- TODO: ordered field axiom
+				sum = {
+					signature = simpleSignature("Int", "method", "sum", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return a + b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method difference(Int) Int
+				difference = {
+					signature = simpleSignature("Int", "method", "difference", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
+						return a - b
+					end),
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+			},
+		},
+
+		-- String
+		String = {
+			tag = "class-definition",
+			constraintArguments = {},
+			fieldMap = {},
+			kind = {
+				tag = "keyword-type",
+				role = "type",
+				name = "String",
+			},
+
+			functionMap = {
+				-- method concatenate(String) String
+				["concatenate"] = {
+					signature = {
+						foreign = true,
+						longName = "String:concatenate",
+						memberName = "concatenate",
+						modifier = "method",
+						parameters = {p("left", STRING_TYPE), p("right", STRING_TYPE)},
+						returnTypes = {STRING_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = false,
+						eval = function(a, b)
+							return a .. b
+						end,
+					},
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+
+				-- method eq(String) Boolean
+				["eq"] = {
+					signature = {
+						foreign = true,
+						longName = "String:eq",
+						memberName = "eq",
+						modifier = "method",
+						parameters = {p("left", STRING_TYPE), p("right", STRING_TYPE)},
+						returnTypes = {BOOLEAN_TYPE},
+						bang = false,
+						requiresASTs = {},
+						ensuresASTs = {},
+						logic = false,
+						eval = function(a, b)
+							return a == b
+						end,
+					},
+					bodyAST = false,
+					definitionLocation = BUILTIN_LOC,
+					constraintArguments = {},
+				},
+			},
+		},
 	}
 }

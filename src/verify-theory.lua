@@ -9,10 +9,7 @@ local Map = import "data/map.lua"
 local UnionFind = import "data/unionfind.lua"
 
 local common = import "common.lua"
-local showType = common.showType
-
-local BUILTIN_DEFINITIONS = common.BUILTIN_DEFINITIONS
-local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
+local showTypeKind = common.showTypeKind
 
 local areTypesEqual = common.areTypesEqual
 
@@ -33,7 +30,7 @@ local function notAssertion(a)
 	return freeze {
 		tag = "fn",
 		arguments = {a},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "not"),
+		signature = common.builtinDefinitions.Boolean.functionMap["not"].signature,
 		index = 1,
 	}
 end
@@ -43,7 +40,7 @@ notAssertion = memoized(1, notAssertion)
 local function eqAssertion(a, b, t)
 	assertis(a, "Assertion")
 	assertis(b, "Assertion")
-	assertis(t, "Type+")
+	assertis(t, "TypeKind")
 
 	local p = freeze {
 		tag = "eq",
@@ -156,7 +153,7 @@ local function showAssertion(assertion)
 	elseif assertion.tag == "symbol" then
 		return "(symbol " .. assertion.symbol .. ")"
 	elseif assertion.tag == "forall" then
-		return "(forall " .. showType(assertion.quantified) .. " " .. assertion.unique .. " " .. assertion.instance .. ")"
+		return "(forall " .. showTypeKind(assertion.quantified) .. " " .. assertion.unique .. " " .. assertion.instance .. ")"
 	end
 	error("unknown assertion tag `" .. assertion.tag .. "` in showAssertion")
 end
@@ -312,7 +309,7 @@ local function quantifierClauses(model, term, truth)
 			assertis(x, "Assertion")
 
 			local tx = typeOfAssertion(x)
-			assertis(tx, "Type+")
+			assertis(tx, "TypeKind")
 
 			if areTypesEqual(tx, term.quantified) then
 				table.insert(opportunities, x)

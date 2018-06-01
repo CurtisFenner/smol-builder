@@ -20,66 +20,42 @@ REGISTER_TYPE("Token", recordType {
 -- Type Definitions ------------------------------------------------------------
 
 REGISTER_TYPE("Semantics", recordType {
-	compounds = listType(choiceType("ClassIR", "UnionIR")),
-	interfaces = listType "InterfaceIR",
-	builtins = listType(recordType {
-		tag = constantType "builtin",
-		name = "string",
-		signatures = listType "Signature",
-		type = "KeywordType+",
+	compounds = listType(recordType {
+		tag = choiceType(constantType("union-definition"), constantType("class-definition")),
+		fieldMap = mapType("string", recordType {
+			name = "string",
+			type = "TypeKind",
+		}),
+		constraintArguments = listType(recordType {
+			name = "string",
+			index = "integer",
+			constraint = "ConstraintKind",
+		}),
+		fullName = "string",
 	}),
+	interfaces = listType "InterfaceIR",
 	functions = listType "FunctionIR",
 	main = choiceType("string", constantType(false)),
 })
 
-REGISTER_TYPE("ClassIR", recordType {
-	tag = constantType "class",
-	name = "string",
-	fields = listType "VariableIR",
-	generics = listType "TypeParameterIR",
-	implements = listType "InterfaceType+",
-	signatures = listType "Signature",
-	constraints = mapType("string", "InterfaceType+"),
-	builtin = constantType(nil),
-})
-
-REGISTER_TYPE("UnionIR", recordType {
-	tag = constantType "union",
-	name = "string",
-	fields = listType "VariableIR",
-	generics = listType "TypeParameterIR",
-	implements = listType "InterfaceType+",
-	signatures = listType "Signature",
-	constraints = mapType("string", "InterfaceType+"),
-})
-
 REGISTER_TYPE("InterfaceIR", recordType {
-	tag = constantType "interface",
-	name = "string",
-	signatures = listType "Signature",
-	generics = listType "TypeParameterIR",
-})
-
-REGISTER_TYPE("Definition", choiceType("ClassIR", "UnionIR", "InterfaceIR"))
-
-REGISTER_TYPE("TypeParameterIR", recordType {
-	name = "string",
-
-	-- Type parameter name (e.g., "#Right")
-	constraints = listType(recordType {
-		interface = "InterfaceType+",
+	tag = constantType "interface-definition",
+	fullName = "string",
+	functionMap = mapType("string", recordType {
+		signature = "Signature",
 	}),
-	location = "Location",
+	constraintArguments = listType(recordType {
+		name = "string",
+		index = "integer",
+		constraint = "ConstraintKind",
+	}),
 })
 
 REGISTER_TYPE("FunctionIR", recordType {
+	namespace = "string",
 	name = "string",
-	parameters = listType "VariableIR",
-	generics = listType "TypeParameterIR",
-	returnTypes = listType "Type+",
 	body = choiceType(constantType(false), "StatementIR"),
 	signature = "Signature",
-	definitionName = "string",
 })
 
 REGISTER_TYPE("Signature", recordType {
@@ -126,7 +102,6 @@ REGISTER_TYPE("StatementIR", intersectType("AbstractStatementIR", choiceType(
 	"ReturnSt",
 	"IfSt",
 	"StringLoadSt",
-	"ThisSt",
 	"UnitSt",
 	"VariantSt",
 
@@ -237,21 +212,18 @@ EXTEND_TYPE("StaticCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "static-call",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
+	constraintArguments = listType "VTableIR",
 	returns = constantType "no",
 	signature = "Signature",
 })
 
 EXTEND_TYPE("DynamicCallSt", "AbstractStatementIR", recordType {
 	tag = constantType "dynamic-call",
-	baseInstance = "VariableIR",
-	constraint = "ConstraintIR",
+	constraint = "VTableIR",
 	arguments = listType "VariableIR",
 	destinations = listType "VariableIR",
 	returns = constantType "no",
 	signature = "Signature",
-
-	-- XXX: delete this
-	methodName = "nil",
 })
 
 EXTEND_TYPE("BooleanLoadSt", "AbstractStatementIR", recordType {
@@ -265,12 +237,6 @@ EXTEND_TYPE("FieldSt", "AbstractStatementIR", recordType {
 	tag = constantType "field",
 	name = "string",
 	base = "VariableIR",
-	destination = "VariableIR",
-	returns = constantType "no",
-})
-
-EXTEND_TYPE("ThisSt", "AbstractStatementIR", recordType {
-	tag = constantType "this",
 	destination = "VariableIR",
 	returns = constantType "no",
 })
@@ -309,7 +275,7 @@ EXTEND_TYPE("IsASt", "AbstractStatementIR", recordType {
 EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
 	tag = constantType "forall",
 	destination = "VariableIR",
-	quantified = "Type+",
+	quantified = "TypeKind",
 
 	-- VariableIR => StatementIR, VariableIR
 	instantiate = "function",
@@ -323,23 +289,17 @@ REGISTER_TYPE("VariableIR", recordType {
 	type = "TypeKind",
 })
 
-REGISTER_TYPE("ConstraintIR", choiceType(
+REGISTER_TYPE("VTableIR", choiceType(
 	recordType {
-		tag = constantType "this-constraint",
-		instance = "VariableIR",
-		interface = "InterfaceType+",
+		tag = constantType "parameter-vtable",
+		interface = "ConstraintKind",
 		name = "string",
 	},
 	recordType {
-		tag = constantType "parameter-constraint",
-		interface = "InterfaceType+",
-		name = "string",
-	},
-	recordType {
-		tag = constantType "concrete-constraint",
-		interface = "InterfaceType+",
-		concrete = "ConcreteType+",
-		assignments = mapType("string", "ConstraintIR"),
+		tag = constantType "concrete-vtable",
+		interface = "ConstraintKind",
+		concrete = "TypeKind",
+		arguments = mapType("string", listType "VTableIR"),
 	}
 ))
 

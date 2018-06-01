@@ -4,11 +4,12 @@ local Map = import "data/map.lua"
 
 local Report = import "semantic-errors.lua"
 local common = import "common.lua"
-local showType = common.showType
-local areInterfaceTypesEqual = common.areInterfaceTypesEqual
 local excerpt = common.excerpt
 
-local BOOLEAN_DEF = table.findwith(common.BUILTIN_DEFINITIONS, "name", "Boolean")
+local showTypeKind = common.showTypeKind
+local showConstraintKind = common.showConstraintKind
+local areTypesEqual = common.areTypesEqual
+
 local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
 
 local UNIT_TYPE = {
@@ -41,53 +42,6 @@ local SELF_TYPE = {
 	tag = "self-type",
 	role = "type",
 }
-
-
--- RETURNS a description of the given TypeKind as a string of Smol code
-local function showTypeKind(t)
-	assertis(t, "TypeKind")
-
-	if t.tag == "compound-type" then
-		local base = t.packageName .. ":" .. t.definitionName
-		if #t.arguments == 0 then
-			return base
-		end
-		local arguments = table.map(showTypeKind, t.arguments)
-		return base .. "[" .. table.concat(arguments, ", ") .. "]"
-	elseif t.tag == "self-type" then
-		return "#Self"
-	elseif t.tag == "generic-type" then
-		return "#" .. t.name
-	elseif t.tag == "keyword-type" then
-		return t.name
-	end
-	error "unknown TypeKind tag"
-end
-
--- RETURNS a description of the given ConstraintKind as a string of Smol code
-local function showConstraintKind(c)
-	assertis(c, "ConstraintKind")
-
-	if c.tag == "interface-constraint" then
-		local base = c.packageName .. ":" .. c.definitionName
-		if #c.arguments == 0 then
-			return base
-		end
-		local arguments = table.map(showTypeKind, c.arguments)
-		return base .. "[" .. table.concat(arguments, ", ") .. "]"
-	elseif c.tag == "keyword-constraint" then
-		return c.name
-	end
-	error "unknown ConstraintKind tag"
-end
-
--- RETURNS whether or not two given types are the same
-local function areTypesEqual(a, b)
-	assertis(a, "TypeKind")
-	assertis(b, "TypeKind")
-
-	return showTypeKind(a) == showTypeKind(b)
-end
 
 -- RETURNS a Kind with the same structure, buch each GenericTypeKind replaced
 -- with a TypeKind from the map
@@ -491,6 +445,58 @@ local function checkTypes(p)
 	end
 end
 
+-- RETURNS a VTableIR
+local function getVTable(implementer, constraint, context)
+	assertis(implementer, "TypeKind")
+	assertis(constraint, "ConstraintKind")
+	assertis(context, recordType {
+		constraintMap = mapType("string", listType(recordType {
+			constraint = "ConstraintKind",
+			name = "string",
+		})),
+
+		definitionMap = mapType("string", mapType("string", recordType {
+			constraintArguments = listType(recordType {
+				index = "integer",
+				constraint = "ConstraintKind",
+			}),
+		})),
+	})
+
+	if implementer.tag == "compound-type" then
+		-- This can be constructed explicitly
+		local arguments = {}
+		for _, a in ipairs(definition.constraintArguments) do
+			table.insert(arguments, getVTable(implementer.arguments[a.index], a.constraint, context))
+		end
+
+		return {
+			tag = "concrete-vtable",
+			interface = constraint,
+			concrete = implementer,
+			arguments = arguments,
+		}
+	elseif implementer.tag == "generic-type" then
+		assert(context.constraintMap[implementer.name], "type parameter must be inscope")
+		local fit = false
+		for _, c in pairs(context.constraintMap[implementer.name]) do
+			if common.areConstraintsEqual(c.constraint, constraint) then
+				assert(not fit, "must be unique fit")
+				fit = {
+					tag = "parameter-vtable",
+					name = c.name,
+					interface = c.constraint,
+				}
+			end
+		end
+		assert(fit, "must satisfy required constraint")
+
+		return fit
+	end
+
+	error("unknown implementer tag `" .. implementer.tag .. "`")
+end
+
 -- RETURNS StatementIR, out variables, impure boolean
 -- The StatementIR describes how to execute the statement such that the out
 -- variables are assigned with the evaluation.
@@ -509,7 +515,19 @@ local function compileExpression(expressionAST, scope, context)
 
 		typeResolver = "function",
 		typeResolverContext = "object",
-		definitionMap = "object",
+		definitionMap = mapType("string", mapType("string", recordType {
+			functionMap = mapType("string", recordType {}),
+			constraintArguments = listType(recordType {
+				index = "integer",
+				constraint = "ConstraintKind",
+			}),
+		})),
+
+		constraintMap = mapType("string", listType(recordType {
+			constraint = "ConstraintKind",
+			name = "string",
+			location = "Location",
+		})),
 	})
 
 	if expressionAST.tag == "string-literal" then
@@ -591,6 +609,26 @@ local function compileExpression(expressionAST, scope, context)
 			end
 
 			return sequenceSt {}, {scope:get("this")}, false
+		elseif expressionAST.keyword == "true" or expressionAST.keyword == "false" then
+			local destination = {
+				name = vendUniqueIdentifier(),
+				type = BOOLEAN_TYPE,
+			}
+			local code = {
+				{
+					tag = "local",
+					variable = destination,
+					returns = "no",
+				},
+				{
+					tag = "boolean",
+					boolean = expressionAST.keyword == "true",
+					destination = destination,
+					returns = "no",
+				}
+			}
+
+			return sequenceSt(code), {destination}, false
 		end
 		error(show(expressionAST))
 	elseif expressionAST.tag == "field-access" then
@@ -787,6 +825,7 @@ local function compileExpression(expressionAST, scope, context)
 		for _, fieldAST in ipairs(expressionAST.fields) do
 			-- Compile the argument
 			local c, outs, i = compileExpression(fieldAST.value, scope, context)
+			table.insert(code, c)
 
 			local field = definition.fieldMap[fieldAST.name]
 			if not field then
@@ -910,12 +949,96 @@ local function compileExpression(expressionAST, scope, context)
 		end
 
 		local baseType = bases[1].type
-		if baseType.tag == "self-type" then
-			-- TODO: In Interface contracts, #Self is allowed as a regular
-			-- type parameter!
-			error "TODO"
-		elseif baseType.tag == "generic-type" then
-			error "TODO"
+		if baseType.tag == "generic-type" or baseType.tag == "self-type" then
+			-- Get a list of constraints associated with this base type
+			if baseType.tag == "self-type" then
+				assert(context.genericMap.self)
+			end
+			local info = context.constraintMap[baseType.tag == "generic-type" and baseType.name or "Self"]
+			assertis(info, listType(recordType {constraint = "ConstraintKind"}))
+
+			-- Find the matching method
+			local matching = false
+			local matchingConstraint = false
+			for _, c in ipairs(info) do
+				if c.constraint.tag == "keyword-constraint" then
+					error "TODO: Handle keyword-constraints"
+				else
+					assert(c.constraint.tag == "interface-constraint")
+
+					local interface = context.definitionMap[c.constraint.packageName][c.constraint.definitionName]
+					assert(interface.tag == "interface-definition")
+
+					if interface.functionMap[expressionAST.methodName] then
+						-- Check that it is not ambiguous
+						if matching then
+							Report.CONFLICTING_INTERFACES {
+								method = expressionAST.methodName,
+								location = expressionAST.location,
+								interfaceOne = showConstraintKind(matchingConstraint.constraint),
+								interfaceTwo = showConstraintKind(c.constraint),
+							}
+						end
+
+						matching = interface.functionMap[expressionAST.methodName]
+						matchingConstraint = c
+					end
+				end
+			end
+
+			-- Check that the method was found
+			if not matching.signature or matching.signature.modifier ~= "method" then
+				Report.NO_SUCH_MEMBER {
+					container = showTypeKind(baseType),
+					memberType = "method",
+					location = expressionAST.location,
+				}
+			end
+
+			-- Check the bang
+			if not matching.signature.bang ~= not expressionAST.bang then
+				Report.BANG_MISMATCH {
+					given = matching.signature.bang and "without a `!`" or "with a `!`",
+					expects = matching.signature.bang and "a `!` action" or " a pure function",
+					fullName = matching.signature.fullName,
+					location = expressionAST.location,
+					signatureLocation = matching.definitionLocation,
+				}
+			elseif matching.signature.bang and not context.canUseBang then
+				Report.BANG_NOT_ALLOWED {
+					context = matching.signature.modifier .. " `" .. matching.signature.fullName .. "`",
+					location = expressionAST.location,
+				}
+			end
+
+			-- Create the destination storage
+			local destinations = {}
+			for _, returnType in ipairs(matching.signature.returnTypes) do
+				local destination = {
+					name = vendUniqueIdentifier(),
+					type = returnType,
+				}
+				table.insert(destinations, destination)
+				table.insert(code, {
+					tag = "local",
+					variable = destination,
+					returns = "no",
+				})
+			end
+
+			-- Make the indirect call
+			local call = {
+				tag = "dynamic-call",
+				constraint = getVTable(baseType, matchingConstraint.constraint, context),
+				signature = matching.signature,
+				arguments = arguments,
+				destinations = destinations,
+				returns = "no",
+			}
+			assertis(call, "DynamicCallSt")
+			table.insert(code, call)
+
+			return sequenceSt(code), destinations, expressionAST.bang
 		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
 			local definition
 			if baseType.tag == "compound-type" then
@@ -954,7 +1077,7 @@ local function compileExpression(expressionAST, scope, context)
 			if not member.signature.bang ~= not expressionAST.bang then
 				Report.BANG_MISMATCH {
 					given = member.signature.bang and "without a `!`" or "with a `!`",
-					expects = member.signature.bang and "a `!` action" or " apure function",
+					expects = member.signature.bang and "a `!` action" or " a pure function",
 					fullName = member.signature.fullName,
 					location = expressionAST.location,
 					signatureLocation = member.definitionLocation,
@@ -981,11 +1104,18 @@ local function compileExpression(expressionAST, scope, context)
 				table.insert(destinations, destination)
 			end
 
+			-- Get vtables
+			local vtables = {}
+			for _, a in ipairs(definition.constraintArguments) do
+				table.insert(vtables, getVTable(baseType.arguments[a.index], a.constraint, context))
+			end
+
 			local call = {
 				tag = "static-call",
 				arguments = arguments,
 				signature = member.signature,
 				destinations = destinations,
+				constraintArguments = vtables,
 				returns = "no",
 			}
 			assertis(call, "StaticCallSt")
@@ -1042,7 +1172,7 @@ local function compileExpression(expressionAST, scope, context)
 					location = expressionAST.location,
 				}
 			end
-
+			
 			-- Check the types
 			local expected = table.map(table.getter "type", member.signature.parameters)
 			checkTypes {
@@ -1084,12 +1214,20 @@ local function compileExpression(expressionAST, scope, context)
 				table.insert(destinations, destination)
 			end
 
+			-- Get constraint arguments
+			local constraintArguments = {}
+			for _, c in ipairs(definition.constraintArguments) do
+				local vtable = getVTable(baseType.arguments[c.index], c.constraint, context)
+				table.insert(constraintArguments, vtable)
+			end
+
 			local call = {
 				tag = "static-call",
 				arguments = arguments,
 				destinations = destinations,
 				returns = "no",
 				signature = member.signature,
+				constraintArguments = constraintArguments,
 			}
 			assertis(call, "StaticCallSt")
 			table.insert(code, call)
@@ -1112,10 +1250,12 @@ local function compileStatement(statementAST, scope, context)
 		proof = "boolean",
 		newType = choiceType(constantType(false), "TypeKind"),
 		makePostamble = "function",
-			
+
 		typeResolver = "function",
 		typeResolverContext = "object",
-		definitionMap = "object",
+		definitionMap = mapType("string", mapType("string", recordType {
+			functionMap = mapType("string", recordType {}),
+		})),
 	})
 
 	if statementAST.tag == "block" then
@@ -1588,7 +1728,7 @@ local function semanticsSmol(sources, main)
 
 			-- Read the constraints, suppressing errors regarding no constraints
 			-- Note: We MUST check them again afterwards
-			for _, constraintAST in ipairs(definition.definition.generics.constraints) do
+			for i, constraintAST in ipairs(definition.definition.generics.constraints) do
 				local concerning = constraintAST.parameter.name
 
 				-- Process the constraint, checking that it is a ConstraintKind
@@ -1605,6 +1745,8 @@ local function semanticsSmol(sources, main)
 				table.insert(constraintMap[concerning], {
 					constraint = constraint,
 					location = constraintAST.location,
+					name = "smol_con_" .. concerning .. "_" .. i,
+					index = i,
 				})
 			end
 
@@ -1615,6 +1757,18 @@ local function semanticsSmol(sources, main)
 				map = constraintMap,
 				locations = genericLocationMap,
 			}
+
+			-- Get the constraints list
+			definition.constraintArguments = {}
+			for _, r in pairs(constraintMap) do
+				for _, v in ipairs(r) do
+					table.insert(definition.constraintArguments, v)
+				end
+			end
+			table.sort(definition.constraintArguments, function(a, b)
+				return a.index < b.index
+			end)
+
 
 			-- Read the implements claims, suppressing errors regarding no
 			-- constraints
@@ -1715,7 +1869,7 @@ local function semanticsSmol(sources, main)
 				return {
 					modifier = signatureAST.modifier.lexeme,
 					memberName = signatureAST.name,
-					longName = packageName .. "." .. definitionName .. "." .. signatureAST.name,
+					longName = packageName .. ":" .. definitionName .. "." .. signatureAST.name,
 					foreign = false,
 					bang = not not signatureAST.bang,
 					parameters = parameters,
@@ -1969,23 +2123,14 @@ local function semanticsSmol(sources, main)
 	local functions = {}
 	for _, package in pairs(definitionMap) do
 		for _, definition in pairs(package) do
-			-- Get the constraints list
-			local constraintArguments = {}
-			for _, genericName in ipairs(definition.genericConstraintMap.order) do
-				for i, c in ipairs(definition.genericConstraintMap.map[genericName]) do
-					table.insert(constraintArguments, {
-						name = genericName .. "_" .. i,
-						namespace = "#" .. genericName,
-						constraint = c.constraint,
-					})
-				end
-			end
-
 			if definition.tag == "interface-definition" then
 				-- Check each signature's ensures and requires clauses
 				for key, f in pairs(definition.functionMap) do
 					local context = {
 						returnTypes = f.signature.returnTypes,
+
+						-- Generic information, noting what Self is
+						constraintMap = table.with(definition.genericConstraintMap.map, "Self", definition.kind),
 
 						-- This is for checking the pre and post conditions,
 						-- which cannot use bang even if this is a bang action
@@ -2009,6 +2154,9 @@ local function semanticsSmol(sources, main)
 						canUseBang = f.signature.bang,
 						newType = definition.kind,
 						proof = false,
+
+						-- Generic information
+						constraintMap = definition.genericConstraintMap.map,
 
 						-- RETURNS a ProofSt
 						makePostamble = function(returning)
@@ -2041,6 +2189,41 @@ local function semanticsSmol(sources, main)
 						assert(f.bodyAST)
 						local body = compileStatement(f.bodyAST, scope, context)
 
+						if body.returns ~= "yes" then
+							if #f.signature.returnTypes == 1 and areTypesEqual(UNIT_TYPE, f.signature.returnTypes[1]) then
+								-- return unit; is optional
+								local unitOut = {
+									name = vendUniqueIdentifier(),
+									type = UNIT_TYPE,
+								}
+								body = sequenceSt {
+									body,
+									{
+										tag = "local",
+										variable = unitOut,
+										returns = "no",
+									},
+									{
+										tag = "unit",
+										destination = unitOut,
+										returns = "no",
+									},
+									{
+										tag = "return",
+										sources = {unitOut},
+										returns = "yes",
+									},
+								}
+							else
+								Report.FUNCTION_DOESNT_RETURN {
+									modifier = f.signature.modifier,
+									name = f.signature.name,
+									returns = table.concat(table.map(showTypeKind, f.signature.returnTypes), ", "),
+									location = f.definitionLocation,
+								}
+							end
+						end
+
 						-- Package the function up for contract verification and
 						-- code generation
 						table.insert(functions, {
@@ -2049,29 +2232,59 @@ local function semanticsSmol(sources, main)
 							name = key,
 							body = sequenceSt {preamble, body},
 							signature = f.signature,
-							constraintArguments = constraintArguments,
+							constraintArguments = definition.constraintArguments,
 						})
 					else
-						-- TODO: Notate these somehow
+						-- Still notate foreign functions
+						-- (They still will need signatures in codegen, and we
+						-- can catch unsupported ones)
+						table.insert(functions, {
+							namespace = showTypeKind(definition.kind),
+							thisType = definition.kind,
+							name = key,
+							body = false,
+							signature = f.signature,
+							constraintArguments = definition.constraintArguments,
+						})
 					end
 				end
 			end
 		end
 	end
 
-	assertis(functions, listType {
-		namespace = "string",
-		name = "string",
-		body = "StatementIR",
-		signature = "Signature",
-		constraintArguments = listType(recordType {
-			generic = "string",
-			constraint = "ConstraintKind",
-		}),
-	})
+	assertis(functions, listType "FunctionIR")
+
+	-- Collect the structures that need to be compiled
+	local compounds = {}
+	local interfaces = {}
+	for _, package in pairs(definitionMap) do
+		for _, definition in pairs(package) do
+			if definition.tag == "interface-definition" then
+				table.insert(interfaces, definition)
+			else
+				assert(definition.tag == "class-definition" or definition.tag == "union-definition")
+				table.insert(compounds, definition)
+			end
+		end
+	end
+
+	-- Add foreign functions from builtins
+	for keyword, builtin in pairs(common.builtinDefinitions) do
+		for key, f in pairs(builtin.functionMap) do
+			assert(f.signature.foreign)
+			table.insert(functions, {
+				namespace = keyword,
+				thisType = builtin.kind,
+				name = key,
+				body = false,
+				signature = f.signature,
+				constraintArguments = {},
+			})
+		end
+	end
 
 	return freeze {
-		builtins = common.BUILTIN_DEFINITIONS,
+		builtins = common.builtinDefinitions,
 		compounds = compounds,
 		interfaces = interfaces,
 		functions = functions,

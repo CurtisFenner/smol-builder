@@ -1,18 +1,22 @@
 package test;
 import core;
 
+class Array[#T] {
+	
+}
+
 class MinBinaryHeap[#T | #T is core:Orderable, #T is core:Showable] {
-	var sequence core:Array[#T];
+	var sequence Array[#T];
 
 	static makeEmpty() MinBinaryHeap[#T] {
-		return new(sequence = core:Array[#T].make());
+		return new(sequence = Array[#T].make());
 	}
 
-	static make(sequence core:Array[#T]) MinBinaryHeap[#T] {
+	static make(sequence Array[#T]) MinBinaryHeap[#T] {
 		return new(sequence = sequence);
 	}
 
-	static heapProperty(sequence core:Array[#T]) Boolean {
+	static heapProperty(sequence Array[#T]) Boolean {
 		return true;
 	}
 
@@ -26,7 +30,7 @@ class MinBinaryHeap[#T | #T is core:Orderable, #T is core:Showable] {
 		return (index - 1) / 2;
 	}
 
-	static bubbleUp(list core:Array[#T], index Int) core:Array[#T] {
+	static bubbleUp(list Array[#T], index Int) Array[#T] {
 		if index == 0 {
 			return list;
 		}
@@ -40,7 +44,7 @@ class MinBinaryHeap[#T | #T is core:Orderable, #T is core:Showable] {
 		return list;
 	}
 
-	static bubbleDown(list core:Array[#T], index Int) core:Array[#T] {
+	static bubbleDown(list Array[#T], index Int) Array[#T] {
 		var a Int = MinBinaryHeap[#T].zLeftChild(index);
 		var b Int = MinBinaryHeap[#T].zRightChild(index);
 		if (list.size() - 1) < a {
@@ -66,7 +70,7 @@ class MinBinaryHeap[#T | #T is core:Orderable, #T is core:Showable] {
 	}
 
 	method insert(value #T) MinBinaryHeap[#T] {
-		var modified core:Array[#T] = this.sequence.append(value);
+		var modified Array[#T] = this.sequence.append(value);
 		modified = MinBinaryHeap[#T].bubbleUp(modified, modified.size() - 1);
 		return MinBinaryHeap[#T].make(modified);
 	}

@@ -452,11 +452,10 @@ function Report.THIS_USED_OUTSIDE_METHOD(p)
 	quit("You try to use `this` in a non-method function ", p.location)
 end
 
---------------------------------------------------------------------------------
 
 function Report.CONFLICTING_INTERFACES(p)
 	quit(
-		"The method `",
+		"The call `",
 		p.method,
 		"` is ambiguous ",
 		p.location,
@@ -470,32 +469,7 @@ function Report.CONFLICTING_INTERFACES(p)
 	)
 end
 
-function Report.TYPE_MUST_BE_CLASS(p)
-	assertis(p.purpose, "string")
-	assertis(p.givenType, "string")
-	assertis(p.location, "Location")
-
-	quit(
-		"The ",
-		p.purpose,
-		" must be a class instance. However, it is a ",
-		p.givenType,
-		" ",
-		p.location
-	)
-end
-
-function Report.TYPE_MUST_BE_UNION(p)
-	quit(
-		"The ",
-		p.purpose,
-		" must be a union instance. However, you try to use a ",
-		"`",
-		p.givenType,
-		"` ",
-		p.location
-	)
-end
+--------------------------------------------------------------------------------
 
 function Report.FUNCTION_DOESNT_RETURN(p)
 	quit(
