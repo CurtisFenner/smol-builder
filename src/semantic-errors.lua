@@ -296,34 +296,18 @@ function Report.UNREACHABLE_STATEMENT(p)
 end
 
 function Report.TYPE_MISMATCH(p)
-	if #p.given ~= #p.expected then
-		quit(
-			"There were " .. #p.expected .. " " .. p.purpose .. " expected",
-			" ",
-			p.expectedLocation,
-			"\nHowever, " .. #p.given .. " " .. p.purpose .. " were supplied ",
-			p.givenLocation
-		)
-	end
-
-	for i in ipairs(p.given) do
-		if p.given[i] ~= p.expected[i] then
-			quit(
-				"The " .. string.ordinal(i) .. " " .. p.purpose,
-				" should be ",
-				p.expected[i],
-				" as defined ",
-				p.expectedLocation,
-				"\nHowever, the " .. string.ordinal(i) .. " " .. p.purpose,
-				" was ",
-				p.given[i],
-				" ",
-				p.givenLocation
-			)
-		end
-	end
-
-	error "unreachable"
+	quit(
+		"The " .. p.purpose,
+		" should be ",
+		p.expected,
+		" as defined ",
+		p.expectedLocation,
+		"\nHowever, the " .. p.purpose,
+		" was ",
+		p.given,
+		" ",
+		p.givenLocation
+	)
 end
 
 function Report.EVALUATION_ORDER(p)
@@ -472,6 +456,13 @@ end
 --------------------------------------------------------------------------------
 
 function Report.FUNCTION_DOESNT_RETURN(p)
+	assertis(p, recordType {
+		modifier = "string",
+		name = "string",
+		returns = "string",
+		location = "Location",
+	})
+
 	quit(
 		"The ",
 		p.modifier,

@@ -38,6 +38,7 @@ function quit(first, ...)
 		if type(rest[i]) == "number" then
 			rest[i] = tostring(rest[i])
 		elseif type(rest[i]) ~= "string" then
+			assert(rest[i] ~= nil, "rest[i] ~= nil")
 			if not rest[i].ends then
 				print(...)
 			end

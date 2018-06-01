@@ -194,6 +194,23 @@ local function makeDefinitionASTResolver(info, definitionMap)
 				name = ast.name,
 			}
 		elseif ast.tag == "generic" then
+			-- Check that the generic is in scope
+			if context.checkConstraints then
+				if not context.generics.map[ast.name] then
+					Report.UNKNOWN_GENERIC_USED {
+						name = ast.name,
+						location = ast.location,
+					}
+				end
+			else
+				if not context.generics[ast.name] then
+					Report.UNKNOWN_GENERIC_USED {
+						name = ast.name,
+						location = ast.location,
+					}
+				end
+			end
+
 			return {
 				tag = "generic-type",
 				role = "type",
@@ -423,10 +440,10 @@ local function checkTypes(p)
 	})
 
 	if #p.given ~= #p.expected then
-		Report.TYPE_MISMATCH {
-			given = table.map(table.getter "type", p.given),
-			expected = p.expected,
-			purpose = p.purpose,
+		Report.WRONG_VALUE_COUNT {
+			expectedCount = #p.expected,
+			givenCount = #p.given,
+			purpose = purpose,
 			givenLocation = p.givenLocation,
 			expectedLocation = p.expectedLocation,
 		}
@@ -435,9 +452,9 @@ local function checkTypes(p)
 	for i in ipairs(p.given) do
 		if not areTypesEqual(p.given[i].type, p.expected[i]) then
 			Report.TYPE_MISMATCH {
-				given = table.map(table.getter "type", p.given),
-				expected = p.expected,
-				purpose = p.purpose,
+				given = showTypeKind(p.given[i].type),
+				expected = showTypeKind(p.expected[i]),
+				purpose = string.ordinal(i) .. " " .. p.purpose,
 				givenLocation = p.givenLocation,
 				expectedLocation = p.expectedLocation,
 			}
@@ -629,6 +646,8 @@ local function compileExpression(expressionAST, scope, context)
 			}
 
 			return sequenceSt(code), {destination}, false
+		elseif expressionAST.keyword == "return" then
+			error("TODO: compileExpression return")
 		end
 		error(show(expressionAST))
 	elseif expressionAST.tag == "field-access" then
@@ -1000,13 +1019,13 @@ local function compileExpression(expressionAST, scope, context)
 				Report.BANG_MISMATCH {
 					given = matching.signature.bang and "without a `!`" or "with a `!`",
 					expects = matching.signature.bang and "a `!` action" or " a pure function",
-					fullName = matching.signature.fullName,
+					fullName = matching.signature.longName,
 					location = expressionAST.location,
 					signatureLocation = matching.definitionLocation,
 				}
 			elseif matching.signature.bang and not context.canUseBang then
 				Report.BANG_NOT_ALLOWED {
-					context = matching.signature.modifier .. " `" .. matching.signature.fullName .. "`",
+					context = matching.signature.modifier .. " `" .. matching.signature.longName .. "`",
 					location = expressionAST.location,
 				}
 			end
@@ -1076,15 +1095,16 @@ local function compileExpression(expressionAST, scope, context)
 			-- Check bang
 			if not member.signature.bang ~= not expressionAST.bang then
 				Report.BANG_MISMATCH {
+					modifier = member.signature.modifier,
 					given = member.signature.bang and "without a `!`" or "with a `!`",
 					expects = member.signature.bang and "a `!` action" or " a pure function",
-					fullName = member.signature.fullName,
+					fullName = member.signature.longName,
 					location = expressionAST.location,
 					signatureLocation = member.definitionLocation,
 				}
 			elseif member.signature.bang and not context.canUseBang then
 				Report.BANG_NOT_ALLOWED {
-					context = member.signature.modifier .. " `" .. member.signature.fullName .. "`",
+					context = member.signature.modifier .. " `" .. member.signature.longName .. "`",
 					location = expressionAST.location,
 				}
 			end
@@ -1188,13 +1208,14 @@ local function compileExpression(expressionAST, scope, context)
 				Report.BANG_MISMATCH {
 					given = member.signature.bang and "without a `!`" or "with a `!`",
 					expects = member.signature.bang and "a `!` action" or " apure function",
-					fullName = member.signature.fullName,
+					fullName = member.signature.longName,
 					location = expressionAST.location,
+					modifier = member.signature.modifier,
 					signatureLocation = member.definitionLocation,
 				}
 			elseif member.signature.bang and not context.canUseBang then
 				Report.BANG_NOT_ALLOWED {
-					context = method.signature.modifier .. " `" .. method.signature.fullName .. "`",
+					context = member.signature.modifier .. " `" .. member.signature.longName .. "`",
 					location = expressionAST.location,
 				}
 			end
@@ -1395,6 +1416,11 @@ local function compileStatement(statementAST, scope, context)
 
 		local c, outs, i = compileExpression(statementAST.expression, scope, context)
 		return c, scope
+	elseif statementAST.tag == "assign-statement" then
+		local code = {}
+		local rhsCode, rhsResults = compileExpression(statement.value)
+		table.insert(code, rhsCode)
+
 	elseif statementAST.tag == "if-statement" then
 		local code = {}
 		local conditionCode, conditions = compileExpression(statementAST.condition, scope, context)
@@ -2217,7 +2243,7 @@ local function semanticsSmol(sources, main)
 							else
 								Report.FUNCTION_DOESNT_RETURN {
 									modifier = f.signature.modifier,
-									name = f.signature.name,
+									name = f.signature.memberName,
 									returns = table.concat(table.map(showTypeKind, f.signature.returnTypes), ", "),
 									location = f.definitionLocation,
 								}

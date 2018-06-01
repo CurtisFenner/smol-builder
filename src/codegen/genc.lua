@@ -658,7 +658,7 @@ local function generateStatement(statement, program, info)
 		local lhs = localName(statement.destination.name)
 		local rhs = "ALLOCATE(smol_Boolean_T)"
 		program:assign(lhs, rhs)
-		program:assign(lhs .. "->value", statement.boolean and 1 or 0)
+		program:assign(lhs .. "->value", statement.boolean and "1" or "0")
 		return
 	elseif statement.tag == "field" then
 		local lhs = localName(statement.destination.name)
