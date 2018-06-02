@@ -22,13 +22,14 @@ REGISTER_TYPE("Token", recordType {
 REGISTER_TYPE("Semantics", recordType {
 	compounds = listType(recordType {
 		tag = choiceType(constantType("union-definition"), constantType("class-definition")),
-		fieldMap = mapType("string", recordType {
+		_fieldMap = mapType("string", recordType {
 			name = "string",
 			type = "TypeKind",
 		}),
 		constraintArguments = listType(recordType {
 			name = "string",
-			index = "integer",
+			concerningIndex = "integer",
+			constraintListIndex = "integer",
 			constraint = "ConstraintKind",
 		}),
 		fullName = "string",
@@ -41,12 +42,13 @@ REGISTER_TYPE("Semantics", recordType {
 REGISTER_TYPE("InterfaceIR", recordType {
 	tag = constantType "interface-definition",
 	fullName = "string",
-	functionMap = mapType("string", recordType {
+	_functionMap = mapType("string", recordType {
 		signature = "Signature",
 	}),
 	constraintArguments = listType(recordType {
 		name = "string",
-		index = "integer",
+		concerningIndex = "integer",
+		constraintListIndex = "integer",
 		constraint = "ConstraintKind",
 	}),
 })
@@ -259,6 +261,7 @@ EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
 	tag = constantType "match",
 	base = "VariableIR",
 	cases = listType(recordType {
+		variable = "VariableIR",
 		variant = "string",
 		statement = "StatementIR",
 	}),
@@ -299,7 +302,7 @@ REGISTER_TYPE("VTableIR", choiceType(
 		tag = constantType "concrete-vtable",
 		interface = "ConstraintKind",
 		concrete = "TypeKind",
-		arguments = mapType("string", listType "VTableIR"),
+		arguments = listType "VTableIR",
 	}
 ))
 

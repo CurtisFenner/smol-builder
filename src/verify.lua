@@ -753,7 +753,7 @@ local function verifyStatement(statement, scope, semantics)
 
 			-- Remember whether or not the condition was true when we started
 			-- evaluating it
-			local snappedCondition = addSnapshot(scope, condition, statement.base.location)
+			local snappedCondition = addSnapshot(scope, condition)
 
 			-- Add variant predicate
 			addPredicate(subscope, condition)
@@ -939,7 +939,7 @@ return function(semantics)
 	for _, c in ipairs(semantics.compounds) do
 		assertis(c, recordType {
 			tag = choiceType(constantType("union-definition"), constantType("class-definition")),
-			fieldMap = mapType("string", recordType {
+			_fieldMap = mapType("string", recordType {
 				name = "string",
 				type = "TypeKind",
 			}),
@@ -947,7 +947,8 @@ return function(semantics)
 		})
 		assertis(c.constraintArguments, listType(recordType {
 			name = "string",
-			index = "integer",
+			concerningIndex = "integer",
+			constraintListIndex = "integer",
 			constraint = "ConstraintKind",
 		}))
 	end

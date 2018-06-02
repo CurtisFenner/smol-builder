@@ -269,6 +269,10 @@ if mode ~= "-" then
 					"-Wall",
 					"-Wextra",
 					"-Wconversion",
+
+					-- Only show one error
+					"-Wfatal-errors",
+
 					-- Disable unhelpful warnings
 					"-Wno-unused-parameter",
 					"-Wno-unused-but-set-variable",

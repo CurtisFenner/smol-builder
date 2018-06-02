@@ -298,14 +298,14 @@ end
 function Report.TYPE_MISMATCH(p)
 	quit(
 		"The " .. p.purpose,
-		" should be ",
+		" expects a value of type `",
 		p.expected,
-		" as defined ",
+		"` as defined ",
 		p.expectedLocation,
 		"\nHowever, the " .. p.purpose,
-		" was ",
+		" was `",
 		p.given,
-		" ",
+		"` ",
 		p.givenLocation
 	)
 end
@@ -502,6 +502,12 @@ function Report.UNKNOWN_OPERATOR_USED(p)
 end
 
 function Report.VARIANT_USED_TWICE(p)
+	assertis(p, recordType {
+		variant = "string",
+		firstLocation = "Location",
+		secondLocation = "Location",
+	})
+
 	quit(
 		"You use the variant `case ",
 		p.variant,

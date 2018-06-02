@@ -1,16 +1,16 @@
 package test;
 
-interface Makeable[#T] {
+interface MakerOf[#T] {
 	static make() #T;
 }
 
-class Foo is Makeable[Foo] {
+class Foo is MakerOf[Foo] {
 	static make() Foo {
 		return new();
 	}
 }
 
-class Box[#T | #T is Makeable[#T]] is Makeable[Box[#T]] {
+class Box[#T | #T is MakerOf[#T]] is MakerOf[Box[#T]] {
 	var thing #T;
 
 	static make() Box[#T] {
@@ -20,6 +20,7 @@ class Box[#T | #T is Makeable[#T]] is Makeable[Box[#T]] {
 
 class Test {
 	static main() Unit {
+		var n Box[Foo] = Box[Foo].make();
 	}
 }
 

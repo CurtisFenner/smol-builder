@@ -45,6 +45,21 @@ local function showConstraintKind(c)
 	error "unknown ConstraintKind tag"
 end
 
+-- RETURNS a description of the given Signature as a string of Smol code
+local function showSignature(s)
+	assertis(s, "Signature")
+
+	local parameters = {}
+	for _, p in ipairs(s.parameters) do
+		table.insert(parameters, showTypeKind(p.type))
+	end
+	local parameterList = "(" .. table.concat(parameters, ", ") .. ") "
+
+	local returnTypes = table.map(showTypeKind, s.returnTypes)
+	local returnList = table.concat(returnTypes, ", ")
+	return s.modifier .. " " .. s.memberName .. parameterList .. returnList
+end
+
 -- RETURNS whether or not two given types are the same
 local function areTypesEqual(a, b)
 	assertis(a, "TypeKind")
@@ -462,6 +477,7 @@ return {
 	assertionExprString = assertionExprString,
 	showTypeKind = showTypeKind,
 	showConstraintKind = showConstraintKind,
+	showSignature = showSignature,
 
 	typeOfAssertion = typeOfAssertion,
 
@@ -474,6 +490,7 @@ return {
 	builtinDefinitions = {
 		-- Boolean
 		Boolean = {
+			isBuiltIn = true,
 			tag = "class-definition",
 			constraintArguments = {},
 			fieldMap = {},
@@ -614,6 +631,7 @@ return {
 
 		-- Int
 		Int = {
+			isBuiltIn = true,
 			tag = "class-definition",
 			constraintArguments = {},
 
@@ -715,6 +733,7 @@ return {
 
 		-- String
 		String = {
+			isBuiltIn = true,
 			tag = "class-definition",
 			constraintArguments = {},
 			fieldMap = {},

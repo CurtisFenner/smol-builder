@@ -10,7 +10,11 @@ local BUILTIN_NAME_MAP = {
 
 --------------------------------------------------------------------------------
 
+
+--------------------------------------------------------------------------------
+
 local FOREIGN_IMPLEMENTATION = {}
+
 
 FOREIGN_IMPLEMENTATION["core:ASCII.formatInt"] = [[
 	smol_String_T* out1;
@@ -173,6 +177,7 @@ function CProgram.new()
 
 	-- Initialize root information
 	instance._tupleMap = {}
+	instance._closureMap = {}
 
 	instance.preamble = instance._program:section()
 
@@ -196,6 +201,35 @@ end
 -- RETURNS this program's text as a string
 function CProgram:serialize()
 	return self._program:serialize()
+end
+
+-- RETURNS a C type name (not a pointer)
+function CProgram:getClosure(rt, pts)
+	if self ~= self._root then
+		return self._root:getClosure(rt, pts)
+	end
+
+	assertis(rt, "string")
+	assertis(pts, listType "string")
+
+	local parameters = {"void*", table.unpack(pts)}
+
+	local fptr = rt .. " (*func)(" .. table.concat(parameters, ", ") .. ")"
+
+	if self._closureMap[fptr] then
+		return self._closureMap[fptr]
+	end
+
+	local name = "_closure_" .. #table.keys(self._closureMap) .. "_T"
+	self._closureMap[fptr] = name
+
+	self:defineStruct(name, {
+		{name = "data", type = "void*"},
+
+		-- XXX: fix this
+		{name = fptr, type = ""},
+	})
+	return name
 end
 
 -- RETURNS nothing
@@ -239,7 +273,7 @@ function CProgram:getTuple(fields)
 	end
 
 	-- Generate a unique name
-	local name = "_tuple_" .. #table.keys(self._tupleMap) .. "_T"
+	local name = "_tuple_" .. #table.keys(self._tupleMap) .. "z" .. id:gsub("[^a-zA-Z0-9]+", "_") .. "z_T"
 	self._tupleMap[id] = name
 
 	-- Create forward declaration
@@ -262,7 +296,7 @@ end
 -- MODIFIES this
 function CProgram:defineFunction(name, returns, parameters)
 	if self ~= self._root then
-		return self._root:getTuple(name, returns, parameters)
+		return self._root:defineFunction(name, returns, parameters)
 	end
 
 	assertis(name, "string")
@@ -348,6 +382,7 @@ end
 
 local CONSTRAINT_PARAMETER = "cons"
 local TAG_FIELD = "tag"
+local TAG_TYPE = "uint32_t"
 
 -- RETURNS a string representing a C identifier for a Smol variable or parameter
 local function localName(name)
@@ -480,32 +515,105 @@ local function generateVTable(a, program, info)
 	assertis(program, "object")
 	assertis(info, recordType {
 		constraints = mapType("string", recordType {
-			members = listType("string"),
+			members = listType "Signature",
 		}),
 		parameterIndices = mapType("string", "integer"),
+		functionSignatures = mapType("string", "Signature")
 	})
 
 	if a.tag == "parameter-vtable" then
+		program:comment("<parameter-vtable>")
 		local tmp = uniqueTmp() .. "_vtable"
 		local tmpType = cVTableType(a.interface)
 		local i = info.parameterIndices[a.name]
 		program:assign(tmpType .. " " .. tmp, CONSTRAINT_PARAMETER .. "->_" .. i)
+		program:comment("</parameter-vtable>")
 		return tmp, tmpType
 	elseif a.tag == "concrete-vtable" then
+		program:comment("<concrete-vtable>")
 		local tmp = uniqueTmp() .. "_vtable"
 		local tmpType = cVTableType(a.interface)
 
-		error "TODO: collect arguments to pass to closure building"
-		error "TODO: get list of all members to make closures of"
+		program:write(tmpType .. " " .. tmp .. ";")
 
-		for name in pairs(interface.functionMap) do
+		local fullName = a.interface.packageName .. ":" .. a.interface.definitionName
+		for _, f in ipairs(info.constraints[fullName].members) do
 			local closureName = uniqueTmp() .. "_closure"
-			local closureType = "CLOSURE_TYPE(" .. rt .. ", " .. table.concat(pt, ", ") .. ")"
-			local needed = error "TODO: collect arguments to pass to closure"
-			local fptr = staticFunctionName(a.concrete.packageName .. ":" .. a.concrete.definitionName .. "." .. name)
-			program:assign(closureType .. " " .. closureName, "(" .. closureType .. "){" .. needed .. ", " .. fptr .. "}")
-			program:assign(tmp .. "." .. vtableMemberName(name), closure)
+
+			-- Get type parameters and return type
+			local rts = table.map(cType, f.returnTypes)
+			local rTuple = program:getTuple(rts)
+			local pt = {}
+			for _, p in ipairs(f.parameters) do
+				table.insert(pt, cType(p.type))
+			end
+
+			-- The C argument types of the static implementation may differ
+			-- from the interface: the interface may use generics where the
+			-- implementation puts statics.
+			-- As long as the representation of the arguments are the same, this
+			-- is OK.
+			-- NOTE: C guarantees that all pointers-to-structs have comptabile
+			-- representations.
+			local closureType = program:getClosure(rTuple, pt)
+
+			-- Collect the arguments to store in the closure's state
+			local neededVariables = {}
+			local neededTypes = {}
+			for _, a in ipairs(a.arguments) do
+				local n, t = generateVTable(a, program, info)
+				table.insert(neededVariables, n)
+				table.insert(neededTypes, t)
+			end
+
+			local needed
+			if #neededVariables == 0 then
+				needed = "NULL"
+			else
+				local neededTuple = program:getTuple(neededTypes)
+				local neededName = uniqueTmp() .. "_closure_state"
+				program:assign(neededTuple .. "* " .. neededName, "ALLOCATE(" .. neededTuple .. ")")
+				for i, n in ipairs(neededVariables) do
+					program:assign(neededName .. "->_" .. i, n)
+				end
+				needed = neededName
+			end
+
+			local concreteFunctionName = a.concrete.packageName .. ":" .. a.concrete.definitionName .. "." .. f.memberName
+			local fptr = staticFunctionName(concreteFunctionName)
+
+			-- Generate wrapper
+			local concreteSignature = info.functionSignatures[concreteFunctionName]
+			local wrapperName = uniqueTmp() .. "_" .. fptr
+			local wrapperParameters = {{name = "data", type = "void*"}}
+			local arguments = {"data"}
+			assert(#pt == #concreteSignature.parameters)
+			for i, p in ipairs(pt) do
+				table.insert(wrapperParameters, {
+					name = "a" .. i,
+					type = p,
+				})
+				table.insert(arguments, "(" .. cType(concreteSignature.parameters[i].type) .. ")a" .. i)
+			end
+			local wrapperBody = program:defineFunction(wrapperName, rTuple, wrapperParameters)
+			wrapperBody:comment("Wrapper for `" .. concreteFunctionName .. "` impl `" .. common.showConstraintKind(a.interface))
+			wrapperBody:comment(common.showSignature(concreteSignature))
+			wrapperBody:comment(common.showSignature(f))
+			local rawTupleType = program:getTuple(table.map(cType, concreteSignature.returnTypes))
+			wrapperBody:write(rawTupleType .. " out = " .. fptr .. "(" .. table.concat(arguments, ", ") .. ");")
+			wrapperBody:write(program:getTuple(rts) .. " ret;")
+			for i, r in ipairs(rts) do
+				wrapperBody:assign("ret._" .. i, "(" .. r .. ")out._" .. i)
+			end
+			wrapperBody:write("return ret;")
+
+			program:write(closureType .. " " .. closureName .. ";")
+			program:assign(closureName .. ".data", needed)
+			program:assign(closureName .. ".func", wrapperName)
+			program:assign(tmp .. "." .. vtableMemberName(f.memberName), closureName)
 		end
+		program:comment("</concrete-vtable>")
+		return tmp, tmpType
 	end
 	error("unknown VTableIR tag `" .. a.tag .. "`")
 end
@@ -517,7 +625,7 @@ local function generateStatement(statement, program, info)
 	assertis(program, "object")
 	assertis(info, recordType {
 		constraints = mapType("string", recordType {
-			members = listType("string"),
+			members = listType "Signature",
 		}),
 		unions = mapType("string", recordType {
 			tags = mapType("string", "integer"),
@@ -616,21 +724,31 @@ local function generateStatement(statement, program, info)
 			table.insert(cArguments, "&" .. cTmp)
 		end
 		
-		-- Add regular value arguments
-		for _, a in ipairs(statement.arguments) do
-			table.insert(cArguments, localName(a.name))
-		end
+		-- Get static form of signature
+		local staticSignature = info.functionSignatures[statement.signature.longName]
 
+		-- Add regular value arguments
+		for i, a in ipairs(statement.arguments) do
+			-- An explicit cast is necessary if the signature statically takes
+			-- generics
+			local cast = "(" .. cType(staticSignature.parameters[i].type) .. ")"
+			table.insert(cArguments, cast .. localName(a.name))
+		end
+		
 		-- Invoke the function
-		local cName = staticFunctionName(statement.signature.longName)
-		local tmpType = program:getTuple(table.map(cType, statement.signature.returnTypes))
+		program:comment("static-call " .. common.showSignature(statement.signature))
+		local tmpType = program:getTuple(table.map(cType, staticSignature.returnTypes))
 		local tmp = uniqueTmp()
+		local cName = staticFunctionName(statement.signature.longName)
 		local invocation = cName .. "(" .. table.concat(cArguments, ", ") .. ")"
 		program:assign(tmpType .. " " .. tmp, invocation)
 
 		-- Write to destinations
 		for i, d in ipairs(statement.destinations) do
-			program:assign(localName(d.name), tmp .. "._" .. i)
+			-- An explicit cast is necessary if the signature statically returns
+			-- generics
+			local cast = "(" .. cType(d.type) .. ")"
+			program:assign(localName(d.name), cast .. tmp .. "._" .. i)
 		end
 		return
 	elseif statement.tag == "dynamic-call" then
@@ -642,11 +760,16 @@ local function generateStatement(statement, program, info)
 			table.insert(cArguments, localName(a.name))
 		end
 
+		if #cArguments == 0 then
+			program:comment("Problematic 0 argument call!")
+		end
+
 		-- Invoke the function
 		local tmpType = program:getTuple(table.map(cType, statement.signature.returnTypes))
 		local tmp = uniqueTmp()
 		local closure = vName .. "." .. vtableMemberName(statement.signature.memberName)
-		local invocation = "CLOSURE_CALL(" .. closure .. ", " .. table.concat(cArguments, ", ") .. ")"
+		table.insert(cArguments, 1, closure .. ".data")
+		local invocation = closure .. ".func(" .. table.concat(cArguments, ", ") .. ")"
 		program:assign(tmpType .. " " .. tmp, invocation)
 
 		-- Write to destinations
@@ -669,15 +792,44 @@ local function generateStatement(statement, program, info)
 		local lhs = localName(statement.destination.name)
 		program:assign(lhs, "NULL")
 		return
+	elseif statement.tag == "isa" then
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(smol_Boolean_T)"
+		local union = info.unions[statement.base.type.packageName .. ":" .. statement.base.type.definitionName]
+		local getTag = localName(statement.base.name) .. "->" .. TAG_FIELD
+		local value = getTag .. " == " .. union.tags[statement.variant]
+		program:assign(lhs, rhs)
+		program:assign(lhs .. "->value", value)
+		return
 	elseif statement.tag == "variant" then
 		local lhs = localName(statement.destination.name)
 		local rhs = localName(statement.base.name) .. "->" .. unionFieldName(statement.variant)
 		program:assign(lhs, rhs)
 		return
 	elseif statement.tag == "match" then
-		error "TODO! match"
-	elseif statement.tag == "isa" then
-		error "TODO! isa"
+		local tagVar = uniqueTmp() .. "tag"
+		local getTag = localName(statement.base.name) .. "->" .. TAG_FIELD
+		program:assign(TAG_TYPE .. " " .. tagVar, getTag)
+		local union = info.unions[statement.base.type.packageName .. ":" .. statement.base.type.definitionName]
+		for i, case in ipairs(statement.cases) do
+			local tagValue = union.tags[case.variant]
+			if i ~= 1 then
+				program:write("else")
+			end
+			program:write("if (" .. tagVar .. " == " .. tagValue .. ") {")
+			local body = program:section(1)
+			local caseType = cType(case.variable.type)
+			local caseName = localName(case.variable.name)
+			local caseValue = localName(statement.base.name) .. "->" .. unionFieldName(case.variant)
+			body:assign(caseType .. " " .. caseName, caseValue)
+			generateStatement(case.statement, body, info)
+			program:write("}")
+		end
+		assert(#statement.cases ~= 0)
+		program:write("else {")
+		program:write("\tassert(0);")
+		program:write("}")
+		return
 	end
 
 	error("unknown statement tag `" .. statement.tag .. "`")
@@ -712,15 +864,6 @@ return function(semantics, arguments)
 
 #define PANIC(message) do { printf(message "\n"); exit(1); } while (0)
 
-// NOTE: closures must take at least one argument
-#define CLOSURE_TYPE(returnType, ...)           \
-	struct {                                    \
-		void* data;                             \
-		returnType (*func)(void*, __VA_ARGS__); \
-	}
-
-#define CLOSURE_CALL(closure, ...) (closure.func(closure.data, __VA_ARGS__))
-
 typedef struct {
 	void* instance;
 	int (*eq)(void*, void*);
@@ -752,6 +895,7 @@ typedef struct {
 	local globalInfo = {
 		constraints = {},
 		unions = {},
+		functionSignatures = {},
 	}
 
 	-- Generate a vtable struct for each interface
@@ -760,7 +904,7 @@ typedef struct {
 		local structName = interfaceStructName(interface.fullName)
 		local fields = {{type = "char", name = "_"}}
 		local memberList = {}
-		for _, func in pairs(interface.functionMap) do
+		for _, func in pairs(interface._functionMap) do
 			local signature = func.signature
 
 			-- Get return types
@@ -775,18 +919,19 @@ typedef struct {
 			for _, p in ipairs(signature.parameters) do
 				table.insert(pt, cType(p.type))
 			end
-			if #pt == 0 then
-				pt = {"void*"}
-			end
 
-			table.insert(memberList, signature.memberName)
+			local fieldType = code:getClosure(code:getTuple(rt), pt)
+
+			table.insert(memberList, signature)
 			table.insert(fields, {
 				name = vtableMemberName(signature.memberName),
-				type = "CLOSURE_TYPE(" .. code:getTuple(rt) .. ", " .. table.concat(pt, ", ") .. ")",
+				type = fieldType,
 			})
 		end
 
-		table.sort(memberList)
+		table.sort(memberList, function(a, b)
+			return a.memberName < b.memberName
+		end)
 		table.sort(fields, function(a, b)
 			return a.name < b.name
 		end)
@@ -804,7 +949,7 @@ typedef struct {
 			local fields = {{type = "void*", name = "foreign"}}
 
 			-- Generate all value fields
-			for _, field in pairs(class.fieldMap) do
+			for _, field in pairs(class._fieldMap) do
 				table.insert(fields, {
 					name = classFieldName(field.name),
 					type = cType(field.type),
@@ -822,14 +967,14 @@ typedef struct {
 			globalInfo.unions[union.fullName] = {tags = {}}
 
 			-- TODO: Generate a union rather than a struct
-			local fields = {{type = "uint32_t", name = TAG_FIELD}}
+			local fields = {{type = TAG_TYPE, name = TAG_FIELD}}
 
 			-- Generate tag
-			assert(#table.keys(union.fieldMap) < 2^16, "TODO: Too many fields!")
+			assert(#table.keys(union._fieldMap) < 2^16, "TODO: Too many fields!")
 
 			-- Generate all value fields
 			local fieldList = {}
-			for _, field in pairs(union.fieldMap) do
+			for _, field in pairs(union._fieldMap) do
 				table.insert(fieldList, field.name)
 				table.insert(fields, {
 					type = cType(field.type),
@@ -849,6 +994,11 @@ typedef struct {
 			-- Create VTable struct
 			code:defineStruct(structName, fields)
 		end
+	end
+
+	-- Save the signatures of all functions
+	for _, func in ipairs(semantics.functions) do
+		globalInfo.functionSignatures[func.signature.longName] = func.signature
 	end
 
 	-- Generate the body for each method and static
@@ -886,6 +1036,7 @@ typedef struct {
 
 		-- Generate the function prototype
 		local body = code:defineFunction(cFunctionName, cOutType, cParameters)
+		body:comment(common.showSignature(func.signature))
 
 		-- Generate function body
 		if not func.signature.foreign then
