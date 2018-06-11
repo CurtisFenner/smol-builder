@@ -538,6 +538,10 @@ function Report.INEXHAUSTIVE_MATCH(p)
 	)
 end
 
+function Report.CANNOT_USE_RETURN(p)
+	quit("The `return` expression cannot be used ", p.location)
+end
+
 function Report.RETURN_USED_IN_IMPLEMENTATION(p)
 	quit(
 		"The `return` keyword can only be used as an expression in",

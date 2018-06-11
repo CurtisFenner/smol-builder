@@ -124,14 +124,11 @@ REGISTER_TYPE("AbstractStatementIR", recordType {
 
 EXTEND_TYPE("AssumeSt", "AbstractStatementIR", recordType {
 	tag = constantType "assume",
-	body = "nil",
 	variable = "VariableIR",
-	location = "Location",
 })
 
 EXTEND_TYPE("VerifySt", "AbstractStatementIR", recordType {
 	tag = constantType "verify",
-	body = "nil",
 	variable = "VariableIR",
 	checkLocation = "Location",
 	conditionLocation = "Location",

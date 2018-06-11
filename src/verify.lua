@@ -81,6 +81,7 @@ REGISTER_TYPE("Assertion", choiceType(
 		tag = constantType "field",
 		base = "Assertion",
 		fieldName = "string",
+		fieldType = "TypeKind",
 		definition = "nil",
 	},
 	recordType {
@@ -99,6 +100,7 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "variant",
 		variantName = "string",
+		variantType = "TypeKind",
 		base = "Assertion",
 	},
 	recordType {
@@ -124,15 +126,24 @@ local function andAssertion(a, b)
 	assertis(a, "Assertion")
 	assertis(b, "Assertion")
 
-	local BUILTIN_LOC = {
-		begins = "builtin",
-		ends = "builtin",
-	}
-
 	local p = freeze {
 		tag = "fn",
 		arguments = {a, b},
 		signature = common.builtinDefinitions.Boolean.functionMap["and"].signature,
+		index = 1,
+	}
+	return p
+end
+
+-- RETURNS an Assertion representing a || b
+local function orAssertion(a, b)
+	assertis(a, "Assertion")
+	assertis(b, "Assertion")
+
+	local p = freeze {
+		tag = "fn",
+		arguments = {a, b},
+		signature = common.builtinDefinitions.Boolean.functionMap["or"].signature,
 		index = 1,
 	}
 	return p
@@ -368,9 +379,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
 			local newVariable = freeze {
 				type = action.destination.type,
-				location = action.destination.location,
 				name = newID,
-				description = action.destination.description,
 			}
 			local newV = variableAssertion(newVariable)
 
@@ -495,23 +504,13 @@ local function resultAssertion(statement, index)
 end
 
 -- RETURNS an Assertion
-local function fieldAssertion(statement)
-	assertis(statement, "FieldSt")
-
-	return freeze {
-		tag = "field",
-		fieldName = statement.name,
-		base = variableAssertion(statement.base),
-	}
-end
-
--- RETURNS an Assertion
 local function variantAssertion(statement)
 	assertis(statement, "VariantSt")
 
 	return freeze {
 		tag = "variant",
 		variantName = statement.variant,
+		variantType = statement.destination.type,
 		base = variableAssertion(statement.base),
 	}
 end
@@ -653,7 +652,12 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, VALUE_UNIT)
 		return
 	elseif statement.tag == "field" then
-		local assertion = fieldAssertion(statement)
+		local assertion = freeze {
+			tag = "field",
+			fieldName = statement.name,
+			fieldType = statement.destination.type,
+			base = variableAssertion(statement.base),
+		}
 		assignRaw(scope, statement.destination, assertion)
 		return
 	elseif statement.tag == "variant" then
@@ -698,6 +702,7 @@ local function verifyStatement(statement, scope, semantics)
 				tag = "field",
 				base = instance,
 				fieldName = fieldName,
+				fieldType = value.type,
 			}
 			assertis(assertion, "Assertion")
 			assertis(value, "VariableIR")
@@ -723,6 +728,7 @@ local function verifyStatement(statement, scope, semantics)
 		local extract = freeze {
 			tag = "variant",
 			variantName = statement.field,
+			variantType = statement.value.type,
 			base = variableAssertion(statement.destination),
 		}
 		assertis(extract, "Assertion")
@@ -736,6 +742,34 @@ local function verifyStatement(statement, scope, semantics)
 	elseif statement.tag == "match" then
 		local branches = {}
 
+		local tag = freeze {
+			tag = "gettag",
+			base = variableAssertion(statement.base),
+		}
+
+		local unionType = statement.base.type
+		local unionName = unionType.packageName .. ":" .. unionType.definitionName
+
+		local unionDefinition = table.findwith(semantics.compounds, "fullName", unionName)
+
+		-- TODO: communicate enum-finiteness to the theory somehow so that this
+		-- isn't necessary here
+		local possibleVariants = {}
+		for _, f in spairs(unionDefinition._fieldMap, tostring) do
+			table.insert(possibleVariants, freeze {
+				tag = "eq",
+				left = variantSymbol(statement.base.type, f.name),
+				right = tag,
+			})
+		end
+
+		local anyOf = possibleVariants[1]
+		for i = 2, #possibleVariants do
+			anyOf = orAssertion(anyOf, possibleVariants[i])
+		end
+		addPredicate(scope, anyOf)
+
+
 		-- Check each case
 		assert(#statement.cases > 0)
 		local posts = {}
@@ -744,10 +778,7 @@ local function verifyStatement(statement, scope, semantics)
 
 			local condition = freeze {
 				tag = "eq",
-				left = {
-					tag = "gettag",
-					base = variableAssertion(statement.base),
-				},
+				left = tag,
 				right = variantSymbol(statement.base.type, case.variant),
 			}
 
@@ -868,10 +899,7 @@ local function verifyStatement(statement, scope, semantics)
 			local arbitrary = freeze {
 				name = name,
 				type = statement.quantified,
-				location = statement.location,
-				description = false,
 			}
-			assertis(arbitrary, "VariableIR")
 
 			local subscope = scopeCopy(subscopePrime)
 			local inCode, instanceTruth = statement.instantiate(arbitrary)

@@ -241,7 +241,7 @@ local function m_scan(self, object)
 			tag = "field",
 			base = self:scan(object.base),
 			fieldName = object.fieldName,
-			definition = object.definition,
+			fieldType = object.fieldType,
 		}
 		self.relevant[shown] = real
 	elseif object.tag == "variant" then
@@ -249,7 +249,7 @@ local function m_scan(self, object)
 			tag = "variant",
 			base = self:scan(object.base),
 			variantName = object.variantName,
-			definition = object.definition,
+			variantType = object.variantType,
 		}
 		self.relevant[shown] = real
 	elseif object.tag == "gettag" then

@@ -467,6 +467,17 @@ local function sequenceSt(statements)
 	}
 end
 
+-- RETURNS a ProofSt that captures the given statement
+local function proofSt(statement)
+	assertis(statement, "StatementIR")
+
+	return {
+		tag = "proof",
+		body = statement,
+		returns = "no",
+	}
+end
+
 -- For vendUniqueIdentifier
 local _uniqueTick = 0
 
@@ -624,6 +635,8 @@ local function findConstraint(baseType, memberName, location, context)
 	return matching, matchingConstraint
 end
 
+local compilePredicate
+
 -- RETURNS StatementIR, out variables, impure boolean
 -- The StatementIR describes how to execute the statement such that the out
 -- variables are assigned with the evaluation.
@@ -635,7 +648,6 @@ local function compileExpression(expressionAST, scope, context)
 		tag = "string",
 	})
 	assertis(context, recordType {
-		returnTypes = listType "TypeKind",
 		canUseBang = "boolean",
 		proof = "boolean",
 		newType = choiceType(constantType(false), "TypeKind"),
@@ -763,7 +775,15 @@ local function compileExpression(expressionAST, scope, context)
 					location = expressionAST.location,
 				}
 			end
-			error("TODO: compileExpression return")
+
+			-- Get the variable "return"
+			if not scope:get("return") then
+				Report.CANNOT_USE_RETURN {
+					location = expressionAST.location,
+				}
+			end
+
+			return sequenceSt {}, {scope:get("return")}, false
 		end
 		error(show(expressionAST))
 	elseif expressionAST.tag == "field-access" then
@@ -840,7 +860,41 @@ local function compileExpression(expressionAST, scope, context)
 			-- Accessing a field on a union is only allowed when we know the
 			-- variant
 			assert(definition.tag == "union-definition")
-			print("TODO: Check that the variant is correct")
+
+			-- Assert that the union is of the right tag
+			local isaVariable = {
+				name = vendUniqueIdentifier(),
+				type = BOOLEAN_TYPE,
+			}
+			local proof = proofSt(sequenceSt {
+				{
+					tag = "local",
+					variable = isaVariable,
+					returns = "no",
+				},
+				{
+					tag = "isa",
+					base = bases[1],
+					destination = isaVariable,
+					returns = "no",
+					variant = expressionAST.field,
+				},
+				{
+					tag = "verify",
+					variable = isaVariable,
+					checkLocation = expressionAST.location,
+					conditionLocation = expressionAST.location,
+					reason = table.concat {
+						"the `",
+						showTypeKind(baseType),
+						"` union instance is a `",
+						expressionAST.field,
+						"`",
+					},
+					returns = "no",
+				},
+			})
+			table.insert(code, proof)
 
 			table.insert(code, {
 				tag = "variant",
@@ -1161,7 +1215,18 @@ local function compileExpression(expressionAST, scope, context)
 				returns = "no",
 			}
 			assertis(call, "DynamicCallSt")
+
+			-- Make the requires checks
+			for _, ast in ipairs(matching.signature.requiresASTs) do
+				error "TODO: requires for dynamic method"
+			end
+
 			table.insert(code, call)
+
+			-- Make the post condition assumes
+			for _, ast in ipairs(matching.signature.ensuresASTs) do
+				error "TODO: ensures for dynamic method"
+			end
 
 			return sequenceSt(code), destinations, expressionAST.bang
 		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
@@ -1177,12 +1242,12 @@ local function compileExpression(expressionAST, scope, context)
 
 			-- Get the member
 			local member
+			local substitutionMap = {}
 			if baseType.tag ~= "keyword-type" then
 				member = definition._functionMap[expressionAST.methodName]
 
 				-- Substitute generics
 				if member then
-					local substitutionMap = {}
 					for i, argument in ipairs(baseType.arguments) do
 						local name = definition.genericConstraintMap.order[i]
 						substitutionMap[name] = argument
@@ -1260,7 +1325,53 @@ local function compileExpression(expressionAST, scope, context)
 				returns = "no",
 			}
 			assertis(call, "StaticCallSt")
+
+			-- Create the context for requires/ensures
+			local proofContext = {
+				canUseBang = false,
+				proof = true,
+				definitionMap = context.definitionMap,
+
+				-- Type specific
+				newType = substituteGenerics(definition.kind, substitutionMap),
+				typeResolver = definition.resolver,
+				typeResolverContext = definition.resolverContext,
+				constraintMap = definition.genericConstraintMap.map,
+			}
+
+			-- Make arguments, this, and return the appropriate values for
+			-- requires/ensures
+			local proofScope = Map.new()
+			for i, p in ipairs(member.signature.parameters) do
+				proofScope = proofScope:with(p.name, arguments[i])
+			end
+
+			-- Verify the things needed by requires
+			for _, ast in ipairs(member.signature.requiresASTs) do
+				error "TODO: static method requires"
+			end
+
 			table.insert(code, call)
+
+			if #destinations == 1 then
+				-- return is allowed in ensures (but not in requires)
+				proofScope = proofScope:with("return", destinations[1])
+			end
+
+			-- Assume the things allowed via ensures
+			for _, ast in ipairs(member.signature.ensuresASTs) do
+				local preAssume, assumeVariable = compilePredicate(ast, proofScope, proofContext, "ensures")
+				table.insert(code, proofSt(sequenceSt {
+					preAssume,
+					{
+						tag = "assume",
+						variable = assumeVariable,
+						returns = "no",
+					}
+				}))
+
+			end
+
 			return sequenceSt(code), destinations, impure or member.signature.bang
 		end
 	elseif expressionAST.tag == "static-call" then
@@ -1445,18 +1556,130 @@ local function compileExpression(expressionAST, scope, context)
 				constraintArguments = constraintArguments,
 			}
 			assertis(call, "StaticCallSt")
+
+			-- Create the context for requires/ensures
+			local proofContext = {
+				canUseBang = false,
+				proof = true,
+				definitionMap = context.definitionMap,
+
+				-- Type specific
+				newType = substituteGenerics(definition.kind, substitutionMap),
+				typeResolver = definition.resolver,
+				typeResolverContext = definition.resolverContext,
+				constraintMap = definition.genericConstraintMap.map,
+			}
+
+			-- Make arguments/this the appropriate values for requires/ensures
+			local proofScope = Map.new()
+			for i, p in ipairs(member.signature.parameters) do
+				proofScope = proofScope:with(p.name, arguments[i])
+			end
+
+			-- Verify that the function's pre-conditions hold
+			for _, r in ipairs(member.signature.requiresASTs) do
+				error "TODO: requires"
+			end
+
 			table.insert(code, call)
+
+			if #destinations == 1 then
+				-- return is allowed in ensures (but not in requires)
+				proofScope = proofScope:with("return", destinations[1])
+			end
+
+			-- Assume that the function's post-conditions hold
+			for _, e in ipairs(member.signature.ensuresASTs) do
+				local preAssume, assumeVariable = compilePredicate(e, proofScope, proofContext, "ensures")
+				table.insert(code, proofSt(sequenceSt {
+					preAssume,
+					{
+						tag = "assume",
+						variable = assumeVariable,
+						returns = "no",
+					}
+				}))
+			end
 
 			return sequenceSt(code), destinations, impure or member.signature.bang
 		end
 		error "TODO"
 	elseif expressionAST.tag == "forall-expr" then
+		-- Check that quantifiers only appear in ghost contexts
 		if not context.proof then
 			Report.QUANTIFIER_USED_IN_IMPLEMENTATION {
 				quantifier = "forall",
 				location = expressionAST.location,
 			}
 		end
+
+		-- Check that the variable name is fresh
+		if scope:get(expressionAST.variable.name) then
+			Report.VARIABLE_DEFINED_TWICE {
+				name = expressionAST.variable.name,
+				first = scope:get(expressionAST.variable.name).definitionLocation,
+				second = expressionAST.variable.location,
+			}
+		end
+
+		-- Make a new boolean variable to hold the result of the quantified
+		-- statement
+		local resultVariable = {
+			name = vendUniqueIdentifier(),
+			type = BOOLEAN_TYPE,
+		}
+
+		-- Get the type quantified over
+		local variableType = context.typeResolver(expressionAST.variable.type, context.typeResolverContext)
+
+		-- RETURNS code to execute the instantiation, the truth result variable
+		-- REQUIRES v is a valid variable to instantiate on
+		local function instantiate(v)
+			assertis(v, "VariableIR")
+			assert(areTypesEqual(v.type, variableType))
+
+			assert(context.proof)
+			local boundScope = scope:with(expressionAST.variable.name, {
+				name = v.name,
+				type = v.type,
+				definitionLocation = expressionAST.variable.location,
+			})
+			local body, result = compilePredicate(expressionAST, boundScope, context, "forall")
+			return body, result
+		end
+
+		-- Instantiate once to ensure that the body is fine even if it is never
+		-- used
+		instantiate {
+			name = vendUniqueIdentifier(),
+			type = variableType,
+		}
+
+		local code = sequenceSt {
+			{
+				tag = "local",
+				variable = resultVariable,
+				returns = "no",
+			},
+			{
+				tag = "forall",
+				quantified = variableType,
+				instantiate = instantiate,
+
+				-- TODO: Is this necessary?
+				location = expressionAST.location,
+
+				destination = resultVariable,
+				returns = "no",
+
+				-- Identifies this forall from all others
+				-- NOTE: This MUST be DISTINCT for each re-compilation of this
+				-- expression, as happens with repeated calls of
+				-- ensures/requires
+				unique = vendUniqueIdentifier(),
+			},
+		}
+		return code, {resultVariable}, false
 	end
 
 	error("compileExpression: " .. expressionAST.tag)
@@ -1477,6 +1700,12 @@ local function compileStatement(statementAST, scope, context)
 		typeResolverContext = "object",
 		definitionMap = mapType("string", mapType("string", recordType {
 			_functionMap = mapType("string", recordType {}),
+		})),
+
+		constraintMap = mapType("string", listType(recordType {
+			constraint = "ConstraintKind",
+			name = "string",
+			location = "Location",
 		})),
 	})
 
@@ -1866,11 +2095,138 @@ local function compileStatement(statementAST, scope, context)
 
 		return sequenceSt(code), scope
 	elseif statementAST.tag == "assert-statement" then
-		print("TODO: assertStatement")
-		return sequenceSt {}, scope
+		local assertContext = {
+			-- Universal
+			definitionMap = context.definitionMap,
+
+			-- Contextual
+			canUseBang = false,
+			proof = true,
+			
+			-- These are irrelevant to expression compilation:
+			returnTypes = context.returnTypes,
+			makePostamble = function() end,
+			
+			-- Definition scope dependent
+			newType = context.newType,
+			typeResolver = context.typeResolver,
+			typeResolverContext = context.typeResolverContext,
+			constraintMap = context.constraintMap,
+		}
+		local expressionCode, results = compileExpression(statementAST.expression, scope, assertContext)
+
+		checkTypes {
+			given = results,
+			expected = {BOOLEAN_TYPE},
+			purpose = "assert condition",
+			givenLocation = statementAST.expression.location,
+			expectedLocation = statementAST.expression.location,
+		}
+
+		assert(#results == 1)
+		local code = {
+			tag = "proof",
+			body = sequenceSt {
+				expressionCode,
+				{
+					tag = "verify",
+					variable = results[1],
+					checkLocation = statementAST.expression.location,
+					conditionLocation = statementAST.expression.location,
+					reason = "the assertion",
+					returns = "no",
+				}
+			},
+			returns = "no",
+		}
+
+		return code, scope
 	end
 
 	error("compileStatement: " .. statementAST.tag)
+end
+
+-- RETURNS a StatementIR, Variable which executes the condition and assigns the
+-- result to returned Boolean variable (which is true, vacuously, when the
+-- `when` conditions don't hold)
+function compilePredicate(ast, callScope, proofContext, purpose)
+	assertis(ast, recordType {
+		condition = "ASTExpression",
+		whens = listType "ASTExpression",
+	})
+	assertis(callScope, "object")
+	assertis(proofContext, recordType {
+		proof = constantType(true),
+		canUseBang = constantType(false),
+		definitionMap = mapType("string", "object"),
+
+		-- Container specific
+		typeResolver = "function",
+		definitionMap = mapType("string", "object"),
+		constraintMap = mapType("string", listType "object"),
+	})
+	assertis(purpose, "string")
+
+	local resultVariable = {
+		name = vendUniqueIdentifier(),
+		type = BOOLEAN_TYPE,
+	}
+
+	local evalCode, insideResults = compileExpression(ast.condition, callScope, proofContext)
+	checkTypes {
+		given = insideResults,
+		expected = {BOOLEAN_TYPE},
+		purpose = purpose .. " condition",
+		givenLocation = ast.condition.location,
+		expectedLocation = ast.condition.location,
+	}
+
+	-- Create assumes
+	evalCode = sequenceSt {
+		evalCode,
+		{
+			tag = "assign",
+			source = insideResults[1],
+			destination = resultVariable,
+			returns = "no",
+		}
+	}
+
+	-- Wrap assumes in necessary when conditions
+	for i = #ast.whens, 1, -1 do
+		local whenCode, whenResults = compileExpression(ast.whens[i], callScope, proofContext)
+		checkTypes {
+			given = whenResults,
+			expected = {BOOLEAN_TYPE},
+			purpose = purpose .. " when condition",
+			givenLocation = ast.whens[i].location,
+			expectedLocation = ast.whens[i].location,
+		}
+
+		-- Only run the ensures conditionally
+		evalCode = sequenceSt {
+			whenCode,
+			{
+				tag = "if",
+				condition = whenResults[1],
+				bodyThen = evalCode,
+				bodyElse = sequenceSt {},
+				returns = "no",
+			}
+		}
+	end
+
+	local code = sequenceSt {
+		{
+			tag = "boolean",
+			boolean = true,
+			destination = resultVariable,
+			returns = "no",
+		},
+		evalCode,
+	}
+
+	return code, resultVariable
 end
 
 --------------------------------------------------------------------------------
@@ -2452,6 +2808,17 @@ local function semanticsSmol(sources, main)
 						typeResolverContext = definition.resolverContext,
 						definitionMap = definitionMap,
 					}
+				
+					local proofContext = {
+						canUseBang = false,
+						proof = true,
+						newType = context.newType,
+
+						constraintMap = context.constraintMap,
+						typeResolver = context.typeResolver,
+						typeResolverContext = context.typeResolverContext,
+						definitionMap = context.definitionMap,
+					}
 
 					-- Create the initial (argument) scope
 					local scope = Map.new()
@@ -2464,8 +2831,23 @@ local function semanticsSmol(sources, main)
 						})
 					end
 
-					-- TODO: Compile requires
-					local preamble = sequenceSt {}
+					-- Compile each requires to an assume
+					local requiresContext = {
+					}
+					local preambleList = {}
+					for _, r in ipairs(f.signature.requiresASTs) do
+						local proofScope = scope
+						local preAssume, assumeVariable = compilePredicate(r, proofScope, proofContext, "requires")
+						table.insert(preambleList, preAssume)
+						table.insert(preambleList, {
+							tag = "assume",
+							variable = assumeVariable,
+							returns = "no",
+						})
+					end
+
+					-- The preamble is only executed statically, not dynamically
+					local preamble = proofSt(sequenceSt(preambleList))
 
 					if not f.signature.foreign then
 						-- Compile the body

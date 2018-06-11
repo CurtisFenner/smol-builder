@@ -1,0 +1,11 @@
+package test;
+
+class Test {
+	static foo(n Int) Unit
+	requires forall (n Int) true {
+	}
+
+	static main() Unit {
+		
+	}
+}

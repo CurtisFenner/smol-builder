@@ -673,14 +673,18 @@ local parsers = {
 		{"_", K_ROUND_OPEN, "`(` after `forall`"},
 		{"variable", parser.named "variable", "variable after `forall (`"},
 		{"_", K_ROUND_CLOSE, "`)` after variable"},
-		{"predicate", parser.named "expression", "predicate expression"},
+		{"condition", parser.named "expression", "predicate expression"},
 		{
-			"when",
-			parser.optional(parser.composite {
-				tag = "forall-when",
-				{"_", K_WHEN},
-				{"#e", parser.named "expression", "expression"},
-			}),
+			"whens",
+			parserOtherwise(
+				parser.optional(parser.composite {
+					tag = "forall-when",
+					location = false,
+					{"_", K_WHEN},
+					{"#when", parser.query "expression,1+", "an expression"},
+				}),
+				{}
+			),
 		}
 	},
 
