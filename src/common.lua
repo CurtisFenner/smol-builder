@@ -745,6 +745,15 @@ local BUILTIN_DEFINITIONS = {
 	},
 }
 
+for _, d in pairs(BUILTIN_DEFINITIONS) do
+	d.resolverContext = {
+		selfAllowed = false,
+		generics = {},
+		checkConstraints = true,
+		template = false,
+	}
+end
+
 --------------------------------------------------------------------------------
 
 return {

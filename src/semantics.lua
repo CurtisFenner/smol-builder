@@ -219,6 +219,7 @@ local function makeDefinitionASTResolver(info, definitionMap)
 			checkConstraints = "boolean",
 
 			generics = "object",
+			template = choiceType(constantType(false), mapType("string", "TypeKind")),
 		})
 		if context.checkConstraints then
 			assertis(context.generics, recordType {
@@ -248,6 +249,12 @@ local function makeDefinitionASTResolver(info, definitionMap)
 						name = ast.name,
 						location = ast.location,
 					}
+				end
+
+				-- Get from the template map
+				if context.template then
+					assert(context.template[ast.name])
+					return context.template[ast.name]
 				end
 			else
 				if not context.generics[ast.name] then
@@ -589,7 +596,8 @@ local function findConstraint(baseType, memberName, location, context)
 		})),
 	})
 
-	local info = context.constraintMap[baseType.tag == "generic-type" and baseType.name or "Self"]
+	local lookup = baseType.tag == "generic-type" and baseType.name or "Self"
+	local info = context.constraintMap[lookup]
 	assertis(info, listType(recordType {constraint = "ConstraintKind"}))
 
 	local matching = false
@@ -1159,7 +1167,7 @@ local function compileExpression(expressionAST, scope, context)
 		if baseType.tag == "generic-type" or baseType.tag == "self-type" then
 			-- Get a list of constraints associated with this base type
 			if baseType.tag == "self-type" then
-				assert(context.genericMap.self)
+				assert(context.genericMap.Self)
 			end
 
 			-- Find the matching method
@@ -1335,8 +1343,10 @@ local function compileExpression(expressionAST, scope, context)
 				-- Type specific
 				newType = substituteGenerics(definition.kind, substitutionMap),
 				typeResolver = definition.resolver,
-				typeResolverContext = definition.resolverContext,
-				constraintMap = definition.genericConstraintMap.map,
+
+				-- Use template instantiation: their generics will NOT appear
+				typeResolverContext = table.with(definition.resolverContext, "template", substitutionMap),
+				constraintMap = context.constraintMap,
 			}
 
 			-- Make arguments, this, and return the appropriate values for
@@ -1347,8 +1357,19 @@ local function compileExpression(expressionAST, scope, context)
 			end
 
 			-- Verify the things needed by requires
-			for _, ast in ipairs(member.signature.requiresASTs) do
-				error "TODO: static method requires"
+			for i, ast in ipairs(member.signature.requiresASTs) do
+				local preVerify, verifyVariable = compilePredicate(ast, proofScope, proofContext, "requires")
+				table.insert(code, proofSt(sequenceSt {
+					preVerify,
+					{
+						tag = "verify",
+						variable = verifyVariable,
+						checkLocation = expressionAST.location,
+						conditionLocation = ast.location,
+						reason = "the " .. string.ordinal(i) .. " precondition",
+						returns = "no",
+					},
+				}))
 			end
 
 			table.insert(code, call)
@@ -1566,8 +1587,10 @@ local function compileExpression(expressionAST, scope, context)
 				-- Type specific
 				newType = substituteGenerics(definition.kind, substitutionMap),
 				typeResolver = definition.resolver,
-				typeResolverContext = definition.resolverContext,
-				constraintMap = definition.genericConstraintMap.map,
+
+				-- Use template instantiation: their generics will NOT appear
+				typeResolverContext = table.with(definition.resolverContext, "template", substitutionMap),
+				constraintMap = context.constraintMap,
 			}
 
 			-- Make arguments/this the appropriate values for requires/ensures
@@ -1577,8 +1600,19 @@ local function compileExpression(expressionAST, scope, context)
 			end
 
 			-- Verify that the function's pre-conditions hold
-			for _, r in ipairs(member.signature.requiresASTs) do
-				error "TODO: requires"
+			for i, ast in ipairs(member.signature.requiresASTs) do
+				local preVerify, verifyVariable = compilePredicate(ast, proofScope, proofContext, "requires")
+				table.insert(code, proofSt(sequenceSt {
+					preVerify,
+					{
+						tag = "verify",
+						variable = verifyVariable,
+						checkLocation = expressionAST.location,
+						conditionLocation = ast.location,
+						reason = "the " .. string.ordinal(i) .. " precondition",
+						returns = "no",
+					},
+				}))
 			end
 
 			table.insert(code, call)
@@ -2355,6 +2389,7 @@ local function semanticsSmol(sources, main)
 				-- constraints
 				generics = genericLocationMap,
 				checkConstraints = false,
+				template = false,
 			}
 
 			-- Read the constraints, suppressing errors regarding no constraints
@@ -2439,6 +2474,9 @@ local function semanticsSmol(sources, main)
 				-- constraints
 				generics = definition.genericConstraintMap,
 				checkConstraints = true,
+
+				-- Since a map is provided instead, no templating
+				template = false,
 			}
 
 			-- Check the well-formedness of each implements claim
