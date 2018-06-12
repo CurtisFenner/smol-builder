@@ -2107,7 +2107,59 @@ local function compileStatement(statementAST, scope, context)
 		-- Handle exhaustivity
 		for variant in pairs(definition._fieldMap) do
 			if not handledCases[variant] then
-				print("TODO: check that this variant is not possible")
+				local falseVariable = {
+					name = vendUniqueIdentifier(),
+					type = BOOLEAN_TYPE,
+				}
+				local isaVariable = {
+					name = vendUniqueIdentifier(),
+					type = BOOLEAN_TYPE,
+				}
+
+				table.insert(code, proofSt(sequenceSt {
+					-- For asserting false
+					{
+						tag = "local",
+						variable = falseVariable,
+						returns = "no",
+					},
+					{
+						tag = "boolean",
+						boolean = false,
+						destination = falseVariable,
+						returns = "no",
+					},
+
+					-- Check if it is possibly the unhandled cases
+					{
+						tag = "local",
+						variable = isaVariable,
+						returns = "no",
+					},
+					{
+						tag = "isa",
+						variant = variant,
+						base = bases[1],
+						destination = isaVariable,
+						returns = "no",
+					},
+
+					-- If it's the unhandled case, assert false
+					{
+						tag = "if",
+						condition = isaVariable,
+						bodyThen = {
+							tag = "verify",
+							variable = falseVariable,
+							checkLocation = statementAST.location,
+							conditionLocation = statementAST.location,
+							reason = "the tag is not the unhandled variant `" .. variant .. "`",
+							returns = "no",
+						},
+						bodyElse = sequenceSt {},
+						returns = "no",
+					},
+				}))
 			end
 		end
 
