@@ -2854,7 +2854,13 @@ local function semanticsSmol(sources, main)
 						returnTypes = f.signature.returnTypes,
 
 						-- Generic information, noting what Self is
-						constraintMap = table.with(definition.genericConstraintMap.map, "Self", definition.kind),
+						constraintMap = table.with(definition.genericConstraintMap.map, "Self", {{
+							constraint = definition.kind,
+							name = "self",
+							location = definition.definition.location,
+						}}),
+						typeResolver = definition.resolver,
+						typeResolverContext = definition.resolverContext,
 
 						-- This is for checking the pre and post conditions,
 						-- which cannot use bang even if this is a bang action
@@ -2864,16 +2870,37 @@ local function semanticsSmol(sources, main)
 						newType = false,
 
 						proof = true,
+						definitionMap = definitionMap,
 					}
+
+					-- Create the scope
+					local scope = Map.new()
+					for _, parameter in ipairs(f.signature.parameters) do
+						scope = scope:with(parameter.name, {
+							name = parameter.name,
+							type = parameter.type,
+							final = true,
+							definitionLocation = parameter.definitionLocation,
+						})
+					end
 
 					-- Compile requires checking for errors, and discard results
 					for _, requiresAST in ipairs(f.signature.requiresASTs) do
-						print("TODO: interface requires")
+						compilePredicate(requiresAST, scope, context, "requires")
 					end
 
+					-- Add returns to the scope when appropriate
+					if #f.signature.returnTypes == 1 then
+						scope = scope:with("return", {
+							definitionLocation = f.definitionLocation,
+							name = "return",
+							type = f.signature.returnTypes[1],
+						})
+					end
+					
 					-- Compile ensures checking for errors, and discard results
 					for _, ensuresAST in ipairs(f.signature.ensuresASTs) do
-						print("TODO: interface ensures")
+						compilePredicate(ensuresAST, scope, context, "ensures")
 					end
 				end
 			elseif definition.tag == "class-definition" or definition.tag == "union-definition" then

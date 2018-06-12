@@ -266,10 +266,10 @@ EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
 
 EXTEND_TYPE("IsASt", "AbstractStatementIR", recordType {
 	tag = constantType "isa",
+	variant = "string",
 	base = "VariableIR",
 	destination = "VariableIR",
 	returns = constantType "no",
-	variant = "string",
 })
 
 EXTEND_TYPE("ForallSt", "AbstractStatementIR", recordType {
