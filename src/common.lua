@@ -295,12 +295,12 @@ local function showStatement(statement, indent)
 	local color = ansi.blue
 	if statement.tag == "verify" or statement.tag == "assume" or statement.tag == "proof" then
 		color = ansi.red
-	elseif statement.tag == "block" then
+	elseif statement.tag == "sequence" then
 		color = ansi.gray
 	end
 
 	local pre = indent .. color(statement.tag)
-	if statement.tag == "block" then
+	if statement.tag == "sequence" then
 		if #statement.statements == 0 then
 			return pre .. " {}"
 		end
@@ -335,21 +335,16 @@ local function showStatement(statement, indent)
 			statement.variant,
 		}
 		return table.concat(x)
-	elseif statement.tag == "method-call" then
-		local destinations = showDestinations(statement.destinations)
-		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		local rhs = statement.baseInstance.name .. "." .. statement.signature.memberName .. "(" .. arguments .. ")"
-		return pre .. " " .. destinations .. " := " .. rhs
 	elseif statement.tag == "static-call" then
 		local destinations = showDestinations(statement.destinations)
 		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
 		local rhs = statement.signature.longName .. "(" .. arguments .. ")"
 		return pre .. " " .. destinations .. " := " .. rhs
-	elseif statement.tag == "generic-method-call" then
-		local destinations = showDestinations(statement.destinations)
-		local arguments = table.concat(table.map(table.getter "name", statement.arguments), ", ")
-		local rhs = statement.baseInstance.name .. "." .. statement.signature.memberName .. "(" .. arguments .. ")"
-		return pre .. " " .. destinations .. " := " .. rhs
+	elseif statement.tag == "dynamic-call" then
+		local arguments = showDestinations(statement.arguments)
+		local rhs = statement.signature.longName .. "(" .. arguments .. ") via <?>"
+		local lhs = showDestinations(statement.destinations)
+		return pre .. " " .. lhs .. " := " .. rhs
 	elseif statement.tag == "return" then
 		local out = {}
 		for _, s in ipairs(statement.sources) do
@@ -377,15 +372,18 @@ local function showStatement(statement, indent)
 	elseif statement.tag == "new-class" then
 		local rhs = {}
 		for k, v in spairs(statement.fields) do
-			table.insert(rhs, k .. " -> " .. v.name)
+			table.insert(rhs, k .. " = " .. v.name)
 		end
 		rhs = table.concat(rhs, ", ")
-		local t = showTypeKind(statement.type)
+		local t = showTypeKind(statement.destination.type)
 		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
 	elseif statement.tag == "new-union" then
 		local rhs = statement.field .. " -> " .. statement.value.name
-		local t = showTypeKind(statement.type)
+		local t = showTypeKind(statement.destination.type)
 		return pre .. " " .. statement.destination.name .. " := new " .. t .. "(" .. rhs .. ")"
+	elseif statement.tag == "boolean" then
+		local rhs = tostring(statement.boolean)
+		return pre .. " " .. statement.destination.name .. " := " .. rhs
 	else
 		return pre .. " <?>"
 	end
