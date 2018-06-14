@@ -361,6 +361,19 @@ local function showStatement(statement, indent)
 		table.insert(x, "\n" .. indent .. "else\n")
 		table.insert(x, showStatement(statement.bodyElse, indent .. "\t"))
 		return table.concat(x, "")
+	elseif statement.tag == "match" then
+		local x = {}
+		table.insert(x, pre)
+		table.insert(x, " ")
+		table.insert(x, statement.base.name)
+		table.insert(x, "\n")
+		for _, c in ipairs(statement.cases) do
+			table.insert(x, indent .. "case " .. c.variant)
+			table.insert(x, "\n")
+			table.insert(x, showStatement(c.statement, indent .. "\t"))
+			table.insert(x, "\n")
+		end
+		return table.concat(x, "")
 	elseif statement.tag == "this" then
 		return pre .. " " .. statement.destination.name
 	elseif statement.tag == "field" then
