@@ -818,10 +818,6 @@ local function generateStatement(statement, program, info)
 			end
 			program:write("if (" .. tagVar .. " == " .. tagValue .. ") {")
 			local body = program:section(1)
-			local caseType = cType(case.variable.type)
-			local caseName = localName(case.variable.name)
-			local caseValue = localName(statement.base.name) .. "->" .. unionFieldName(case.variant)
-			body:assign(caseType .. " " .. caseName, caseValue)
 			generateStatement(case.statement, body, info)
 			program:write("}")
 		end

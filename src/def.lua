@@ -258,7 +258,6 @@ EXTEND_TYPE("MatchSt", "AbstractStatementIR", recordType {
 	tag = constantType "match",
 	base = "VariableIR",
 	cases = listType(recordType {
-		variable = "VariableIR",
 		variant = "string",
 		statement = "StatementIR",
 	}),

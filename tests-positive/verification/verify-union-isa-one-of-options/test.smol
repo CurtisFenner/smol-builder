@@ -1,0 +1,18 @@
+package test;
+
+union Foo {
+	var a Unit;
+	var b Unit;
+
+	static make() Foo {
+		return new(a = unit);
+	}
+}
+
+class Test {
+	
+	static main() Unit {
+		var f Foo = Foo.make();
+		assert (f is a).or(f is b);
+	}
+}

@@ -542,65 +542,34 @@ local function scopeAdditional(old, new)
 	return out
 end
 
--- RETURNS a list of VariableIRs
-local function localsInStatement(statement)
-	assertis(statement, "StatementIR")
+-- TODO: communicate enum-finiteness to the theory somehow so that this
+-- isn't necessary here
+-- RETURNS an Assertion
+local function finitenessAssertion(v, semantics)
+	local unionType = v.type
+	local unionName = unionType.packageName .. ":" .. unionType.definitionName
 
-	if statement.tag == "local" then
-		return {statement.variable}
-	elseif statement.tag == "sequence" then
-		local out = {}
-		for _, child in ipairs(statement.statements) do
-			for _, e in ipairs(localsInStatement(child)) do
-				table.insert(out, e)
-			end
-		end
-		return out
-	elseif statement.tag == "match" then
-		local out = {}
-		for _, case in ipairs(statement.cases) do
-			for _, e in ipairs(localsInStatement(case.statement)) do
-				table.insert(out, e)
-			end
-		end
-		return out
-	end
+	local unionDefinition = table.findwith(semantics.compounds, "fullName", unionName)
 
-	local terminal = {
-		assume = {},
-		verify = {},
-
-		-- Proofs are recursive
-		proof = {"body"},
-
-		string = {},
-		nothing = {},
-		assign = {},
-		["return"] = {},
-		["if"] = {"bodyThen", "bodyElse"},
-		int = {},
-		["new-class"] = {},
-		["new-union"] = {},
-		["static-call"] = {},
-		["method-call"] = {},
-		["generic-method-call"] = {},
-		["generic-static-call"] = {},
-		boolean = {},
-		field = {},
-		this = {},
-		unit = {},
-		variant = {},
-		isa = {},
-		forall = {},
+	local tag = freeze {
+		tag = "gettag",
+		base = variableAssertion(v),
 	}
 
-	local out = {}
-	for _, property in ipairs(terminal[statement.tag]) do
-		for _, e in ipairs(localsInStatement(statement[property])) do
-			table.insert(out, e)
-		end
+	local possibleVariants = {}
+	for _, f in spairs(unionDefinition._fieldMap, tostring) do
+		table.insert(possibleVariants, freeze {
+			tag = "eq",
+			left = variantSymbol(v.type, f.name),
+			right = tag,
+		})
 	end
-	return out
+
+	local anyOf = possibleVariants[1]
+	for i = 2, #possibleVariants do
+		anyOf = orAssertion(anyOf, possibleVariants[i])
+	end
+	return anyOf
 end
 
 -- MODIFIES scope
@@ -741,34 +710,13 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "match" then
 		local branches = {}
-
+		
+		addPredicate(scope, finitenessAssertion(statement.base, semantics))
+		
 		local tag = freeze {
 			tag = "gettag",
 			base = variableAssertion(statement.base),
 		}
-
-		local unionType = statement.base.type
-		local unionName = unionType.packageName .. ":" .. unionType.definitionName
-
-		local unionDefinition = table.findwith(semantics.compounds, "fullName", unionName)
-
-		-- TODO: communicate enum-finiteness to the theory somehow so that this
-		-- isn't necessary here
-		local possibleVariants = {}
-		for _, f in spairs(unionDefinition._fieldMap, tostring) do
-			table.insert(possibleVariants, freeze {
-				tag = "eq",
-				left = variantSymbol(statement.base.type, f.name),
-				right = tag,
-			})
-		end
-
-		local anyOf = possibleVariants[1]
-		for i = 2, #possibleVariants do
-			anyOf = orAssertion(anyOf, possibleVariants[i])
-		end
-		addPredicate(scope, anyOf)
-
 
 		-- Check each case
 		assert(#statement.cases > 0)
@@ -875,6 +823,8 @@ local function verifyStatement(statement, scope, semantics)
 
 		return
 	elseif statement.tag == "isa" then
+		addPredicate(scope, finitenessAssertion(statement.base, semantics))
+
 		assertis(statement, "IsASt")
 		assignRaw(scope, statement.destination, freeze {
 			tag = "eq",

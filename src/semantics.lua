@@ -456,6 +456,25 @@ local function sequenceSt(statements)
 		return statements[1]
 	end
 
+	-- Flatten sequences. NOTE that sequences do NOT indicate scopes and thus
+	-- nesting them does not carry meaning
+	local actual = {}
+	local expanded = false
+	for i = 1, #statements do
+		if statements[i].tag == "sequence" then
+			expanded = true
+			for _, s in ipairs(statements[i].statements) do
+				table.insert(actual, s)
+			end
+		else
+			table.insert(actual, statements[i])
+		end
+	end
+	
+	if expanded then
+		return sequenceSt(actual)
+	end
+
 	local returns = "no"
 	for _, s in ipairs(statements) do
 		assert(returns ~= "yes")
@@ -1867,6 +1886,7 @@ local function compileStatement(statementAST, scope, context)
 			expectedLocation = UNKNOWN_LOCATION,
 		}
 
+		table.insert(code, context.makePostamble(toReturn, statementAST.location))
 		table.insert(code, {
 			tag = "return",
 			sources = toReturn,
@@ -2076,12 +2096,12 @@ local function compileStatement(statementAST, scope, context)
 				substitutionMap[name] = argument
 			end
 			local caseType = substituteGenerics(caseTypeRaw, substitutionMap)
-
-			local subscope = scope:with(variable, {
+			local caseVariable = {
 				name = variable,
 				type = caseType,
 				definitionLocation = caseAST.head.location,
-			})
+			}
+			local subscope = scope:with(variable, caseVariable)
 
 			-- Compile the body, noting whether or not this structure returns
 			local body = compileStatement(caseAST.body, subscope, context)
@@ -2095,12 +2115,22 @@ local function compileStatement(statementAST, scope, context)
 			end
 
 			table.insert(caseList, {
-				variable = {
-					name = variable,
-					type = caseType,
-				},
 				variant = variant,
-				statement = body,
+				statement = sequenceSt {
+					{
+						tag = "local",
+						variable = caseVariable,
+						returns = "no",
+					},
+					{
+						tag = "variant",
+						destination = caseVariable,
+						base = bases[1],
+						variant = variant,
+						returns = "no",
+					},
+					body,
+				},
 			})
 		end
 
@@ -2271,11 +2301,16 @@ function compilePredicate(ast, callScope, proofContext, purpose)
 	evalCode = sequenceSt {
 		evalCode,
 		{
+			tag = "local",
+			variable = resultVariable,
+			returns = "no",
+		},
+		{
 			tag = "assign",
 			source = insideResults[1],
 			destination = resultVariable,
 			returns = "no",
-		}
+		},
 	}
 
 	-- Wrap assumes in necessary when conditions
@@ -2893,6 +2928,9 @@ local function semanticsSmol(sources, main)
 					if #f.signature.returnTypes == 1 then
 						scope = scope:with("return", {
 							definitionLocation = f.definitionLocation,
+
+							-- Interface return need not mesh with any "real"
+							-- variable
 							name = "return",
 							type = f.signature.returnTypes[1],
 						})
@@ -2913,12 +2951,6 @@ local function semanticsSmol(sources, main)
 
 						-- Generic information
 						constraintMap = definition.genericConstraintMap.map,
-
-						-- RETURNS a ProofSt
-						makePostamble = function(returning)
-							print("TODO")
-							return sequenceSt {}
-						end,
 
 						-- More global information
 						typeResolver = definition.resolver,
@@ -2946,6 +2978,39 @@ local function semanticsSmol(sources, main)
 							final = true,
 							definitionLocation = parameter.definitionLocation,
 						})
+					end
+
+					-- RETURNS a ProofSt to be inserted immediately before
+					-- each return-statement
+					function context.makePostamble(returning, location)
+						assertis(returning, listType "VariableIR")
+						assertis(location, "Location")
+						assert(#returning == #f.signature.returnTypes)
+
+						-- Add appropriate return variable
+						local proofScope = scope
+						if #returning == 1 then
+							local returnVariable = table.with(returning[1], "definitionLocation", f.definitionLocation)
+							assertis(returnVariable, recordType {
+								definitionLocation = "Location",
+							})
+							proofScope = scope:with("return", returnVariable)
+						end
+
+						local postamble = {}
+						for i, ensuresAST in ipairs(f.signature.ensuresASTs) do
+							local preVerify, verifyVariable = compilePredicate(ensuresAST, proofScope, proofContext, "ensures")
+							table.insert(postamble, preVerify)
+							table.insert(postamble, {
+								tag = "verify",
+								variable = verifyVariable,
+								checkLocation = location,
+								conditionLocation = ensuresAST.location,
+								reason = "the " .. string.ordinal(i) .. " postcondition",
+								returns = "no",
+							})
+						end
+						return proofSt(sequenceSt(postamble))
 					end
 
 					-- Compile each requires to an assume
@@ -2990,6 +3055,7 @@ local function semanticsSmol(sources, main)
 										destination = unitOut,
 										returns = "no",
 									},
+									context.makePostamble({unitOut}, f.bodyAST.location),
 									{
 										tag = "return",
 										sources = {unitOut},
@@ -3039,8 +3105,8 @@ local function semanticsSmol(sources, main)
 	-- Collect the structures that need to be compiled
 	local compounds = {}
 	local interfaces = {}
-	for _, package in pairs(definitionMap) do
-		for _, definition in pairs(package) do
+	for _, package in spairs(definitionMap) do
+		for _, definition in spairs(package) do
 			if definition.tag == "interface-definition" then
 				table.insert(interfaces, definition)
 			else
@@ -3051,8 +3117,8 @@ local function semanticsSmol(sources, main)
 	end
 
 	-- Add foreign functions from builtins
-	for keyword, builtin in pairs(common.builtinDefinitions) do
-		for key, f in pairs(builtin.functionMap) do
+	for keyword, builtin in spairs(common.builtinDefinitions) do
+		for key, f in spairs(builtin.functionMap) do
 			assert(f.signature.foreign)
 			table.insert(functions, {
 				namespace = keyword,
