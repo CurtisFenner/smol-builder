@@ -397,6 +397,9 @@ local function showStatement(statement, indent)
 	elseif statement.tag == "boolean" then
 		local rhs = tostring(statement.boolean)
 		return pre .. " " .. statement.destination.name .. " := " .. rhs
+	elseif statement.tag == "int-load" then
+		local rhs = tostring(statement.number)
+		return pre .. " " .. statement.destination.name .. " := " .. rhs
 	else
 		return pre .. " <?>"
 	end
