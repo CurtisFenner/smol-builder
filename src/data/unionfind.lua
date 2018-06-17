@@ -40,25 +40,25 @@ function UnionFind:withTryInit(e)
 	if self._representatives:get(e) ~= nil then
 		return self
 	end
-	
+
 	local out = {
 		_representatives = self._representatives:with(e, e),
 		_classes = self._classes:with(e, Rope.singleton(e)),
 		_graph = self._graph:with(e, Rope.empty()),
 		_special = self._special,
-		_specialsPer = {}
+		_specialsPer = {},
 	}
 
-	for k, v in pairs(self._special) do
+	for className, classPredicate in pairs(self._special) do
 		local rope
-		if v(e) then
+		if classPredicate(e) then
 			-- e is the only special value of this class
 			rope = Rope.singleton(e)
 		else
 			-- e is not special, so this singleton class has no special values
 			rope = Rope.empty()
 		end
-		out._specialsPer[k] = self._specialsPer[k]:with(e, rope)
+		out._specialsPer[className] = self._specialsPer[className]:with(e, rope)
 	end
 
 	return setmetatable(out, UnionFind)
@@ -88,8 +88,14 @@ function UnionFind:withUnion(a, b, reason)
 		-- Update the graph
 		local aOut = outGraph:get(a) or Rope.empty()
 		local bOut = outGraph:get(b) or Rope.empty()
-		outGraph = outGraph:with(a, aOut .. Rope.singleton {from = a, to = b, reason = reason})
-		outGraph = outGraph:with(b, bOut .. Rope.singleton {from = b, to = a, reason = reason})
+		outGraph = outGraph:with(
+			a,
+			aOut .. Rope.singleton {from = a, to = b, reason = reason}
+		)
+		outGraph = outGraph:with(
+			b,
+			bOut .. Rope.singleton {from = b, to = a, reason = reason}
+		)
 	end
 
 	local ra = self:_root(a)
@@ -131,9 +137,14 @@ function UnionFind:withUnion(a, b, reason)
 		_specialsPer = {},
 	}
 
-	for k in pairs(self._special) do
-		local merged = self._specialsPer[k]:get(child) .. self._specialsPer[k]:get(parent)
-		out._specialsPer[k] = self._specialsPer[k]:with(parent, merged)
+	for className in pairs(self._special) do
+		local left = self._specialsPer[className]:get(child)
+		local right = self._specialsPer[className]:get(parent)
+		local merged = left .. right
+		out._specialsPer[className] = self._specialsPer[className]:with(
+			parent,
+			merged
+		)
 	end
 
 	return setmetatable(out, UnionFind)
@@ -199,8 +210,8 @@ end
 -- predicates past to UnionFind's constructor
 function UnionFind:specialsOf(k, a)
 	assert(self._special[k], "unknown special class")
-	
-	return self._specialsPer[k]:get(self:_root(a))
+	local root = self:_root(a)
+	return self._specialsPer[k]:get(root)
 end
 
 function UnionFind:traverse()
@@ -272,6 +283,21 @@ do
 	assert(table.indexof(reasoning, 1))
 	assert(table.indexof(reasoning, 5))
 	assert(table.indexof(reasoning, 7))
+end
+
+do
+	-- Test specials
+	local u = UnionFind.new {
+		string = function(x)
+			return type(x) == "string"
+		end,
+	}
+
+	u = u:withInit("a"):withInit("b"):withInit(1):withInit(2):withInit(3)
+	u = u:withUnion(1, 2, "r1")
+	u = u:withUnion(2, "a", "r2")
+	assert(u:specialsOf("string", 1):size() == 1)
+	assert(u:specialsOf("string", 1):get(1) == "a")
 end
 
 return UnionFind
