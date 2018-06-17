@@ -104,6 +104,8 @@ fnAssertion = memoized(4, fnAssertion)
 
 --------------------------------------------------------------------------------
 
+local validateModel
+
 -- RETURNS a string
 local showSkip = {}
 local function showAssertion(assertion)
@@ -490,11 +492,37 @@ local function listToMap(list)
 	return m
 end
 
+--------------------------------------------------------------------------------
+
+-- RETURNS nothing
+-- Checks some invariants of the smol model
+function validateModel(model)
+	do
+		return
+	end
+
+	for a, c in model._eq:traverse() do
+		for _, t in c:traverse() do
+			if t.tag == "fn" then
+				local con = fnLiteralEvaluation(t, model._eq)
+				if con ~= nil then
+					if model._eq:specialsOf("literal", t):size() == 0 then
+						print("CONCERNING:", theory:canonKey(t))
+						error("Constant evaluation doesn't agree with cached literals-of")
+					end
+				end
+			end
+		end
+	end
+end
+
 -- RETURNS whether or not the given model is satisfiable in a quantifier free
 -- theory of uninterpreted functions
 -- as a part of the 'theory' interface for the SMT solver
 local function modelSatisfiable(self)
 	assertis(self, "SmolModel")
+
+	validateModel(self)
 
 	if self._contradiction then
 		return false, self._contradiction
@@ -640,7 +668,9 @@ local function recheckFunction(subassertion, eqQueue, eq, functionMap, mentionMa
 				local literal, reasons = fnLiteralEvaluation(subassertion, eq)
 				if literal ~= nil then
 					local literalExpression = constantAssertion(literal)
+					local before = theory:canonKey(literalExpression)
 					literalExpression = canon:scan(literalExpression)
+					assert(before == theory:canonKey(literalExpression))
 					eq = eq:withTryInit(literalExpression)
 					if not eq:query(literalExpression, subassertion) then
 						table.insert(eqQueue, {
@@ -669,6 +699,7 @@ end
 -- detection is fast
 local function modelAssigned(self, key, truth)
 	assertis(self, "SmolModel")
+	validateModel(self)
 
 	local eq = self._eq
 	local assertion = self._canon:scan(key)
@@ -729,6 +760,8 @@ local function modelAssigned(self, key, truth)
 		if assertion.tag == "eq" then
 			local left = self._canon:scan(assertion.left)
 			local right = self._canon:scan(assertion.right)
+			assert(theory:canonKey(left) == theory:canonKey(assertion.left))
+			assert(theory:canonKey(right) == theory:canonKey(assertion.right))
 
 			if truth then
 				-- a = b joins union find
@@ -790,8 +823,23 @@ local function modelAssigned(self, key, truth)
 				staleRep = oldRightRep
 			end
 			if staleRep then
+				-- Merge maps
+				if not mentionMap:get(newRep) then
+					mentionMap = mentionMap:with(newRep, Map.new())
+				end
 				if mentionMap:get(staleRep) then
-					for mentioner in mentionMap:get(staleRep):traverse() do
+					for mention in mentionMap:get(staleRep):traverse() do
+						assertis(mention, "Assertion")
+
+						local merged = mentionMap:get(newRep):with(mention, true)
+						mentionMap = mentionMap:with(newRep, merged)
+					end
+				end
+
+				-- Find functions that are now equal via their arguments being
+				-- equal
+				if mentionMap:get(newRep) then
+					for mentioner in mentionMap:get(newRep):traverse() do
 						eq, functionMap, mentionMap = recheckFunction(
 							mentioner,
 							eqQueue,
@@ -838,6 +886,7 @@ local function modelAssigned(self, key, truth)
 		_functionMap = functionMap,
 	}
 	assertis(out, "SmolModel")
+	validateModel(out)
 	return out
 end
 
@@ -875,6 +924,7 @@ function theory:makeEmptyModel()
 	out._eq = out._eq:withInit(aTrue):withInit(aFalse)
 
 	assertis(out, "SmolModel")
+	validateModel(out)
 	return out
 end
 
