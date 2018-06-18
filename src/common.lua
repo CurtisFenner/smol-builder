@@ -407,13 +407,17 @@ end
 
 --------------------------------------------------------------------------------
 
-local function simpleSignature(container, modifier, name, from, to, eval)
+local function simpleSignature(container, modifier, name, from, to, extra)
 	local ps = {}
 	for i, t in ipairs(from) do
 		table.insert(ps, {
 			type = t,
 			name = "arg" .. tostring(i),
 		})
+	end
+
+	if modifier == "method" then
+		ps[1].name = "this"
 	end
 
 	return {
@@ -424,10 +428,10 @@ local function simpleSignature(container, modifier, name, from, to, eval)
 		parameters = ps,
 		foreign = true,
 		bang = false,
-		requiresASTs = {},
-		ensuresASTs = {},
+		requiresASTs = extra.requiresASTs or {},
+		ensuresASTs = extra.ensuresASTs or {},
 		logic = false,
-		eval = eval,
+		eval = extra.eval or false,
 	}
 end
 
@@ -611,9 +615,11 @@ local BUILTIN_DEFINITIONS = {
 		functionMap = {
 			-- method isPositive() Boolean
 			isPositive = {
-				signature = simpleSignature("Int", "method", "isPositive", {INT_TYPE}, {BOOLEAN_TYPE}, function(n)
-					return 0 < n
-				end),
+				signature = simpleSignature("Int", "method", "isPositive", {INT_TYPE}, {BOOLEAN_TYPE}, {
+					eval = function(n)
+						return 0 < n
+					end,
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -621,9 +627,11 @@ local BUILTIN_DEFINITIONS = {
 
 			-- method negate() Int
 			negate = {
-				signature = simpleSignature("Int", "method", "negate", {INT_TYPE}, {INT_TYPE}, function(n)
-					return -n
-				end),
+				signature = simpleSignature("Int", "method", "negate", {INT_TYPE}, {INT_TYPE}, {
+					eval = function(n)
+						return -n
+					end,
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -632,9 +640,21 @@ local BUILTIN_DEFINITIONS = {
 			-- method lessThan(Int) Boolean
 			lessThan = {
 				-- TODO: Add ensures/requires
-				signature = simpleSignature("Int", "method", "lessThan", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
-					return a < b
-				end),
+				signature = simpleSignature("Int", "method", "lessThan", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, {
+					eval = function(a, b)
+						return a < b
+					end,
+					ensuresASTs = {
+						-- Transitive
+						parseKind("ensures (forall (middle Int) return when (this < middle).and(middle < right))", "ensures"),
+
+						-- Antireflexive
+						parseKind("ensures return.not() when this == right", "ensures"),
+
+						-- Antisymmetric
+						parseKind("ensures return.not() when right < this", "ensures"),
+					},
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -642,9 +662,11 @@ local BUILTIN_DEFINITIONS = {
 
 			-- method eq(Int) Boolean
 			eq = {
-				signature = simpleSignature("Int", "method", "eq", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, function(a, b)
-					return a == b
-				end),
+				signature = simpleSignature("Int", "method", "eq", {INT_TYPE, INT_TYPE}, {BOOLEAN_TYPE}, {
+					eval = function(a, b)
+						return a == b
+					end,
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -652,9 +674,11 @@ local BUILTIN_DEFINITIONS = {
 
 			-- method quotient(Int) Int
 			quotient = {
-				signature = simpleSignature("Int", "method", "quotient", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-					return math.floor(a / b)
-				end),
+				signature = simpleSignature("Int", "method", "quotient", {INT_TYPE, INT_TYPE}, {INT_TYPE}, {
+					eval = function(a, b)
+						return math.floor(a / b)
+					end,
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -662,9 +686,11 @@ local BUILTIN_DEFINITIONS = {
 
 			-- method product(Int) Int
 			product = {
-				signature = simpleSignature("Int", "method", "product", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-					return a * b
-				end),
+				signature = simpleSignature("Int", "method", "product", {INT_TYPE, INT_TYPE}, {INT_TYPE}, {
+					eval = function(a, b)
+						return a * b
+					end,
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -673,9 +699,15 @@ local BUILTIN_DEFINITIONS = {
 			-- method sum(Int) Int
 			-- TODO: ordered field axiom
 			sum = {
-				signature = simpleSignature("Int", "method", "sum", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-					return a + b
-				end),
+				signature = simpleSignature("Int", "method", "sum", {INT_TYPE, INT_TYPE}, {INT_TYPE}, {
+					eval = function(a, b)
+						return a + b
+					end,
+					ensuresASTs = {
+						-- Ordered field
+						parseKind("ensures this < return when 0 < right", "ensures"),
+					},
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -683,9 +715,11 @@ local BUILTIN_DEFINITIONS = {
 
 			-- method difference(Int) Int
 			difference = {
-				signature = simpleSignature("Int", "method", "difference", {INT_TYPE, INT_TYPE}, {INT_TYPE}, function(a, b)
-					return a - b
-				end),
+				signature = simpleSignature("Int", "method", "difference", {INT_TYPE, INT_TYPE}, {INT_TYPE}, {
+					eval = function(a, b)
+						return a - b
+					end,
+				}),
 				bodyAST = false,
 				definitionLocation = BUILTIN_LOC,
 				constraintArguments = {},
@@ -766,6 +800,14 @@ for _, d in pairs(BUILTIN_DEFINITIONS) do
 		checkConstraints = true,
 		template = false,
 	}
+	d.resolver = function(ast)
+		assert(ast.tag == "type-keyword", "TODO: non built ins")
+		return {
+			tag = "keyword-type",
+			role = "type",
+			name = ast.name,
+		}
+	end
 end
 
 --------------------------------------------------------------------------------

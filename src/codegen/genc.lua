@@ -81,42 +81,42 @@ FOREIGN_IMPLEMENTATION["Boolean:or"] = [[
 
 FOREIGN_IMPLEMENTATION["Int:difference"] = [[
 	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
-	out1->value = smol_local_arg1->value - smol_local_arg2->value;
+	out1->value = smol_local_this->value - smol_local_arg2->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:sum"] = [[
 	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
-	out1->value = smol_local_arg1->value + smol_local_arg2->value;
+	out1->value = smol_local_this->value + smol_local_arg2->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:product"] = [[
 	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
-	out1->value = smol_local_arg1->value * smol_local_arg2->value;
+	out1->value = smol_local_this->value * smol_local_arg2->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:quotient"] = [[
 	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
-	out1->value = smol_local_arg1->value / smol_local_arg2->value;
+	out1->value = smol_local_this->value / smol_local_arg2->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:negate"] = [[
 	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
-	out1->value = -smol_local_arg1->value;
+	out1->value = -smol_local_this->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:lessThan"] = [[
 	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
-	out1->value = smol_local_arg1->value < smol_local_arg2->value;
+	out1->value = smol_local_this->value < smol_local_arg2->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:eq"] = [[
 	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
-	out1->value = smol_local_arg1->value == smol_local_arg2->value;
+	out1->value = smol_local_this->value == smol_local_arg2->value;
 ]]
 
 FOREIGN_IMPLEMENTATION["Int:isPositive"] = [[
 	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
-	out1->value = 0 < smol_local_arg1->value;
+	out1->value = 0 < smol_local_this->value;
 ]]
 
 --------------------------------------------------------------------------------

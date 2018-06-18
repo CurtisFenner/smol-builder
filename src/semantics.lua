@@ -695,6 +695,8 @@ local function compileExpression(expressionAST, scope, context)
 			name = "string",
 			location = "Location",
 		})),
+
+		suppressContracts = mapType("string", "boolean"),
 	})
 
 	if expressionAST.tag == "string-literal" then
@@ -1011,7 +1013,7 @@ local function compileExpression(expressionAST, scope, context)
 			tag = "method-call",
 			bang = false,
 			base = expressionAST.left,
-			methodName = methodName,
+			funcName = methodName,
 			arguments = {expressionAST.right},
 			location = expressionAST.location,
 		}
@@ -1145,24 +1147,40 @@ local function compileExpression(expressionAST, scope, context)
 		end
 
 		return sequenceSt(code), {outVariable}, impure
-	elseif expressionAST.tag == "method-call" then
+	elseif expressionAST.tag == "static-call" or expressionAST.tag == "method-call" then
+		local baseType
+
 		local code = {}
-		local baseCode, bases, impureBase = compileExpression(expressionAST.base, scope, context)
-		table.insert(code, baseCode)
-		
-		-- Check that exactly one method base is given
-		if #bases ~= 1 then
-			Report.WRONG_VALUE_COUNT {
-				purpose = "method base",
-				givenCount = #bases,
-				expectedCount = 1,
-				givenLocation = expressionAST.base.location,
-			}
+		local impure = false
+		local arguments = {}
+		if expressionAST.tag == "static-call" then
+			baseType = context.typeResolver(expressionAST.baseType, context.typeResolverContext)
+		else
+			assert(expressionAST.tag == "method-call")
+
+			-- Compile the method base
+			local baseCode, bases, impureBase = compileExpression(expressionAST.base, scope, context)
+
+			-- Check that exactly one method base is given
+			if #bases ~= 1 then
+				Report.WRONG_VALUE_COUNT {
+					purpose = "method base",
+					givenCount = #bases,
+					expectedCount = 1,
+					givenLocation = expressionAST.base.location,
+				}
+			end
+
+			if impureBase then
+				impure = expressionAST.base.location
+			end
+
+			baseType = bases[1].type
+			table.insert(arguments, bases[1])
+			table.insert(code, baseCode)
 		end
 
 		-- Compile the arguments
-		local arguments = {bases[1]}
-		local impure = impureBase and expressionAST.base.location
 		for _, ast in ipairs(expressionAST.arguments) do
 			local c, outs, i = compileExpression(ast, scope, context)
 			table.insert(code, c)
@@ -1182,278 +1200,27 @@ local function compileExpression(expressionAST, scope, context)
 			end
 		end
 
-		local baseType = bases[1].type
+		-- Save the expected modifier
+		local expectedModifier
+		if expressionAST.tag == "static-call" then
+			expectedModifier = "static"
+		else
+			expectedModifier = "method"
+		end
+
 		if baseType.tag == "generic-type" or baseType.tag == "self-type" then
-			-- Get a list of constraints associated with this base type
 			if baseType.tag == "self-type" then
 				assert(context.genericMap.Self)
 			end
 
 			-- Find the matching method
-			local matching, matchingConstraint = findConstraint(baseType, expressionAST.methodName, expressionAST.location, context)
-
-			-- Check that the method was found
-			if not matching or matching.signature.modifier ~= "method" then
-				Report.NO_SUCH_MEMBER {
-					container = showTypeKind(baseType),
-					memberType = "method",
-					location = expressionAST.location,
-				}
-			end
-
-			-- Check the bang
-			if not matching.signature.bang ~= not expressionAST.bang then
-				Report.BANG_MISMATCH {
-					given = matching.signature.bang and "without a `!`" or "with a `!`",
-					expects = matching.signature.bang and "a `!` action" or " a pure function",
-					fullName = matching.signature.longName,
-					location = expressionAST.location,
-					signatureLocation = matching.definitionLocation,
-				}
-			elseif matching.signature.bang and not context.canUseBang then
-				Report.BANG_NOT_ALLOWED {
-					context = matching.signature.modifier .. " `" .. matching.signature.longName .. "`",
-					location = expressionAST.location,
-				}
-			end
-
-			-- Create the destination storage
-			local destinations = {}
-			for _, returnType in ipairs(matching.signature.returnTypes) do
-				local destination = {
-					name = vendUniqueIdentifier(),
-					type = returnType,
-				}
-				table.insert(destinations, destination)
-				table.insert(code, {
-					tag = "local",
-					variable = destination,
-					returns = "no",
-				})
-			end
-
-			-- Make the indirect call
-			local call = {
-				tag = "dynamic-call",
-				constraint = getVTable(baseType, matchingConstraint.constraint, context),
-				signature = matching.signature,
-				arguments = arguments,
-				destinations = destinations,
-				returns = "no",
-			}
-			assertis(call, "DynamicCallSt")
-
-			-- Make the requires checks
-			for _, ast in ipairs(matching.signature.requiresASTs) do
-				error "TODO: requires for dynamic method"
-			end
-
-			table.insert(code, call)
-
-			-- Make the post condition assumes
-			for _, ast in ipairs(matching.signature.ensuresASTs) do
-				error "TODO: ensures for dynamic method"
-			end
-
-			return sequenceSt(code), destinations, expressionAST.bang
-		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
-			local definition
-			if baseType.tag == "compound-type" then
-				definition = context.definitionMap[baseType.packageName][baseType.definitionName]
-			else
-				definition = common.builtinDefinitions[baseType.name]
-				assert(definition, "no built in for " .. baseType.name)
-			end
-			assert(definition)
-			assert(definition.tag == "class-definition" or definition.tag == "union-definition")
-
-			-- Get the member
-			local member
-			local substitutionMap = {}
-			if baseType.tag ~= "keyword-type" then
-				member = definition._functionMap[expressionAST.methodName]
-
-				-- Substitute generics
-				if member then
-					for i, argument in ipairs(baseType.arguments) do
-						local name = definition.genericConstraintMap.order[i]
-						substitutionMap[name] = argument
-					end
-					member = table.with(member, "signature", substitutedSignature(member.signature, substitutionMap))
-				end
-			else
-				member = definition.functionMap[expressionAST.methodName]
-			end
-			if not member or member.signature.modifier ~= "method" then
-				Report.NO_SUCH_MEMBER {
-					memberType = "method",
-					container = showTypeKind(baseType),
-					name = expressionAST.methodName,
-					location = expressionAST.location,
-				}
-			end
-
-			-- Check the types
-			-- NOTE: Signature's parameters INCLUDES `this`, so arguments MUST
-			-- include base
-			local expected = table.map(table.getter "type", member.signature.parameters)
-			checkTypes {
-				given = arguments,
-				expected = expected,
-				purpose = "argument(s) to method " .. showTypeKind(baseType) .. "." .. expressionAST.methodName,
-				givenLocation = expressionAST.location,
-				expectedLocation = member.definitionLocation,
-			}
-
-			-- Check bang
-			if not member.signature.bang ~= not expressionAST.bang then
-				Report.BANG_MISMATCH {
-					modifier = member.signature.modifier,
-					given = member.signature.bang and "without a `!`" or "with a `!`",
-					expects = member.signature.bang and "a `!` action" or " a pure function",
-					fullName = member.signature.longName,
-					location = expressionAST.location,
-					signatureLocation = member.definitionLocation,
-				}
-			elseif member.signature.bang and not context.canUseBang then
-				Report.BANG_NOT_ALLOWED {
-					context = member.signature.modifier .. " `" .. member.signature.longName .. "`",
-					location = expressionAST.location,
-				}
-			end
-
-			-- Get destinations
-			local destinations = {}
-			for _, returnType in ipairs(member.signature.returnTypes) do
-				local destination = {
-					name = vendUniqueIdentifier(),
-					type = returnType,
-				}
-				table.insert(code, {
-					tag = "local",
-					variable = destination,
-					returns = "no",
-				})
-				table.insert(destinations, destination)
-			end
-
-			-- Get vtables
-			local vtables = {}
-			for _, a in ipairs(definition.constraintArguments) do
-				table.insert(vtables, getVTable(baseType.arguments[a.concerningIndex], a.constraint, context))
-			end
-
-			local call = {
-				tag = "static-call",
-				arguments = arguments,
-				signature = member.signature,
-				destinations = destinations,
-				constraintArguments = vtables,
-				returns = "no",
-			}
-			assertis(call, "StaticCallSt")
-
-			-- Create the context for requires/ensures
-			local proofContext = {
-				canUseBang = false,
-				proof = true,
-				definitionMap = context.definitionMap,
-
-				-- Type specific
-				newType = substituteGenerics(definition.kind, substitutionMap),
-				typeResolver = definition.resolver,
-
-				-- Use template instantiation: their generics will NOT appear
-				typeResolverContext = table.with(definition.resolverContext, "template", substitutionMap),
-				constraintMap = context.constraintMap,
-			}
-
-			-- Make arguments, this, and return the appropriate values for
-			-- requires/ensures
-			local proofScope = Map.new()
-			for i, p in ipairs(member.signature.parameters) do
-				proofScope = proofScope:with(p.name, arguments[i])
-			end
-
-			-- Verify the things needed by requires
-			for i, ast in ipairs(member.signature.requiresASTs) do
-				local preVerify, verifyVariable = compilePredicate(ast, proofScope, proofContext, "requires")
-				table.insert(code, proofSt(sequenceSt {
-					preVerify,
-					{
-						tag = "verify",
-						variable = verifyVariable,
-						checkLocation = expressionAST.location,
-						conditionLocation = ast.location,
-						reason = "the " .. string.ordinal(i) .. " precondition",
-						returns = "no",
-					},
-				}))
-			end
-
-			table.insert(code, call)
-
-			if #destinations == 1 then
-				-- return is allowed in ensures (but not in requires)
-				proofScope = proofScope:with("return", destinations[1])
-			end
-
-			-- Assume the things allowed via ensures
-			for _, ast in ipairs(member.signature.ensuresASTs) do
-				local preAssume, assumeVariable = compilePredicate(ast, proofScope, proofContext, "ensures")
-				table.insert(code, proofSt(sequenceSt {
-					preAssume,
-					{
-						tag = "assume",
-						variable = assumeVariable,
-						returns = "no",
-					}
-				}))
-
-			end
-
-			return sequenceSt(code), destinations, impure or member.signature.bang
-		end
-	elseif expressionAST.tag == "static-call" then
-		local baseType = context.typeResolver(expressionAST.baseType, context.typeResolverContext)
-
-		local code = {}
-
-		-- Compile the arguments
-		local arguments = {}
-		local impure = false
-		for _, ast in ipairs(expressionAST.arguments) do
-			local c, outs, i = compileExpression(ast, scope, context)
-			table.insert(code, c)
-
-			for _, o in ipairs(outs) do
-				table.insert(arguments, o)
-			end
-
-			if i then
-				if impure then
-					Report.EVALUATION_ORDER {
-						first = impure,
-						second = ast.location,
-					}
-				end
-				impure = ast.location
-			end
-		end
-
-		if baseType.tag == "self-type" then
-			-- TODO: In Interface contracts, #Self is allowed as a regular
-			-- type parameter!
-			error "TODO"
-		elseif baseType.tag == "generic-type" then
-			-- Find the matching method
 			local matching, matchingConstraint = findConstraint(baseType, expressionAST.funcName, expressionAST.location, context)
 
 			-- Check that the static was found
-			if not matching or matching.signature.modifier ~= "static" then
+			if not matching or matching.signature.modifier ~= expectedModifier then
 				Report.NO_SUCH_MEMBER {
 					container = showTypeKind(baseType),
-					memberType = "static",
+					memberType = expectedModifier,
 					location = expressionAST.location,
 				}
 			end
@@ -1462,7 +1229,7 @@ local function compileExpression(expressionAST, scope, context)
 			checkTypes {
 				given = arguments,
 				expected = expected,
-				purpose = "argument(s) to static " .. showTypeKind(baseType) .. "." .. expressionAST.funcName,
+				purpose = "argument(s) to " .. expectedModifier .. " " .. showTypeKind(baseType) .. "." .. expressionAST.funcName,
 				givenLocation = expressionAST.location,
 				expectedLocation = matching.definitionLocation,
 			}
@@ -1512,37 +1279,55 @@ local function compileExpression(expressionAST, scope, context)
 			table.insert(code, call)
 			
 			return sequenceSt(code), destinations, impure or matching.signature.bang
-		elseif baseType.tag == "keyword-type" then
-			error "TODO"
-		elseif baseType.tag == "compound-type" then
-			local definition = context.definitionMap[baseType.packageName][baseType.definitionName]
+		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
+			-- Get the definition using the base's type's name
+			local definition
+			if baseType.tag == "compound-type" then
+				definition = context.definitionMap[baseType.packageName][baseType.definitionName]
+			else
+				assert(baseType.tag == "keyword-type")
+				definition = common.builtinDefinitions[baseType.name]
+				assert(definition, "no built in for " .. baseType.name)
+			end
+
 			assert(definition)
 			assert(definition.tag == "class-definition" or definition.tag == "union-definition")
 
 			local substitutionMap = {}
-			for i, argument in ipairs(baseType.arguments) do
-				local name = definition.genericConstraintMap.order[i]
-				substitutionMap[name] = argument
+			local member
+			if baseType.tag == "compound-type" then
+				for i, argument in ipairs(baseType.arguments) do
+					local name = definition.genericConstraintMap.order[i]
+					substitutionMap[name] = argument
+				end
+
+				-- Get the member
+				member = definition._functionMap[expressionAST.funcName]
+				if member then
+					-- Substitute the signature to simplify type checking
+					member = table.with(member, "signature", substitutedSignature(member.signature, substitutionMap))
+				end
+			else
+				assert(baseType.tag == "keyword-type")
+				member = definition.functionMap[expressionAST.funcName]
 			end
 
-			-- Get the member
-			local member = definition._functionMap[expressionAST.funcName]
-			if not member or member.signature.modifier ~= "static" then
+			-- Check that the member exists and its modifier matches
+			if not member or member.signature.modifier ~= expectedModifier then
 				Report.NO_SUCH_MEMBER {
-					memberType = "static",
+					memberType = expectedModifier,
 					container = showTypeKind(baseType),
 					name = expressionAST.funcName,
 					location = expressionAST.location,
 				}
 			end
-			member = table.with(member, "signature", substitutedSignature(member.signature, substitutionMap))
 			
-			-- Check the types
+			-- Check the argument types
 			local expected = table.map(table.getter "type", member.signature.parameters)
 			checkTypes {
 				given = arguments,
 				expected = expected,
-				purpose = "argument(s) to static " .. showTypeKind(baseType) .. "." .. expressionAST.funcName,
+				purpose = "argument(s) to " .. expectedModifier .. " " .. showTypeKind(baseType) .. "." .. expressionAST.funcName,
 				givenLocation = expressionAST.location,
 				expectedLocation = member.definitionLocation,
 			}
@@ -1610,6 +1395,9 @@ local function compileExpression(expressionAST, scope, context)
 				-- Use template instantiation: their generics will NOT appear
 				typeResolverContext = table.with(definition.resolverContext, "template", substitutionMap),
 				constraintMap = context.constraintMap,
+
+				-- TODO
+				suppressContracts = context.suppressContracts,
 			}
 
 			-- Make arguments/this the appropriate values for requires/ensures
@@ -1656,7 +1444,6 @@ local function compileExpression(expressionAST, scope, context)
 
 			return sequenceSt(code), destinations, impure or member.signature.bang
 		end
-		error "TODO"
 	elseif expressionAST.tag == "forall-expr" then
 		-- Check that quantifiers only appear in ghost contexts
 		if not context.proof then
@@ -2228,6 +2015,9 @@ local function compileStatement(statementAST, scope, context)
 			typeResolver = context.typeResolver,
 			typeResolverContext = context.typeResolverContext,
 			constraintMap = context.constraintMap,
+
+			-- Empty at expression root
+			suppressContracts = {},
 		}
 		local expressionCode, results = compileExpression(statementAST.expression, scope, assertContext)
 
@@ -2906,6 +2696,9 @@ local function semanticsSmol(sources, main)
 
 						proof = true,
 						definitionMap = definitionMap,
+
+						-- Empty initially is OK here
+						suppressContracts = {},
 					}
 
 					-- Create the scope
@@ -2956,6 +2749,8 @@ local function semanticsSmol(sources, main)
 						typeResolver = definition.resolver,
 						typeResolverContext = definition.resolverContext,
 						definitionMap = definitionMap,
+
+						suppressContracts = {},
 					}
 				
 					local proofContext = {
@@ -2967,6 +2762,9 @@ local function semanticsSmol(sources, main)
 						typeResolver = context.typeResolver,
 						typeResolverContext = context.typeResolverContext,
 						definitionMap = context.definitionMap,
+
+						-- TODO:
+						suppressContracts = {},
 					}
 
 					-- Create the initial (argument) scope

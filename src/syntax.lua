@@ -631,7 +631,7 @@ local parsers = {
 	["method-access"] = parser.composite {
 		tag = "method-call",
 		{"_", K_DOT},
-		{"methodName", T_IDENTIFIER, "a method/field name"},
+		{"funcName", T_IDENTIFIER, "a method/field name"},
 
 		-- What follows is optional, since a field access is also possible
 		{"bang", parser.optional(K_BANG)},
