@@ -646,13 +646,13 @@ local BUILTIN_DEFINITIONS = {
 					end,
 					ensuresASTs = {
 						-- Transitive
-						parseKind("ensures (forall (middle Int) return when (this < middle).and(middle < right))", "ensures"),
+						parseKind("ensures (forall (middle Int) return when (this < middle).and(middle < arg2))", "ensures"),
 
 						-- Antireflexive
-						parseKind("ensures return.not() when this == right", "ensures"),
+						parseKind("ensures return.not() when this == arg2", "ensures"),
 
 						-- Antisymmetric
-						parseKind("ensures return.not() when right < this", "ensures"),
+						parseKind("ensures return.not() when arg2 < this", "ensures"),
 					},
 				}),
 				bodyAST = false,
@@ -705,7 +705,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 					ensuresASTs = {
 						-- Ordered field
-						parseKind("ensures this < return when 0 < right", "ensures"),
+						parseKind("ensures this < return when 0 < arg2", "ensures"),
 					},
 				}),
 				bodyAST = false,

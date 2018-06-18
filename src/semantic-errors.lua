@@ -564,4 +564,13 @@ function Report.QUANTIFIER_USED_IN_IMPLEMENTATION(p)
 	)
 end
 
+function Report.RECURSIVE_REQUIRES(p)
+	quit(
+		"The preconditions of `",
+		p.func,
+		"` are recursive ",
+		p.location
+	)
+end
+
 return Report

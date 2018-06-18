@@ -1382,6 +1382,15 @@ local function compileExpression(expressionAST, scope, context)
 			assertis(call, "StaticCallSt")
 
 			-- Create the context for requires/ensures
+			local childSuppressContracts = {}
+			for k, v in pairs(context.suppressContracts) do
+				childSuppressContracts[k] = v
+			end
+			-- Note that we do NOT include the parameters in this key
+			local suppressKey = showTypeKind(definition.kind) .. "/" .. member.signature.memberName
+			if context.proof then
+				childSuppressContracts[suppressKey] = true
+			end
 			local proofContext = {
 				canUseBang = false,
 				proof = true,
@@ -1396,7 +1405,7 @@ local function compileExpression(expressionAST, scope, context)
 				constraintMap = context.constraintMap,
 
 				-- TODO
-				suppressContracts = context.suppressContracts,
+				suppressContracts = childSuppressContracts,
 			}
 
 			-- Make arguments/this the appropriate values for requires/ensures
@@ -1407,6 +1416,13 @@ local function compileExpression(expressionAST, scope, context)
 
 			-- Verify that the function's pre-conditions hold
 			for i, ast in ipairs(member.signature.requiresASTs) do
+				if context.suppressContracts[suppressKey] then
+					Report.RECURSIVE_REQUIRES {
+						func = member.signature.fullName,
+						location = ast.location,
+					}
+				end
+
 				local preVerify, verifyVariable = compilePredicate(ast, proofScope, proofContext, "requires")
 				table.insert(code, proofSt(sequenceSt {
 					preVerify,
@@ -1430,15 +1446,17 @@ local function compileExpression(expressionAST, scope, context)
 
 			-- Assume that the function's post-conditions hold
 			for _, e in ipairs(member.signature.ensuresASTs) do
-				local preAssume, assumeVariable = compilePredicate(e, proofScope, proofContext, "ensures")
-				table.insert(code, proofSt(sequenceSt {
-					preAssume,
-					{
-						tag = "assume",
-						variable = assumeVariable,
-						returns = "no",
-					}
-				}))
+				if not context.suppressContracts[suppressKey] then
+					local preAssume, assumeVariable = compilePredicate(e, proofScope, proofContext, "ensures")
+					table.insert(code, proofSt(sequenceSt {
+						preAssume,
+						{
+							tag = "assume",
+							variable = assumeVariable,
+							returns = "no",
+						}
+					}))
+				end
 			end
 
 			return sequenceSt(code), destinations, impure or member.signature.bang
