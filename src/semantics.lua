@@ -525,7 +525,7 @@ local function checkTypes(p)
 		Report.WRONG_VALUE_COUNT {
 			expectedCount = #p.expected,
 			givenCount = #p.given,
-			purpose = purpose,
+			purpose = p.purpose,
 			givenLocation = p.givenLocation,
 			expectedLocation = p.expectedLocation,
 		}
@@ -1040,7 +1040,6 @@ local function compileExpression(expressionAST, scope, context)
 			}
 		}
 
-		local providedAt = {}
 		local fieldAssignment = {}
 		local initializationLocation = {}
 		local impure = false
