@@ -36,8 +36,6 @@ local STRING_TYPE = {
 	name = "String",
 }
 
-
-
 local SELF_TYPE = {
 	tag = "self-type",
 	role = "type",
@@ -49,7 +47,7 @@ local SELF_TYPE = {
 local function substituteGenerics(kind, map)
 	assertis(kind, "Kind")
 	assertis(map, mapType("string", "TypeKind"))
-	
+
 	if kind.tag == "generic-type" then
 		assert(map[kind.name], "definition for generic `#" .. kind.name .. "`")
 		return map[kind.name]
@@ -92,10 +90,7 @@ local function substitutedSignature(signature, map)
 			name = "string",
 			type = "TypeKind",
 		})
-		table.insert(newParameters, {
-			name = p.name,
-			type = substituteGenerics(p.type, map)
-		})
+		table.insert(newParameters, {name = p.name, type = substituteGenerics(p.type, map)})
 	end
 
 	local newReturnTypes = {}
@@ -117,7 +112,7 @@ local function substitutedSignature(signature, map)
 		-- Note! This are NOT substituted
 		requiresASTs = signature.requiresASTs,
 		ensuresASTs = signature.ensuresASTs,
-		
+
 		logic = signature.logic,
 		eval = signature.eval,
 	}
@@ -285,7 +280,7 @@ local function makeDefinitionASTResolver(info, definitionMap)
 				role = "type",
 			}
 		end
-		
+
 		assertis(ast, recordType {
 			tag = constantType("concrete-type"),
 			package = choiceType(constantType(false), "string"),
@@ -333,7 +328,7 @@ local function makeDefinitionASTResolver(info, definitionMap)
 		local arguments = {}
 		for _, argumentAST in ipairs(ast.arguments) do
 			local argument = resolver(argumentAST, context)
-			
+
 			-- Check that the role of the argument is a type
 			if argument.role ~= "type" then
 				Report.INTERFACE_USED_AS_TYPE {
@@ -470,7 +465,7 @@ local function sequenceSt(statements)
 			table.insert(actual, statements[i])
 		end
 	end
-	
+
 	if expanded then
 		return sequenceSt(actual)
 	end
@@ -961,7 +956,7 @@ local function compileExpression(expressionAST, scope, context)
 				givenLocation = expressionAST.location,
 			}
 		end
-		
+
 		local definition = context.definitionMap[baseType.packageName][baseType.definitionName]
 		assert(definition)
 		if definition.tag ~= "union-definition" then
@@ -1214,7 +1209,12 @@ local function compileExpression(expressionAST, scope, context)
 			end
 
 			-- Find the matching method
-			local matching, matchingConstraint = findConstraint(baseType, expressionAST.funcName, expressionAST.location, context)
+			local matching, matchingConstraint = findConstraint(
+				baseType,
+				expressionAST.funcName,
+				expressionAST.location,
+				context
+			)
 
 			-- Check that the static was found
 			if not matching or matching.signature.modifier ~= expectedModifier then
@@ -1277,7 +1277,7 @@ local function compileExpression(expressionAST, scope, context)
 			}
 			assertis(call, "DynamicCallSt")
 			table.insert(code, call)
-			
+
 			return sequenceSt(code), destinations, impure or matching.signature.bang
 		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
 			-- Get the definition using the base's type's name
@@ -1321,7 +1321,7 @@ local function compileExpression(expressionAST, scope, context)
 					location = expressionAST.location,
 				}
 			end
-			
+
 			-- Check the argument types
 			local expected = table.map(table.getter "type", member.signature.parameters)
 			checkTypes {
@@ -1564,7 +1564,7 @@ local function compileStatement(statementAST, scope, context)
 				}
 			end
 		end
-		
+
 		return sequenceSt(statements), scopePrime
 	elseif statementAST.tag == "var-statement" then
 		local code = {}
@@ -1706,7 +1706,7 @@ local function compileStatement(statementAST, scope, context)
 			table.insert(destinations, destination)
 			table.insert(expectedTypes, destination.type)
 		end
-		
+
 		-- Check that the types match
 		checkTypes {
 			given = rhsResults,
@@ -1874,7 +1874,7 @@ local function compileStatement(statementAST, scope, context)
 				}
 			end
 			handledCases[variant] = caseAST.head
-			
+
 			-- Substitute the base type's generics into the field type
 			local caseTypeRaw = definition._fieldMap[variant].type
 			local substitutionMap = {}
@@ -2005,11 +2005,7 @@ local function compileStatement(statementAST, scope, context)
 			-- Contextual
 			canUseBang = false,
 			proof = true,
-			
-			-- These are irrelevant to expression compilation:
-			returnTypes = context.returnTypes,
-			makePostamble = function() end,
-			
+
 			-- Definition scope dependent
 			newType = context.newType,
 			typeResolver = context.typeResolver,
@@ -2255,7 +2251,7 @@ local function semanticsSmol(sources, main)
 				constraintMap[parameterAST.name] = {}
 				table.insert(parameterNames, parameterAST.name)
 			end
-			
+
 			assertis(definition.kind, "Kind")
 
 			local context = {
@@ -2310,7 +2306,6 @@ local function semanticsSmol(sources, main)
 				end
 			end
 
-
 			-- Read the implements claims, suppressing errors regarding no
 			-- constraints
 			-- NOTE: We MUST check them again afterwards
@@ -2330,8 +2325,8 @@ local function semanticsSmol(sources, main)
 					constraint = claim,
 				})
 			end
-			
-			assertis(claims, listType(recordType{
+
+			assertis(claims, listType(recordType {
 				claimLocation = "Location",
 				constraint = "ConstraintKind",
 			}))
@@ -2417,11 +2412,7 @@ local function semanticsSmol(sources, main)
 					foreign = false,
 					bang = not not signatureAST.bang,
 					parameters = parameters,
-					returnTypes = table.map(
-						definition.resolver,
-						signatureAST.returnTypes,
-						definition.resolverContext
-					),
+					returnTypes = table.map(definition.resolver, signatureAST.returnTypes, definition.resolverContext),
 
 					-- To be processed after all signatures are known
 					requiresASTs = signatureAST.requires,
@@ -2679,11 +2670,13 @@ local function semanticsSmol(sources, main)
 						returnTypes = f.signature.returnTypes,
 
 						-- Generic information, noting what Self is
-						constraintMap = table.with(definition.genericConstraintMap.map, "Self", {{
-							constraint = definition.kind,
-							name = "self",
-							location = definition.definition.location,
-						}}),
+						constraintMap = table.with(definition.genericConstraintMap.map, "Self", {
+							{
+								constraint = definition.kind,
+								name = "self",
+								location = definition.definition.location,
+							}
+						}),
 						typeResolver = definition.resolver,
 						typeResolverContext = definition.resolverContext,
 
@@ -2728,7 +2721,7 @@ local function semanticsSmol(sources, main)
 							type = f.signature.returnTypes[1],
 						})
 					end
-					
+
 					-- Compile ensures checking for errors, and discard results
 					for _, ensuresAST in ipairs(f.signature.ensuresASTs) do
 						compilePredicate(ensuresAST, scope, context, "ensures")
@@ -2752,7 +2745,7 @@ local function semanticsSmol(sources, main)
 
 						suppressContracts = {},
 					}
-				
+
 					local proofContext = {
 						canUseBang = false,
 						proof = true,
@@ -2797,7 +2790,12 @@ local function semanticsSmol(sources, main)
 
 						local postamble = {}
 						for i, ensuresAST in ipairs(f.signature.ensuresASTs) do
-							local preVerify, verifyVariable = compilePredicate(ensuresAST, proofScope, proofContext, "ensures")
+							local preVerify, verifyVariable = compilePredicate(
+								ensuresAST,
+								proofScope,
+								proofContext,
+								"ensures"
+							)
 							table.insert(postamble, preVerify)
 							table.insert(postamble, {
 								tag = "verify",
@@ -2812,8 +2810,6 @@ local function semanticsSmol(sources, main)
 					end
 
 					-- Compile each requires to an assume
-					local requiresContext = {
-					}
 					local preambleList = {}
 					for _, r in ipairs(f.signature.requiresASTs) do
 						local proofScope = scope
