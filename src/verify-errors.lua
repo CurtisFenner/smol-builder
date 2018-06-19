@@ -20,12 +20,12 @@ function Report.DOES_NOT_MODEL(p)
 	end
 
 	if p.conditionLocation == p.checkLocation then
-		quit("You must show that ", p.reason, " holds as defined ", p.conditionLocation, ruled)
+		quit("You must show that ", p.reason, " holds as required ", p.conditionLocation, ruled)
 	end
 	quit(
-		"You must show that ",
+		"You must show ",
 		p.reason,
-		" holds as defined ",
+		" as required ",
 		p.conditionLocation,
 		ruled,
 		"\n",

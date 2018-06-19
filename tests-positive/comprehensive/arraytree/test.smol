@@ -1,0 +1,136 @@
+package test;
+
+class T0[#T] is ListLike[#T] {
+	method size() Int
+	ensures return == 0 {
+		return 0;
+	}
+
+	method get(n Int) #T
+	requires false {
+		assert false;
+	}
+}
+
+class T1[#T] is ListLike[#T] {
+	var one #T;
+
+	static make(v #T) T1[#T] {
+		return new(one = v);
+	}
+
+	method size() Int
+	ensures return == 1 {
+		return 1;
+	}
+
+	method get(n Int) #T {
+		return this.one;
+	}
+}
+
+class T2[#T] is ListLike[#T] {
+	var one #T;
+	var two #T;
+
+	static make(v1 #T, v2 #T) T2[#T] {
+		return new(one = v1, two = v2);
+	}
+
+	method size() Int
+	ensures return == 2 {
+		return 2;
+	}
+
+	method get(n Int) #T {
+		if (n == 1) {
+			return this.one;
+		}
+		return this.two;
+	}
+}
+
+class T3[#T] is ListLike[#T] {
+	var one #T;
+	var two #T;
+	var three #T;
+
+	static make(v1 #T, v2 #T, v3 #T) T3[#T] {
+		return new(one = v1, two = v2, three = v3);
+	}
+
+	method size() Int
+	ensures return == 3{
+		return 3;
+	}
+
+	method get(n Int) #T {
+		if (n == 1) {
+			return this.one;
+		} elseif (n == 2) {
+			return this.two;
+		}
+		return this.three;
+	}
+}
+
+union Up3[#T] is ListLike[#T] {
+	var zero T0[#T];
+	var one T1[#T];
+	var two T2[#T];
+	var three T3[#T];
+
+	method size() Int
+	ensures return == 0 when this is zero
+	ensures return == 1 when this is one
+	ensures return == 2 when this is two
+	ensures return == 3 when this is three {
+		if this is zero {
+			return 0;
+		} elseif this is one {
+			return 1;
+		} elseif this is two {
+			return 2;
+		}
+		return 3;
+	}
+
+	method get(n Int) #T
+	requires 0 < n
+	requires (n < this.size()).or(n == this.size()) {
+		if this is one {
+			return this.one.get(n);
+		} elseif this is two {
+			return this.two.get(n);
+		}
+		return this.three.get(n);
+	}
+}
+
+class B3[#T, #C | #C is ListLike[#T]] is ListLike[#T] {
+	var one #C;
+	var two #C;
+	var three #C;
+
+	method size() Int {
+		return (this.one.size() + this.two.size()) + this.three.size();
+	}
+
+	method get(n Int) #T {
+		return this.one.get(n);
+	}
+}
+
+interface ListLike[#T] {
+	method get(n Int) #T
+	requires 0 < n
+	requires (n < this.size()).or(n == this.size());
+
+	method size() Int;
+}
+
+class Test {
+	static main() Unit {
+
+	}
+}

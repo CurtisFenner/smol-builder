@@ -9,7 +9,7 @@ class C {
 class Test {
 	static main!() Unit {
 		match C.make() {
-			case x x {
+			case x is x {
 			}
 		}
 	}

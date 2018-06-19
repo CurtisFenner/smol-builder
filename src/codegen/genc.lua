@@ -1,4 +1,4 @@
--- Curtis Fenner, copyright (C) 2017
+local common = import "common.lua"
 
 local BUILTIN_NAME_MAP = {
 	Int = true,
@@ -8,10 +8,369 @@ local BUILTIN_NAME_MAP = {
 	Never = true,
 }
 
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+local FOREIGN_IMPLEMENTATION = {}
+
+
+FOREIGN_IMPLEMENTATION["core:ASCII.formatInt"] = [[
+	smol_String_T* out1;
+	out1 = ALLOCATE(smol_String_T);
+	out1->text = ALLOCATE_ARRAY(32, char);
+	out1->length = (size_t)sprintf(out1->text, "%" PRId64, smol_local_value->value);
+]]
+
+FOREIGN_IMPLEMENTATION["core:Out.println"] = [[
+	// TODO: allow nulls, etc.
+	for (size_t i = 0; i < smol_local_message->length; i++) {
+		putchar(smol_local_message->text[i]);
+	}
+	printf("\n");
+	smol_Unit_T* out1 = NULL;
+]]
+
+FOREIGN_IMPLEMENTATION["String:concatenate"] = [[
+	smol_String_T* out1 = ALLOCATE(smol_String_T);
+	out1->length = smol_local_left->length + smol_local_right->length;
+	out1->text = ALLOCATE_ARRAY(out1->length, char);
+	for (size_t i = 0; i < smol_local_left->length; i++) {
+		out1->text[i] = smol_local_left->text[i];
+	}
+	for (size_t i = 0; i < smol_local_right->length; i++) {
+		out1->text[i + smol_local_left->length] = smol_local_right->text[i];
+	}
+]]
+
+FOREIGN_IMPLEMENTATION["String:eq"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	size_t length = smol_local_left->length;
+	if (length != smol_local_right->length) {
+		out1->value = 0;
+	} else {
+		out1->value = 0 == memcmp(smol_local_left->text, smol_local_right->text, length);
+	}
+]]
+
+FOREIGN_IMPLEMENTATION["Boolean:implies"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = !smol_local_left->value || smol_local_right->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Boolean:not"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = !smol_local_left->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Boolean:eq"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = (!smol_local_left->value) == (!smol_local_right->value);
+]]
+
+FOREIGN_IMPLEMENTATION["Boolean:and"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = smol_local_left->value && smol_local_right->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Boolean:or"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = smol_local_left->value || smol_local_right->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:difference"] = [[
+	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
+	out1->value = smol_local_this->value - smol_local_arg2->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:sum"] = [[
+	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
+	out1->value = smol_local_this->value + smol_local_arg2->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:product"] = [[
+	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
+	out1->value = smol_local_this->value * smol_local_arg2->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:quotient"] = [[
+	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
+	out1->value = smol_local_this->value / smol_local_arg2->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:negate"] = [[
+	smol_Int_T* out1 = ALLOCATE(smol_Int_T);
+	out1->value = -smol_local_this->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:lessThan"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = smol_local_this->value < smol_local_arg2->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:eq"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = smol_local_this->value == smol_local_arg2->value;
+]]
+
+FOREIGN_IMPLEMENTATION["Int:isPositive"] = [[
+	smol_Boolean_T* out1 = ALLOCATE(smol_Boolean_T);
+	out1->value = 0 < smol_local_this->value;
+]]
+
+--------------------------------------------------------------------------------
+
+-- Represents a source file
+local Program = {}
+Program.__index = Program
+
+-- RETURNS a blank program
+function Program.new(indent)
+	local instance = {
+		_chunks = {},
+		_indent = indent or 0,
+	}
+	return setmetatable(instance, Program)
+end
+
+-- Appends a line of text to the end of this progra
+-- RETURNS nothing
+-- MODIFIES this
+function Program:write(text)
+	assert(type(text) == "string")
+	table.insert(self._chunks, string.rep("\t", self._indent) .. text)
+end
+
+-- RETURNS a Program representing a chunk appended to the end of the file
+-- MODIFIES this
+function Program:section(indent)
+	local c = Program.new(self._indent + (indent or 0))
+	table.insert(self._chunks, c)
+	return c
+end
+
+-- RETURNS a string representing all of the lines of this program
+function Program:serialize()
+	local seq = {}
+	for i = 1, #self._chunks do
+		if type(self._chunks[i]) == "string" then
+			seq[i] = self._chunks[i]
+		else
+			seq[i] = self._chunks[i]:serialize()
+		end
+	end
+	return table.concat(seq, "\n")
+end
+
+--------------------------------------------------------------------------------
+
+-- Represents a C source file
+local CProgram = {}
+CProgram.__index = CProgram
+
+-- RETURNS a blank C program
+function CProgram.new()
+	local instance = {
+		_program = Program.new(),
+	}
+
+	-- Initialize root information
+	instance._tupleMap = {}
+	instance._closureMap = {}
+
+	instance.preamble = instance._program:section()
+
+	instance._forward = instance._program:section()
+	instance._forward:write("// FORWARD DECLARATIONS")
+
+	instance._definitions = instance._program:section()
+	instance._definitions:write("// DECLARATION BODIES")
+
+	instance._prototypes = instance._program:section()
+	instance._prototypes:write("// FUNCTION PROTOTYPES")
+
+	instance._functions = instance._program:section()
+	instance._functions:write("// FUNCTION IMPLEMENTATIONS")
+
+	instance._root = instance
+
+	return setmetatable(instance, CProgram)
+end
+
+-- RETURNS this program's text as a string
+function CProgram:serialize()
+	return self._program:serialize()
+end
+
+-- RETURNS a C type name (not a pointer)
+function CProgram:getClosure(rt, pts)
+	if self ~= self._root then
+		return self._root:getClosure(rt, pts)
+	end
+
+	assertis(rt, "string")
+	assertis(pts, listType "string")
+
+	local parameters = {"void*", table.unpack(pts)}
+
+	local fptr = rt .. " (*func)(" .. table.concat(parameters, ", ") .. ")"
+
+	if self._closureMap[fptr] then
+		return self._closureMap[fptr]
+	end
+
+	local name = "_closure_" .. #table.keys(self._closureMap) .. "_T"
+	self._closureMap[fptr] = name
+
+	self:defineStruct(name, {
+		{name = "data", type = "void*"},
+
+		-- XXX: fix this
+		{name = fptr, type = ""},
+	})
+	return name
+end
+
+-- RETURNS nothing
+-- MODIFIES this program
+function CProgram:defineStruct(name, fields)
+	if self ~= self._root then
+		return self._root:defineStruct(name, fields)
+	end
+
+	assertis(fields, listType(recordType {
+		name = "string",
+		type = "string",
+	}))
+	assert(1 <= #fields)
+
+	self._forward:write("typedef struct " .. name .. "_struct " .. name .. ";")
+	self._definitions:write("struct " .. name .. "_struct {")
+	for _, field in ipairs(fields) do
+		self._definitions:write("\t" .. field.type .. " " .. field.name .. ";")
+	end
+	self._definitions:write("};")
+	self._definitions:write("")
+end
+
+-- RETURNS a string representing a (one word) C type with fields 
+-- _1, _2, ..., _{#fields}
+-- of the given C types
+-- REQUIRES at least one field is given
+function CProgram:getTuple(fields)
+	if self ~= self._root then
+		return self._root:getTuple(fields)
+	end
+
+	assertis(fields, listType "string")
+	assert(1 <= #fields, "cannot make a tuple for zero fields")
+
+	local id = table.concat(fields, ", ")
+	assert(not id:find("\n"))
+	if self._tupleMap[id] then
+		return self._tupleMap[id]
+	end
+
+	-- Generate a unique name
+	local name = "_tuple_" .. #table.keys(self._tupleMap) .. "z" .. id:gsub("[^a-zA-Z0-9]+", "_") .. "z_T"
+	self._tupleMap[id] = name
+
+	-- Create forward declaration
+	self._forward:write("// tuple (" .. id .. ")")
+	self._forward:write("typedef struct " .. name .. "_struct " .. name .. ";")
+	self._forward:write("")
+
+	-- Give definition
+	self._definitions:write("struct " .. name .. "_struct {")
+	for i = 1, #fields do
+		self._definitions:write("\t" .. fields[i] .. " _" .. i .. ";")
+	end
+	self._definitions:write("};")
+	self._definitions:write("")
+
+	return name
+end
+
+-- RETURNS a C program section
+-- MODIFIES this
+function CProgram:defineFunction(name, returns, parameters)
+	if self ~= self._root then
+		return self._root:defineFunction(name, returns, parameters)
+	end
+
+	assertis(name, "string")
+	assertis(returns, "string")
+	assertis(parameters, listType(recordType {
+		type = "string",
+		name = "string",
+	}))
+
+	local ps = {}
+	for _, p in ipairs(parameters) do
+		table.insert(ps, p.type .. " " .. p.name)
+	end
+	
+	local prototype = returns .. " " .. name .. "(" .. table.concat(ps, ", ") .. ")"
+
+	self._prototypes:write(prototype .. ";")
+
+	local fn = self._functions:section(0)
+	fn:write(prototype .. " {")
+	local body = fn:section(1)
+	fn:write("}")
+	fn:write("")
+
+	local out = {
+		_program = body,
+		_root = self._root,
+	}
+
+	return setmetatable(out, CProgram)
+end
+
+-- RETURNS a subsection of this program
+-- MODIFIES this
+function CProgram:section(indent)
+	local s = self._program:section(indent)
+
+	local out = {
+		_program = s,
+		_root = self._root,
+	}
+	return setmetatable(out, CProgram)
+end
+
+-- RETURNS nothing
+-- TODO: get rid of this function so that all writing is structure
+function CProgram:write(text)
+	self._program:write(text)
+end
+
+-- Appends a comment to the program
+-- RETURNS nothing
+-- MODIFIES this
+function CProgram:comment(text)
+	assert(not text:find("\n"), "TODO: comment with newlines")
+
+	self:write("// " .. text)
+end
+
+-- Appends an assignment to the program
+-- RETURNS nothing
+-- MODIFIES this
+function CProgram:assign(lhs, rhs)
+	assert(type(lhs) == "string")
+	assert(type(rhs) == "string", type(rhs))
+
+	self:write(lhs .. " = " .. rhs .. ";")
+end
+
+--------------------------------------------------------------------------------
+
 -- RETURNS a string
 local function luaizeName(name)
-	assert(not name:find "%.")
-	return name:gsub(":", "_"):gsub("#", "hash")
+	return name:gsub("[:.]", "_"):gsub("#", "hash_")
 end
 
 -- RETURNS a string
@@ -21,40 +380,9 @@ local function staticFunctionName(longName)
 	return "smol_static_" .. luaizeName(longName)
 end
 
--- RETURNS a string
-local function methodFunctionName(longName)
-	assertis(longName, "string")
-	assert(longName:find ":")
-
-	return "smol_method_" .. luaizeName(longName)
-end
-
--- RETURNS a string
-local function concreteConstraintFunctionName(definitionName, interfaceName)
-	return "smol_concrete_constraint_" .. luaizeName(definitionName) .. "_for_" .. luaizeName(interfaceName)
-end
-
--- RETURNS a string of smol representing the given type
-local function showType(t)
-	assertis(t, "Type+")
-
-	if t.tag == "concrete-type+" then
-		if #t.arguments == 0 then
-			return t.name
-		end
-		local arguments = table.map(showType, t.arguments)
-		return t.name .. "[" .. table.concat(arguments, ", ") .. "]"
-	elseif t.tag == "keyword-type+" then
-		return t.name
-	elseif t.tag == "generic+" then
-		return "#" .. t.name
-	end
-	error("unknown Type+ tag `" .. t.tag .. "`")
-end
-
-local C_THIS_LOCAL = "this"
-local C_CONSTRAINT_PARAMETER_PREFIX = "cons"
+local CONSTRAINT_PARAMETER = "cons"
 local TAG_FIELD = "tag"
+local TAG_TYPE = "uint32_t"
 
 -- RETURNS a string representing a C identifier for a Smol variable or parameter
 local function localName(name)
@@ -78,50 +406,21 @@ local function unionFieldName(name)
 	return "smol_case_" .. name
 end
 
--- RETURNS a string representing a C type
-local function cType(t, scope)
-	assertis(t, "Type+")
-	assertis(scope, mapType("string", "string"))
+-- RETURNS a C type name
+local function compoundStructName(name)
+	assertis(name, "string")
 
-	if t.tag == "generic+" or t.tag == "self-type+" then
-		return "void*"
-	elseif t.tag == "concrete-type+" then
-		return scope[t.name] .. "*"
-	elseif t.tag == "keyword-type+" then
-		return "smol_" .. t.name .. "*"
+	if BUILTIN_NAME_MAP[name] then
+		return "smol_" .. name .. "_T"
 	end
-	error "unknown"
-end
+	assert(name:find(":"))
 
--- RETURNS a string representing a tuple type
--- (even for 1 tuples, which may be inefficient, but is uniform)
-local function cTypeTuple(ts, demandTuple, scope)
-	assertis(ts, listType "Type+")
-	assertis(demandTuple, "function")
-	assert(#ts >= 1)
-	assertis(scope, mapType("string", "string"))
-
-	local shown = table.map(cType, ts, scope)
-	return demandTuple(shown)
+	return "smol_compound_" .. name:gsub(":", "_") .. "_T"
 end
 
 -- RETURNS a string
 local function commented(message)
 	return "// " .. message:gsub("\n", "\n// ")
-end
-
--- RETURNS a string of C-code representing a literal to use as
--- the tag value for a union object
-local function unionTagValue(union, variant)
-	assertis(union, "UnionIR")
-	assertis(variant, "string")
-
-	for i, field in ipairs(union.fields) do
-		if field.name == variant then
-			return tostring(i)
-		end
-	end
-	error("no variant")
 end
 
 -- RETURNS a string
@@ -144,17 +443,34 @@ local function cEncodedString(value)
 end
 
 -- RETURNS a string
-local function luaEncodedNumber(value)
+local function cEncodedNumber(value)
 	assertis(value, "number")
 
-	return tostring(value)
+	return string.format("%d", value)
 end
 
-local function indentedEmitter(emit)
-	assertis(emit, "function")
+-- RETURNS a C type string for the given smol type
+-- When noPointer, get the underlying struct type
+-- Otherwise, a pointer to the underlying struct type
+local function cType(t, noPointer)
+	assertis(t, "TypeKind")
 
-	return function(line)
-		return emit("\t" .. line)
+	if t.tag == "compound-type" then
+		-- Note that it does not distinguish by type parameters
+		local base = compoundStructName(t.packageName .. ":" .. t.definitionName)
+		if noPointer then
+			return base
+		end
+		return base .. "*"
+	elseif t.tag == "generic-type" or t.tag == "self-type" then
+		assert(not noPointer)
+		return "void*"
+	elseif t.tag == "keyword-type" then
+		local base = compoundStructName(t.name)
+		if noPointer then
+			return base
+		end
+		return base .. "*"
 	end
 end
 
@@ -166,424 +482,357 @@ local function interfaceStructName(name)
 	return "smol_interface_" .. name:gsub(":", "_") .. "_T"
 end
 
--- RETURNS a C type name
-local function classStructName(name)
+-- RETURNS a C identifier
+local function vtableMemberName(name)
 	assertis(name, "string")
+	assert(not name:find("[:.]"))
 
-	if BUILTIN_NAME_MAP[name] then
-		return "smol_" .. name
+	return "d_smol_" .. name
+end
+
+-- RETURNS a C type string
+local function cVTableType(c)
+	assertis(c, "ConstraintKind")
+
+	if c.tag == "interface-constraint" then
+		return interfaceStructName(c.packageName .. ":" .. c.definitionName)
 	end
-	assert(name:find(":"))
-
-	return "smol_class_" .. name:gsub(":", "_") .. "_T"
+	error("TODO")
 end
 
--- RETURNS a C type name
-local function unionStructName(name)
-	assertis(name, "string")
-	assert(name:find(":"))
+local _counter = 0
 
-	return "smol_union_" .. name:gsub(":", "_") .. "_T"
+-- RETURNS a unique temporary variable name
+local function uniqueTmp()
+	_counter = _counter + 1
+	return "_tmp" .. _counter
 end
 
--- RETURNS a string representing a C type
-local function cDefinitionType(definition)
-	if definition.tag == "class" then
-		return classStructName(definition.name) .. "*"
-	elseif definition.tag == "union" then
-		return unionStructName(definition.name) .. "*"
-	elseif definition.tag == "builtin" then
-		return "smol_" .. definition.name .. "*"
-	end
-	error("unknown definition tag `" .. definition.tag .. "`")
-end
+-- RETURNS name, type as strings
+-- MODIFIES program
+local function generateVTable(a, program, info)
+	assertis(a, "VTableIR")
+	assertis(program, "object")
+	assertis(info, recordType {
+		constraints = mapType("string", recordType {
+			members = listType "Signature",
+		}),
+		parameterIndices = mapType("string", "integer"),
+		functionSignatures = mapType("string", "Signature")
+	})
 
--- RETURNS a C struct field identifier
--- name must be a constraint "name", e.g., "2_3"
-local function structConstraintField(name)
-	assert(name:match("^#%d+_%d+$"))
+	if a.tag == "parameter-vtable" then
+		program:comment("<parameter-vtable>")
+		local tmp = uniqueTmp() .. "_vtable"
+		local tmpType = cVTableType(a.interface)
+		local i = info.parameterIndices[a.name]
+		program:assign(tmpType .. " " .. tmp, CONSTRAINT_PARAMETER .. "->_" .. i)
+		program:comment("</parameter-vtable>")
+		return tmp, tmpType
+	elseif a.tag == "concrete-vtable" then
+		program:comment("<concrete-vtable>")
+		local tmp = uniqueTmp() .. "_vtable"
+		local tmpType = cVTableType(a.interface)
 
-	return "constraint_" .. name:sub(2)
-end
+		program:write(tmpType .. " " .. tmp .. ";")
 
--- RETURNS a string that is a Lua expression
-local function cConstraint(constraint, semantics)
-	assertis(constraint, "ConstraintIR")
-	assertis(semantics, "Semantics")
+		local fullName = a.interface.packageName .. ":" .. a.interface.definitionName
+		for _, f in ipairs(info.constraints[fullName].members) do
+			local closureName = uniqueTmp() .. "_closure"
 
-	if constraint.tag == "parameter-constraint" then
-		-- XXX
-		return C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. constraint.name:gsub("#", "")
-	elseif constraint.tag == "concrete-constraint" then
-		local func = concreteConstraintFunctionName(constraint.concrete.name, constraint.interface.name)
-		local definition = table.findwith(semantics.compounds, "name", constraint.concrete.name)
-		assertis(definition, recordType {generics = listType "TypeParameterIR"})
-
-		local argumentValues = {}
-		for i, generic in ipairs(definition.generics) do
-			for j, c in ipairs(generic.constraints) do
-				-- XXX
-				local key = "#" .. i .. "_" .. j
-				local assignment = constraint.assignments[key]
-				table.insert(argumentValues, cConstraint(assignment, semantics))
+			-- Get type parameters and return type
+			local rts = table.map(cType, f.returnTypes)
+			local rTuple = program:getTuple(rts)
+			local pt = {}
+			for _, p in ipairs(f.parameters) do
+				table.insert(pt, cType(p.type))
 			end
+
+			-- The C argument types of the static implementation may differ
+			-- from the interface: the interface may use generics where the
+			-- implementation puts statics.
+			-- As long as the representation of the arguments are the same, this
+			-- is OK.
+			-- NOTE: C guarantees that all pointers-to-structs have comptabile
+			-- representations.
+			local closureType = program:getClosure(rTuple, pt)
+
+			-- Collect the arguments to store in the closure's state
+			local neededVariables = {}
+			local neededTypes = {}
+			for _, a in ipairs(a.arguments) do
+				local n, t = generateVTable(a, program, info)
+				table.insert(neededVariables, n)
+				table.insert(neededTypes, t)
+			end
+
+			local needed
+			if #neededVariables == 0 then
+				needed = "NULL"
+			else
+				local neededTuple = program:getTuple(neededTypes)
+				local neededName = uniqueTmp() .. "_closure_state"
+				program:assign(neededTuple .. "* " .. neededName, "ALLOCATE(" .. neededTuple .. ")")
+				for i, n in ipairs(neededVariables) do
+					program:assign(neededName .. "->_" .. i, n)
+				end
+				needed = neededName
+			end
+
+			local concreteFunctionName = a.concrete.packageName .. ":" .. a.concrete.definitionName .. "." .. f.memberName
+			local fptr = staticFunctionName(concreteFunctionName)
+
+			-- Generate wrapper
+			local concreteSignature = info.functionSignatures[concreteFunctionName]
+			local wrapperName = uniqueTmp() .. "_" .. fptr
+			local wrapperParameters = {{name = "data", type = "void*"}}
+			local arguments = {"data"}
+			assert(#pt == #concreteSignature.parameters)
+			for i, p in ipairs(pt) do
+				table.insert(wrapperParameters, {
+					name = "a" .. i,
+					type = p,
+				})
+				table.insert(arguments, "(" .. cType(concreteSignature.parameters[i].type) .. ")a" .. i)
+			end
+			local wrapperBody = program:defineFunction(wrapperName, rTuple, wrapperParameters)
+			wrapperBody:comment("Wrapper for `" .. concreteFunctionName .. "` impl `" .. common.showConstraintKind(a.interface))
+			wrapperBody:comment(common.showSignature(concreteSignature))
+			wrapperBody:comment(common.showSignature(f))
+			local rawTupleType = program:getTuple(table.map(cType, concreteSignature.returnTypes))
+			wrapperBody:write(rawTupleType .. " out = " .. fptr .. "(" .. table.concat(arguments, ", ") .. ");")
+			wrapperBody:write(program:getTuple(rts) .. " ret;")
+			for i, r in ipairs(rts) do
+				wrapperBody:assign("ret._" .. i, "(" .. r .. ")out._" .. i)
+			end
+			wrapperBody:write("return ret;")
+
+			program:write(closureType .. " " .. closureName .. ";")
+			program:assign(closureName .. ".data", needed)
+			program:assign(closureName .. ".func", wrapperName)
+			program:assign(tmp .. "." .. vtableMemberName(f.memberName), closureName)
 		end
-
-		local arguments = table.concat(argumentValues, ", ")
-		return func .. "(" .. arguments .. ")"
-	elseif constraint.tag == "this-constraint" then
-		return localName(constraint.instance.name) .. "->" .. structConstraintField(constraint.name)
+		program:comment("</concrete-vtable>")
+		return tmp, tmpType
 	end
-	error("unimplemented constraint tag `" .. constraint.tag .. "`")
-end
-
--- RETURNS a string representing a interface struct field name
-local function interfaceMember(name)
-	return "i_" .. luaizeName(name)
-end
-
--- REQUIRES that demandTuple has already been called; otherwise the referenced
--- tuple type doesn't exist
--- RETURNS a string that is a C type name
-local function preTupleName(list)
-	assert(list, listType "string")
-
-	-- TODO: deal with 0-tuples
-	local values = {}
-	for _, element in ipairs(list) do
-		table.insert(values, (element:gsub("%*", "_ptr")))
-		assert(not element:find("%s"))
-	end
-	local name = "tuple" .. #list
-	for i, value in ipairs(values) do
-		name = name .. "_" .. i .. "_" .. value
-	end
-
-	return name
-end
-
--- RETURNS a C function identifier
-local function cWrapperName(signature, class, interface)
-	return "wrapper_" .. luaizeName(class) .. "_" .. luaizeName(signature) .. "_is_" .. luaizeName(interface)
-end
-
-local counter = 0
-local function UID()
-	counter = counter + 1
-	return counter
+	error("unknown VTableIR tag `" .. a.tag .. "`")
 end
 
 -- RETURNS nothing
--- Appends strings to code
-local function generateStatement(statement, emit, structScope, semantics, demandTuple)
+-- MODIFIES program to include C statements executing the given statement
+local function generateStatement(statement, program, info)
 	assertis(statement, "StatementIR")
-	assertis(structScope, mapType("string", "string"))
-	assertis(demandTuple, "function")
-	statement = freeze(statement)
+	assertis(program, "object")
+	assertis(info, recordType {
+		constraints = mapType("string", recordType {
+			members = listType "Signature",
+		}),
+		unions = mapType("string", recordType {
+			tags = mapType("string", "integer"),
+		}),
+	})
 
-	if statement.tag == "block" then
-		for _, subStatement in ipairs(statement.statements) do
-			generateStatement(subStatement, emit, structScope, semantics, demandTuple)
+	program:comment(statement.tag)
+
+	if statement.tag == "proof" then
+		if statement.returns == "yes" then
+			program:write("assert(0); // assert false;")
+		else
+			program:comment("skipping proof")
 		end
 		return
-	end
-
-	-- Emits a comment
-	local function comment(message)
-		emit("// " .. message)
-	end
-
-	-- Plain statements
-	if statement.tag == "local" then
-		comment("var " .. statement.variable.name .. " " .. showType(statement.variable.type) .. ";")
-		emit(cType(statement.variable.type, structScope) .. " " .. localName(statement.variable.name) .. ";")
+	elseif statement.tag == "sequence" then
+		for _, s in ipairs(statement.statements) do
+			generateStatement(s, program, info)
+		end
 		return
-	elseif statement.tag == "string" then
-		comment(statement.destination.name .. " = " .. cEncodedString(statement.string) .. ";")
-		local name = localName(statement.destination.name)
-		emit(name .. " = ALLOCATE(smol_String);")
-		emit(name .. "->length = " .. #statement.string .. ";")
-		emit(name .. "->text = " .. cEncodedString(statement.string) .. ";")
+	elseif statement.tag == "string-load" then
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(smol_String_T)"
+		program:assign(lhs, rhs)
+		program:assign(lhs .. "->length", tostring(#statement.string))
+		program:assign(lhs .. "->text", cEncodedString(statement.string))
 		return
-	elseif statement.tag == "int" then
-		comment(statement.destination.name .. " = " .. statement.number .. ";")
-		local name = localName(statement.destination.name)
-		emit(name .. " = ALLOCATE(smol_Int);")
-		emit(name .. "->value = " .. luaEncodedNumber(statement.number) .. ";")
+	elseif statement.tag == "local" then
+		program:write(cType(statement.variable.type) .. " " .. localName(statement.variable.name) .. ";")
 		return
-	elseif statement.tag == "boolean" then
-		comment(statement.destination.name .. " = " .. tostring(statement.boolean) .. ";")
-		local name = localName(statement.destination.name)
-		emit(name .. " = ALLOCATE(smol_Boolean);")
-		emit(name .. "->value = " .. (statement.boolean and 1 or 0) .. ";")
-		return
-	elseif statement.tag == "this" then
-		comment(statement.destination.name .. " = this;")
-		emit(localName(statement.destination.name) .. " = this;")
-		return
-	elseif statement.tag == "unit" then
-		comment(statement.destination.name .. " = unit;")
-		emit(localName(statement.destination.name) .. " = NULL;")
+	elseif statement.tag == "nothing" then
+		program:comment("nothing statement")
 		return
 	elseif statement.tag == "assign" then
-		comment(statement.destination.name .. " = " .. statement.source.name .. ";")
-		emit(localName(statement.destination.name) .. " = " .. localName(statement.source.name) .. ";")
+		program:assign(localName(statement.destination.name), localName(statement.source.name))
+		return
+	elseif statement.tag == "return" then
+		local types = {}
+		local values = {}
+		for _, r in ipairs(statement.sources) do
+			table.insert(types, cType(r.type))
+			table.insert(values, localName(r.name))
+		end
+		local rhs = "(" .. program:getTuple(types) .. "){" .. table.concat(values, ", ") .. "}"
+		program:write("return " .. rhs .. ";")
+		return
+	elseif statement.tag == "if" then
+		local condition = localName(statement.condition.name) .. "->value"
+		program:write("if (" .. condition .. ") {")
+		generateStatement(statement.bodyThen, program:section(1), info)
+		program:write("} else {")
+		generateStatement(statement.bodyElse, program:section(1), info)
+		program:write("}")
+		return
+	elseif statement.tag == "int-load" then
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(smol_Int_T)"
+		program:assign(lhs, rhs)
+		program:assign(lhs .. "->value", cEncodedNumber(statement.number))
 		return
 	elseif statement.tag == "new-class" then
-		comment(statement.destination.name .. " = new(...);")
-
-		-- Allocate a new instance
-		local name = localName(statement.destination.name)
-		local cT = cType(statement.destination.type, structScope)
-		assert(cT:sub(-1) == "*")
-		cT = cT:sub(1, -2)
-		emit(name .. " = ALLOCATE(" .. cT .. ");")
-
-		for key, value in spairs(statement.fields) do
-			emit(name .. "->" .. classFieldName(key) .. " = " .. localName(value.name) .. ";")
-		end
-		for key, constraint in spairs(statement.constraints) do
-			local constraintField = structConstraintField(key)
-			emit(name .. "->" .. constraintField .. " = " .. cConstraint(constraint, semantics) .. ";")
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(" .. cType(statement.destination.type, true) .. ")"
+		program:assign(lhs, rhs)
+		for key, source in pairs(statement.fields) do
+			program:assign(lhs .. "->" .. classFieldName(key), localName(source.name))
 		end
 		return
 	elseif statement.tag == "new-union" then
-		comment(statement.destination.name .. " = new(" .. statement.field .. " = ...);")
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(" .. cType(statement.destination.type, true) .. ")"
+		program:assign(lhs, rhs)
 
-		-- Allocate a new instance
-		local destination = localName(statement.destination.name)
-		local cT = cType(statement.destination.type, structScope)
-		assert(cT:sub(-1) == "*")
-		cT = cT:sub(1, -2)
-		emit(destination .. " = ALLOCATE(" .. cT .. ");")
-
-		local union = table.findwith(semantics.compounds, "name", statement.type.name)
-		assert(union and union.tag == "union")
-
-		-- Initialize the tag
-		emit(destination .. "->" .. TAG_FIELD .. " = " .. unionTagValue(union, statement.field) .. ";")
-
-		-- Initialize the value
-		local value = localName(statement.value.name)
-		emit(destination .. "->" .. unionFieldName(statement.field) .. " = " .. value .. ";")
-		return
-	elseif statement.tag == "return" then
-		comment("return ...;")
-
-		local types = {}
-		for _, source in ipairs(statement.sources) do
-			table.insert(types, cType(source.type, structScope))
-		end
-		local tuple = preTupleName(types)
-		local values = table.map(function(v) return localName(v.name) end, statement.sources)
-		emit("return " .. tuple .. "_make(" .. table.concat(values, ", ") .. ");")
-		return
-	elseif statement.tag == "if" then
-		comment("if ... {")
-		emit("if (" .. localName(statement.condition.name) .. "->value) {")
-		generateStatement(statement.bodyThen, indentedEmitter(emit), structScope, semantics, demandTuple)
-		emit("} else {")
-		generateStatement(statement.bodyElse, indentedEmitter(emit), structScope, semantics, demandTuple)
-		emit("}")
+		local defName = statement.destination.type.packageName .. ":" .. statement.destination.type.definitionName
+		local definition = info.unions[defName]
+		assert(definition)
+		local fieldID = cEncodedNumber(definition.tags[statement.field])
+		program:assign(lhs .. "->" .. TAG_FIELD, fieldID)
+		program:assign(lhs .. "->" .. unionFieldName(statement.field), localName(statement.value.name))
 		return
 	elseif statement.tag == "static-call" then
-		comment("... = " .. statement.signature.longName .. "(...);")
-		-- Collect value arguments
-		local argumentNames = {}
-		for _, argument in ipairs(statement.arguments) do
-			table.insert(argumentNames, localName(argument.name))
+		-- Generate constraints argument
+		local vtables = {}
+		local vtableTypes = {}
+		for _, a in ipairs(statement.constraintArguments) do
+			local vName, vType = generateVTable(a, program, info)
+			table.insert(vtables, vName)
+			table.insert(vtableTypes, vType)
 		end
-
-		-- Collect constraints
-		-- XXX: right now, we're guaranteed these are in lexical order
-		local keys = table.keys(statement.constraints)
-		table.sort(keys)
-		for _, key in ipairs(keys) do
-			local constraint = statement.constraints[key]
-			table.insert(argumentNames, cConstraint(constraint, semantics))
+		
+		local cArguments = {}
+		if #vtables == 0 then
+			table.insert(cArguments, "NULL")
+		else
+			-- Create constraint argument
+			local cTmp = uniqueTmp()
+			local tupleType = program:getTuple(vtableTypes)
+			local tupleValue = "(" .. tupleType .. "){" .. table.concat(vtables, ", ") .. "}"
+			program:assign(tupleType .. " " .. cTmp, tupleValue)
+			table.insert(cArguments, "&" .. cTmp)
 		end
+		
+		-- Get static form of signature
+		local staticSignature = info.functionSignatures[statement.signature.longName]
 
-		-- Emit code
-		local invocation = staticFunctionName(statement.signature.longName)
-		local arguments = table.concat(argumentNames, ", ")
-
-		local definition = table.findwith(semantics.compounds, "name", statement.baseType.name)
-		assert(definition)
-		local signature = statement.signature
-
-		local types = {}
-		for _, r in ipairs(signature.returnTypes) do
-			table.insert(types, cType(r, structScope))
+		-- Add regular value arguments
+		for i, a in ipairs(statement.arguments) do
+			-- An explicit cast is necessary if the signature statically takes
+			-- generics
+			local cast = "(" .. cType(staticSignature.parameters[i].type) .. ")"
+			table.insert(cArguments, cast .. localName(a.name))
 		end
-		local tuple = preTupleName(types)
-		local tmp = "_tmp" .. UID()
-		emit(tuple .. " " .. tmp .. " = " .. invocation .. "(" .. arguments .. ");")
+		
+		-- Invoke the function
+		program:comment("static-call " .. common.showSignature(statement.signature))
+		local tmpType = program:getTuple(table.map(cType, staticSignature.returnTypes))
+		local tmp = uniqueTmp()
+		local cName = staticFunctionName(statement.signature.longName)
+		local invocation = cName .. "(" .. table.concat(cArguments, ", ") .. ")"
+		program:assign(tmpType .. " " .. tmp, invocation)
 
-		-- Assign each resulting tuple
-		for i, destination in ipairs(statement.destinations) do
-			local cast = "(" .. cType(destination.type, structScope) .. ")"
-			emit(localName(destination.name) .. " = " .. cast .. tmp .. "._" .. i .. ";")
+		-- Write to destinations
+		for i, d in ipairs(statement.destinations) do
+			-- An explicit cast is necessary if the signature statically returns
+			-- generics
+			local cast = "(" .. cType(d.type) .. ")"
+			program:assign(localName(d.name), cast .. tmp .. "._" .. i)
 		end
 		return
-	elseif statement.tag == "method-call" then
-		comment("... = " .. statement.signature.longName .. "(...);")
+	elseif statement.tag == "dynamic-call" then
+		local vName, vType = generateVTable(statement.constraint, program, info)
 
-		-- Collect C arguments
-		local argumentNames = {}
-
-		-- Add the self argument
-		table.insert(argumentNames, localName(statement.baseInstance.name))
-
-		-- Add explicit value arguments
-		for _, argument in ipairs(statement.arguments) do
-			table.insert(argumentNames, localName(argument.name))
-		end
-		local arguments = table.concat(argumentNames, ", ")
-
-		-- Get the signature
-		local baseName = statement.baseInstance.type.name
-		local compound = table.findwith(semantics.compounds, "name", baseName)
-		local builtin = table.findwith(semantics.builtins, "name", baseName)
-		local definition = compound or builtin
-		assert(definition)
-		local signature = statement.signature
-
-		-- Get the C return-type of the function (which may not be the same
-		-- as the definitions because of generics)
-		local destinationTypes = {}
-		for _, returnType in ipairs(signature.returnTypes) do
-			table.insert(destinationTypes, cType(returnType, structScope))
+		-- Add regular value arguments
+		local cArguments = {}
+		for _, a in ipairs(statement.arguments) do
+			table.insert(cArguments, localName(a.name))
 		end
 
-		local tmp = "tmp" .. UID()
-
-		local tuple = preTupleName(destinationTypes)
-		local invocation = methodFunctionName(signature.longName) .. "(" .. arguments .. ")"
-		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
-		for i, destination in ipairs(statement.destinations) do
-			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
+		if #cArguments == 0 then
+			program:comment("Problematic 0 argument call!")
 		end
+
+		-- Invoke the function
+		local tmpType = program:getTuple(table.map(cType, statement.signature.returnTypes))
+		local tmp = uniqueTmp()
+		local closure = vName .. "." .. vtableMemberName(statement.signature.memberName)
+		table.insert(cArguments, 1, closure .. ".data")
+		local invocation = closure .. ".func(" .. table.concat(cArguments, ", ") .. ")"
+		program:assign(tmpType .. " " .. tmp, invocation)
+
+		-- Write to destinations
+		for i, d in ipairs(statement.destinations) do
+			program:assign(localName(d.name), tmp .. "._" .. i)
+		end
+		return
+	elseif statement.tag == "boolean" then
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(smol_Boolean_T)"
+		program:assign(lhs, rhs)
+		program:assign(lhs .. "->value", statement.boolean and "1" or "0")
 		return
 	elseif statement.tag == "field" then
-		comment(statement.destination.name .. " = " .. statement.base.name .. "." .. statement.name .. ";")
-		emit(localName(statement.destination.name) .. " = ")
-		emit("\t" .. localName(statement.base.name) .. "->" .. classFieldName(statement.name) .. ";")
+		local lhs = localName(statement.destination.name)
+		local rhs = localName(statement.base.name) .. "->" .. classFieldName(statement.name)
+		program:assign(lhs, rhs)
 		return
-	elseif statement.tag == "generic-static-call" then
-		comment("... = " .. "... ." .. statement.signature.longName .. "(...);")
-
-		-- Collect explicit arguments
-		local argumentValues = {}
-		for _, argument in ipairs(statement.arguments) do
-			table.insert(argumentValues, localName(argument.name))
-		end
-
-		if #argumentValues < 1 then
-			-- Closure calls must be given at least one argument
-			table.insert(argumentValues, "NULL")
-		end
-		local arguments = table.concat(argumentValues, ", ")
-
-		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
-		assert(interface)
-		local signature = statement.signature
-
-		local destinationTypes = {}
-		for _, returnType in ipairs(signature.returnTypes) do
-			table.insert(destinationTypes, cType(returnType, structScope))
-		end
-		local tuple = preTupleName(destinationTypes)
-
-		local constraint = cConstraint(statement.constraint, semantics)
-		local member = interfaceMember(statement.signature.memberName)
-		local invocation = "CLOSURE_CALL(" .. constraint .. "->" .. member .. ", " .. arguments .. ")"
-		local tmp = "tmp" .. UID()
-		emit(tuple .. " " .. tmp .. " = " .. invocation .. ";")
-
-		-- Assign from tmp
-		for i, destination in ipairs(statement.destinations) do
-			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
-		end
-		return
-	elseif statement.tag == "generic-method-call" then
-		comment("... = " .. statement.signature.longName .. "(...);")
-		local destinations = table.map(function(x) return localName(x.name) end, statement.destinations)
-
-		-- Collect the arguments
-		local argumentValues = {}
-
-		-- The first argument is the implicit this
-		table.insert(argumentValues, localName(statement.baseInstance.name))
-
-		-- Add explicit arguments
-		for _, argument in ipairs(statement.arguments) do
-			table.insert(argumentValues, localName(argument.name))
-		end
-
-		local arguments = table.concat(argumentValues, ", ")
-
-		local interface = table.findwith(semantics.interfaces, "name", statement.constraint.interface.name)
-		assert(interface)
-		local signature = statement.signature
-
-		local tmp = "_tmp" .. UID()
-		local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-		emit(outType .. " " .. tmp .. " = CLOSURE_CALL(" .. cConstraint(statement.constraint, semantics) .. "->" .. interfaceMember(signature.memberName) .. ", " .. arguments .. ");")
-		for i, destination in ipairs(statement.destinations) do
-			emit(localName(destination.name) .. " = " .. tmp .. "._" .. i .. ";")
-		end
-		return
-	elseif statement.tag == "match" then
-		comment("match " .. statement.base.name .. " {")
-		assert(#statement.cases >= 1)
-		for i, case in ipairs(statement.cases) do
-			if i > 1 then
-				emit("else")
-			end
-			local id = tostring(i)
-			comment("case ? " .. case.variant)
-			emit("if (" .. localName(statement.base.name) .. "->" .. TAG_FIELD .. " == " .. id .. ") {")
-			generateStatement(case.statement, indentedEmitter(emit), structScope, semantics, demandTuple)
-			emit("}")
-		end
-		emit("else { assert(0); }")
-		comment("}")
-		return
-	elseif statement.tag == "variant" then
-		comment(statement.destination.name .. " = " .. statement.base.name .. "." .. statement.variant .. "; (union)")
-		emit(localName(statement.destination.name) .. " = ")
-		emit("\t" .. localName(statement.base.name) .. "->" .. unionFieldName(statement.variant) .. ";")
-		return
-	elseif statement.tag == "assume" then
-		error "assume statements should be guarded by proof"
-	elseif statement.tag == "verify" then
-		error "verify statements should be guarded by proof"
-	elseif statement.tag == "proof" then
-		comment("proof")
+	elseif statement.tag == "unit" then
+		local lhs = localName(statement.destination.name)
+		program:assign(lhs, "NULL")
 		return
 	elseif statement.tag == "isa" then
-		comment(statement.destination.name .. " = " .. statement.base.name .. " isa " .. statement.variant)
-		emit(localName(statement.destination.name) .. " = ALLOCATE(smol_Boolean);")
-		local union = table.findwith(semantics.compounds, "name", statement.base.type.name)
-		assert(union and union.tag == "union")
-
-		-- Set value
-		local tagValue = unionTagValue(union, statement.variant)
-		local rhs = localName(statement.base.name) .. "->tag == " .. tagValue
-		emit(localName(statement.destination.name) .. "->value = " .. rhs .. ";")
+		local lhs = localName(statement.destination.name)
+		local rhs = "ALLOCATE(smol_Boolean_T)"
+		local union = info.unions[statement.base.type.packageName .. ":" .. statement.base.type.definitionName]
+		local getTag = localName(statement.base.name) .. "->" .. TAG_FIELD
+		local value = getTag .. " == " .. union.tags[statement.variant]
+		program:assign(lhs, rhs)
+		program:assign(lhs .. "->value", value)
+		return
+	elseif statement.tag == "variant" then
+		local lhs = localName(statement.destination.name)
+		local rhs = localName(statement.base.name) .. "->" .. unionFieldName(statement.variant)
+		program:assign(lhs, rhs)
+		return
+	elseif statement.tag == "match" then
+		local tagVar = uniqueTmp() .. "tag"
+		local getTag = localName(statement.base.name) .. "->" .. TAG_FIELD
+		program:assign(TAG_TYPE .. " " .. tagVar, getTag)
+		local union = info.unions[statement.base.type.packageName .. ":" .. statement.base.type.definitionName]
+		for i, case in ipairs(statement.cases) do
+			local tagValue = union.tags[case.variant]
+			if i ~= 1 then
+				program:write("else")
+			end
+			program:write("if (" .. tagVar .. " == " .. tagValue .. ") {")
+			local body = program:section(1)
+			generateStatement(case.statement, body, info)
+			program:write("}")
+		end
+		assert(#statement.cases ~= 0)
+		program:write("else {")
+		program:write("\tassert(0);")
+		program:write("}")
 		return
 	end
 
-	comment(statement.tag .. " ????")
-	print("unknown statement tag `" .. statement.tag .. "`")
-end
-
--- RETURNS a C function identifier
-local function cEqMethodName(kind, name)
-	assert(kind == "class" or kind == "union")
-	assertis(name, "string")
-
-	return "smol_eq_" .. kind .. "_" .. name:gsub(":", "_")
+	error("unknown statement tag `" .. statement.tag .. "`")
 end
 
 return function(semantics, arguments)
@@ -597,8 +846,12 @@ return function(semantics, arguments)
 		quit("Could not open file `" .. arguments.out .. "` for writing")
 	end
 
-	local code = {"// Generated by Smol Lua compiler", commented(INVOKATION), ""}
-	table.insert(code, [[
+	local code = CProgram.new()
+	code.preamble:write("// Generated by Smol Lua compiler ")
+	code.preamble:write(commented(INVOKATION))
+	code.preamble:write("")
+
+	code.preamble:write([[
 #include "assert.h"
 #include "stdint.h"
 #include "stdio.h"
@@ -611,717 +864,218 @@ return function(semantics, arguments)
 
 #define PANIC(message) do { printf(message "\n"); exit(1); } while (0)
 
-// NOTE: closures must take at least one argument
-#define CLOSURE(returnType, ...)                \
-	struct {                                    \
-		void* data;                             \
-		returnType (*func)(void*, __VA_ARGS__); \
-	}
-
-#define CLOSURE_CALL(closure, ...) (closure.func(closure.data, __VA_ARGS__))
-
 typedef struct {
 	void* instance;
 	int (*eq)(void*, void*);
 	void (*destruct)(void*);
-} object_t;
+} object_T;
 
-]])
-
-	local forwardSequence = {}
-	table.insert(code, "// Forward type declarations")
-	table.insert(code, forwardSequence)
-	table.insert(code, "")
-	local function forwardDeclareStruct(private, public)
-		assertis(private, "string")
-		assert(not private:find(";"))
-		assertis(public, "string")
-
-		table.insert(forwardSequence, "struct " .. private .. "; typedef struct " .. private .. " " .. public .. ";")
-	end
-
-	table.insert(code, "// Tuples")
-	local tupleSequence = {}
-	table.insert(code, tupleSequence)
-	table.insert(code, "")
-
-	-- RETURNS a string that is a C type
-	local generatedTuples = {}
-	local function demandTuple(list)
-		assert(list, listType "string")
-
-		-- TODO: deal with 0-tuples
-		local name = preTupleName(list)
-		if not generatedTuples[name] then
-			generatedTuples[name] = true
-			local sequence = {}
-			-- Open struct impl
-			table.insert(sequence, "struct _" .. name .. " {")
-			local parameters = {}
-			for i = 1, #list do
-				table.insert(parameters, list[i] .. " _" .. i)
-				table.insert(sequence, "\t" .. list[i] .. " _" .. i .. ";")
-			end
-			if #list == 0 then
-				table.insert(sequence, "\tchar _;")
-			end
-
-			-- Close struct
-			table.insert(sequence, "};")
-			table.insert(sequence, "")
-
-			table.insert(sequence, name .. " " .. name .. "_make(" .. table.concat(parameters, ", ") .. ") {")
-			table.insert(sequence, "\t" .. name .. " out;")
-			for i = 1, #list do
-				table.insert(sequence, "\tout._" .. i .. " = _" .. i .. ";")
-			end
-			table.insert(sequence, "\treturn out;")
-			table.insert(sequence, "}")
-			table.insert(sequence, "")
-			table.insert(tupleSequence, table.concat(sequence, "\n"))
-			forwardDeclareStruct("_" .. name, name)
-		end
-		return name
-	end
-
-	table.insert(code, [[
-struct _smol_Unit {
-	void* nothing;
-};
-
-struct _smol_Boolean {
-	int value;
-};
-
-struct _smol_String {
-	size_t length;
-	char* text;
-};
-
-struct _smol_Int {
-	int64_t value;
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 ]])
 
-	forwardDeclareStruct("_smol_Unit", "smol_Unit")
-	forwardDeclareStruct("_smol_Boolean", "smol_Boolean")
-	forwardDeclareStruct("_smol_Int", "smol_Int")
-	forwardDeclareStruct("_smol_String", "smol_String")
+	code:defineStruct("smol_Unit_T", {
+		{type = "void*", name = "nothing"},
+	})
 
-	-- Build the struct scope map
-	local structScope = {}
-	for _, compound in ipairs(semantics.compounds) do
-		assert(compound.tag == "class" or compound.tag == "union")
-		if compound.tag == "class" then
-			structScope[compound.name] = classStructName(compound.name)
-		elseif compound.tag == "union" then
-			structScope[compound.name] = unionStructName(compound.name)
-		end
-	end
-	structScope = freeze(structScope)
+	code:defineStruct("smol_Boolean_T", {
+		{type = "int", name = "value"},
+	})
 
-	-- Generate a struct for each interface
+	code:defineStruct("smol_String_T", {
+		{type = "size_t", name = "length"},
+		{type = "char*", name = "text"},
+	})
+
+	code:defineStruct("smol_Int_T", {
+		{type = "int64_t", name = "value"},
+	})
+	
+	-- Maintain some global information needed to compile statements
+	local globalInfo = {
+		constraints = {},
+		unions = {},
+		functionSignatures = {},
+	}
+
+	-- Generate a vtable struct for each interface
 	for _, interface in ipairs(semantics.interfaces) do
-		table.insert(code, "// interface " .. interface.name)
-		local structName = interfaceStructName(interface.name)
-		table.insert(code, "struct _" .. structName .. " {")
-		for _, signature in ipairs(interface.signatures) do
-			local returns = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-			local name = interfaceMember(signature.memberName)
-			local parameters = {}
-			if signature.modifier == "method" then
-				table.insert(parameters, "void* /*this*/")
+		table.insert(code, "// interface " .. interface.fullName)
+		local structName = interfaceStructName(interface.fullName)
+		local fields = {{type = "char", name = "_"}}
+		local memberList = {}
+		for _, func in pairs(interface._functionMap) do
+			local signature = func.signature
+
+			-- Get return types
+			local rt = {}
+			for _, r in ipairs(signature.returnTypes) do
+				table.insert(rt, cType(r))
 			end
-			for _, parameter in ipairs(signature.parameters) do
-				table.insert(parameters, cType(parameter.type, structScope))
+			assert(1 <= #rt)
+
+			-- Get parameter types, padding with "void*" to get at least one
+			local pt = {}
+			for _, p in ipairs(signature.parameters) do
+				table.insert(pt, cType(p.type))
 			end
 
-			local prototype = #parameters == 0 and "void* /*ignore*/ " or table.concat(parameters, ", ")
-			table.insert(code, "\tCLOSURE(" .. returns .. ", " .. prototype .. ") " .. name .. ";")
+			local fieldType = code:getClosure(code:getTuple(rt), pt)
+
+			table.insert(memberList, signature)
+			table.insert(fields, {
+				name = vtableMemberName(signature.memberName),
+				type = fieldType,
+			})
 		end
-		table.insert(code, "\tchar _;")
-		table.insert(code, "};")
-		forwardDeclareStruct("_" .. structName, structName)
-		table.insert(code, "")
+
+		table.sort(memberList, function(a, b)
+			return a.memberName < b.memberName
+		end)
+		table.sort(fields, function(a, b)
+			return a.name < b.name
+		end)
+
+		-- Save struct info
+		globalInfo.constraints[interface.fullName] = {members = memberList}
+
+		code:defineStruct(structName, fields)
 	end
 
 	-- Generate a struct for each class
 	for _, class in ipairs(semantics.compounds) do
-		if class.tag == "class" then
-			table.insert(code, "// class " .. class.name)
-			local structName = classStructName(class.name)
-			table.insert(code, "struct _" .. structName .. " {")
-
-			-- Add a foreign field
-			table.insert(code, "\tvoid* foreign;")
+		if class.tag == "class-definition" then
+			local structName = compoundStructName(class.fullName)
+			local fields = {{type = "void*", name = "foreign"}}
 
 			-- Generate all value fields
-			for _, field in ipairs(class.fields) do
-				table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. classFieldName(field.name) .. ";")
+			for _, field in pairs(class._fieldMap) do
+				table.insert(fields, {
+					name = classFieldName(field.name),
+					type = cType(field.type),
+				})
 			end
 
-			-- Generate all constraint fields
-			for i, generic in ipairs(class.generics) do
-				for j, constraint in ipairs(generic.constraints) do
-					local t = interfaceStructName(constraint.interface.name) .. "*"
-					-- XXX: constraint key
-					local key = "#" .. i .. "_" .. j
-					table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
-				end
-			end
-
-			table.insert(code, "};")
-			forwardDeclareStruct("_" .. structName, structName)
-			table.insert(code, "")
+			code:defineStruct(structName, fields)
 		end
 	end
 
 	-- Generate a tagged union for each union
 	for _, union in ipairs(semantics.compounds) do
-		if union.tag == "union" then
-			-- Open struct definition
-			table.insert(code, "// union " .. union.name)
-			local structName = unionStructName(union.name)
+		if union.tag == "union-definition" then
+			local structName = compoundStructName(union.fullName)
+			globalInfo.unions[union.fullName] = {tags = {}}
 
 			-- TODO: Generate a union rather than a struct
-			table.insert(code, "struct _" .. structName .. "{")
+			local fields = {{type = TAG_TYPE, name = TAG_FIELD}}
 
 			-- Generate tag
-			assert(#union.fields < 64)
-			table.insert(code, "\tunsigned " .. TAG_FIELD .. ";")
+			assert(#table.keys(union._fieldMap) < 2^16, "TODO: Too many fields!")
 
 			-- Generate all value fields
-			for _, field in ipairs(union.fields) do
-				table.insert(code, "\t" .. cType(field.type, structScope) .. " " .. unionFieldName(field.name) .. ";")
+			local fieldList = {}
+			for _, field in pairs(union._fieldMap) do
+				table.insert(fieldList, field.name)
+				table.insert(fields, {
+					type = cType(field.type),
+					name = unionFieldName(field.name),
+				})
+			end
+			table.sort(fields, function(a, b)
+				return a.name < b.name
+			end)
+			table.sort(fieldList)
+
+			-- Save tag map
+			for i, f in ipairs(fieldList) do
+				globalInfo.unions[union.fullName].tags[f] = i
 			end
 
-			-- Generate all constraint fields
-			for i, generic in ipairs(union.generics) do
-				for j, constraint in ipairs(generic.constraints) do
-					local t = interfaceStructName(constraint.interface.name) .. "*"
-					-- XXX: constraint key
-					local key = "#" .. i .. "_" .. j
-					table.insert(code, "\t" .. t .. " " .. structConstraintField(key) .. ";")
-				end
-			end
-
-			-- Close struct definition
-			table.insert(code, "};")
-			forwardDeclareStruct("_" .. structName, structName)
-			table.insert(code, "")
+			-- Create VTable struct
+			code:defineStruct(structName, fields)
 		end
 	end
 
-	local prototypeSequence = {}
-	table.insert(code, prototypeSequence)
-	table.insert(code, "")
-	-- Add a prototype string to up here
-	local function genPrototype(prototype)
-		assert(prototype:find(" ") and prototype:find(";"))
-		table.insert(prototypeSequence, prototype)
-	end
-
-	-- Generate a constraint-building-function for each constraint
-	for _, definition in ipairs(semantics.compounds) do
-		for i, implement in ipairs(definition.implements) do
-			local requirements = {}
-			for key, constraint in spairs(definition.constraints) do
-				table.insert(requirements, {name = key, constraint = constraint})
-			end
-			table.sort(requirements, function(a, b) return a.name < b.name end)
-			local parameters = {}
-			local parameterTypes = {}
-			for j, p in ipairs(requirements) do
-				local t = interfaceStructName(p.constraint.name) .. "*"
-				table.insert(parameters, t .. " p" .. i .. "_" .. j)
-				table.insert(parameterTypes, t)
-			end
-
-			local interface = table.findwith(semantics.interfaces, "name", implement.name)
-			assert(interface)
-
-			-- Generate the wrapper for each method part of the interface
-			local wrapped = {}
-			for _, signature in ipairs(interface.signatures) do
-				table.insert(code, "// wrapper for impl")
-
-				local implementingSignature = table.findwith(definition.signatures, "memberName", signature.memberName)
-
-				-- Collect the constraints
-				local constraints = {}
-				for i, generic in ipairs(definition.generics) do
-					for j, constraint in ipairs(generic.constraints) do
-						table.insert(constraints, interfaceStructName(constraint.interface.name) .. "*")
-					end
-				end
-
-				local dataTupleType = demandTuple(constraints) .. "*"
-
-				-- Get the out type from the interface
-				local wrapperName = cWrapperName(signature.memberName, definition.name, interface.name)
-				wrapped[signature.memberName] = wrapperName
-				local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-				local cParameters = {"void* data_general"}
-
-				-- Add implicit this parameter
-				if signature.modifier == "method" then
-					table.insert(cParameters, "void* " .. C_THIS_LOCAL)
-				end
-
-				-- Add explicit value parameters
-				for _, parameter in ipairs(signature.parameters) do
-					local t = cType(parameter.type, structScope)
-					local name = localName(parameter.name)
-					table.insert(cParameters, t .. " " .. name)
-				end
-				if #cParameters == 1 then
-					table.insert(cParameters, "void* /*ignore*/ _")
-				end
-
-				-- Create prototype for wrapper
-				local prototype = outType .. " " .. wrapperName .. "(" .. table.concat(cParameters, ", ") .. ")"
-				table.insert(code, prototype .. " {")
-				table.insert(code, "\t" .. dataTupleType .. " data = data_general;")
-
-				-- Collect the value arguments for the implementation
-				local arguments = {}
-				if signature.modifier == "method" then
-					-- TODO: explicitly cast to correct type
-					local cast = "(void*)"
-					table.insert(arguments, cast .. C_THIS_LOCAL)
-				end
-
-				for _, parameter in ipairs(signature.parameters) do
-					table.insert(arguments, localName(parameter.name))
-				end
-
-				-- Collect the constraint arguments for the implementation
-				if signature.modifier == "static" then
-					-- Only static functions take parameters
-					for i, constraint in ipairs(constraints) do
-						table.insert(arguments, "data->_" .. i)
-					end
-				end
-
-				local implName
-				if signature.modifier == "static" then
-					implName = staticFunctionName(implementingSignature.longName)
-				else
-					implName = methodFunctionName(implementingSignature.longName)
-				end
-
-				local invocation = implName .. "(" .. table.concat(arguments, ", ") .. ")"
-
-				-- May need to convert tuple types
-				local func = table.findwith(definition.signatures, "memberName", signature.memberName)
-				local defOut = cTypeTuple(func.returnTypes, demandTuple, structScope)
-				local intOut = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-				table.insert(code, "\t" .. defOut .. " concrete_out = " .. invocation .. ";")
-				table.insert(code, "\t" .. intOut .. " out;")
-				for i = 1, #signature.returnTypes do
-					table.insert(code, "\tout._" .. i .. " = concrete_out._" .. i .. ";")
-				end
-				table.insert(code, "\treturn out;")
-				table.insert(code, "}")
-			end
-
-			-- Generate the main function
-			local functionName = concreteConstraintFunctionName(definition.name, implement.name)
-			local outValueType = interfaceStructName(implement.name)
-			table.insert(code, "// " .. definition.name .. " implements " .. implement.name)
-			table.insert(code, outValueType .. "* " .. functionName .. "(" .. table.concat(parameters, ", ") .. ") {")
-			local tuple = demandTuple(parameterTypes)
-			table.insert(code, "\t" .. tuple .. "* closed = ALLOCATE(" .. tuple .. ");")
-			for j = 1, #parameters do
-				table.insert(code, "\tclosed->_" .. i .. " = p" .. i .. "_" .. j .. ";")
-			end
-
-			table.insert(code, "\t" .. outValueType .. "* out = ALLOCATE(" .. outValueType .. ");")
-			for _, signature in ipairs(interface.signatures) do
-				table.insert(code, "\tout->" .. interfaceMember(signature.memberName) .. ".data = closed;")
-				local func = wrapped[signature.memberName]
-				table.insert(code, "\tout->" .. interfaceMember(signature.memberName) .. ".func = " .. func .. ";")
-			end
-
-			table.insert(code, "\treturn out;")
-			table.insert(code, "}")
-			table.insert(code, "")
-		end
-	end
-
-	-- Add separator before functions
-	table.insert(code, string.rep("/", 80))
-	table.insert(code, "")
-
-	-- Generate the tuple types/prototypes for builtins
-	local builtinFuncs = {}
-	for _, builtin in ipairs(semantics.builtins) do
-		for _, signature in ipairs(builtin.signatures) do
-			-- Generate function header
-			local cFunctionName
-			local cParameters
-			if signature.modifier == "static" then
-				cFunctionName = staticFunctionName(signature.longName)
-				cParameters = {}
-			else
-				assert(signature.modifier == "method")
-				cFunctionName = methodFunctionName(signature.longName)
-				cParameters = {"smol_" .. builtin.name .. "* " .. C_THIS_LOCAL}
-			end
-
-			-- Add value parameters
-			for _, parameter in ipairs(signature.parameters) do
-				table.insert(cParameters, cType(parameter.type, structScope) .. " " .. localName(parameter.name))
-			end
-
-			local outType = cTypeTuple(signature.returnTypes, demandTuple, structScope)
-			local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
-			genPrototype(prototype .. ";")
-		end
+	-- Save the signatures of all functions
+	for _, func in ipairs(semantics.functions) do
+		globalInfo.functionSignatures[func.signature.longName] = func.signature
 	end
 
 	-- Generate the body for each method and static
 	for _, func in ipairs(semantics.functions) do
-		local fullName = func.definitionName .. "." .. func.name
-		table.insert(code, "// " .. func.signature.modifier .. " " .. fullName)
-
-		local definition = table.findwith(semantics.compounds, "name", func.definitionName)
-		assert(definition)
-		local thisType = cDefinitionType(definition)
-
 		-- Generate function header
-		local cFunctionName
-		local cParameters
-		if func.signature.modifier == "static" then
-			cFunctionName = staticFunctionName(func.signature.longName)
-			cParameters = {}
-		else
-			assert(func.signature.modifier == "method")
-			cFunctionName = methodFunctionName(func.signature.longName)
-			cParameters = {thisType .. " " .. C_THIS_LOCAL}
+		local cFunctionName = staticFunctionName(func.signature.longName)
+		local cParameters = {}
+
+		-- Add constraint parameter(s)
+		local vtableTypes = {}
+		for _, constraintArgument in ipairs(func.constraintArguments) do
+			local t = cVTableType(constraintArgument.constraint)
+			table.insert(vtableTypes, t)
 		end
+		if #vtableTypes == 0 then
+			-- Pad tuple to length 1
+			table.insert(vtableTypes, "int")
+		end
+
+		table.insert(cParameters, {
+			type = code:getTuple(vtableTypes) .. "*",
+			name = CONSTRAINT_PARAMETER,
+		})
 
 		-- Add value parameters
-		for _, parameter in ipairs(func.parameters) do
-			table.insert(cParameters, cType(parameter.type, structScope) .. " " .. localName(parameter.name))
+		for _, parameter in ipairs(func.signature.parameters) do
+			table.insert(cParameters, {
+				type = cType(parameter.type),
+				name = localName(parameter.name),
+			})
 		end
 
-		-- Add constraint parameters
-		for i, generic in ipairs(func.generics) do
-			for j, constraint in ipairs(generic.constraints) do
-				local interface = constraint.interface
-				assertis(interface, "InterfaceType+")
+		-- Get the returns
+		local cOutType = code:getTuple(table.map(cType, func.signature.returnTypes))
 
-				local t = interfaceStructName(interface.name) .. "*"
-				local identifier = C_CONSTRAINT_PARAMETER_PREFIX .. "_" .. i .. "_" .. j
-				table.insert(cParameters, t .. " " .. identifier)
-			end
-		end
-		local outType = cTypeTuple(func.returnTypes, demandTuple, structScope)
-		local prototype = outType .. " " .. cFunctionName .. "(" .. table.concat(cParameters, ", ") .. ")"
-		genPrototype(prototype .. ";")
+		-- Generate the function prototype
+		local body = code:defineFunction(cFunctionName, cOutType, cParameters)
+		body:comment(common.showSignature(func.signature))
 
 		-- Generate function body
 		if not func.signature.foreign then
-			table.insert(code, prototype .. " {")
-			local function emit(line)
-				table.insert(code, "\t" .. line)
+			-- Get global information about the function
+			local parameterIndices = {}
+			for i, a in ipairs(func.constraintArguments) do
+				parameterIndices[a.name] = i
 			end
-			generateStatement(func.body, emit, structScope, semantics, demandTuple)
+			local info = table.with(globalInfo, "parameterIndices", parameterIndices)
 
-			-- Close function body
-			if func.body.returns ~= "yes" then
-				assert(#func.returnTypes == 1)
-				assert(func.returnTypes[1].tag == "keyword-type+")
-				assert(func.returnTypes[1].name == "Unit")
-
-				table.insert(code, "\treturn (tuple1_1_smol_Unit_ptr){NULL};")
-			end
-			table.insert(code, "}")
+			-- Compile the function
+			assert(func.body.returns == "yes")
+			generateStatement(func.body, body, info)
 		else
-			table.insert(code, "// is foreign")
+			-- Get body from table
+			local impl = FOREIGN_IMPLEMENTATION[func.signature.longName]
+			assert(impl, "no impl for foreign `" .. func.signature.longName .. "`")
+			body:comment("Foreign function `" .. func.signature.longName .. "`")
+			body:write(impl)
+
+			-- Wrap for tuple type
+			local rhs = "(" .. cOutType .. "){"
+			for i = 1, #func.signature.returnTypes do
+				if i ~= 1 then
+					rhs = rhs .. ", "
+				end
+				rhs = rhs .. "out" .. i
+			end
+			rhs = rhs .. "}"
+			body:write("return " .. rhs .. ";")
 		end
-		table.insert(code, "")
 	end
-
-	table.insert(code, [[
-////////////////////////////////////////////////////////////////////////////////
-
-// Boolean method and(Boolean) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Boolean_and(smol_Boolean* this, smol_Boolean* other) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = this->value && other->value;
-	return out;
-}
-
-// Boolean method or(Boolean) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Boolean_or(smol_Boolean* this, smol_Boolean* other) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = this->value || other->value;
-	return out;
-}
-
-// Boolean method not() Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Boolean_not(smol_Boolean* this) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = !this->value;
-	return out;
-}
-
-// Boolean method implies(Boolean) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Boolean_implies(smol_Boolean* this, smol_Boolean* other) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = !this->value || other->value;
-	return out;
-}
-
-// Boolean method eq(Boolean) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Boolean_eq(smol_Boolean* this, smol_Boolean* other) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = this->value == other->value;
-	return out;
-}
-
-// Int method isPositive() Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Int_isPositive(smol_Int* this) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = this->value > 0;
-	return out;
-}
-
-// Int method negate() Int
-tuple1_1_smol_Int_ptr smol_method_Int_negate(smol_Int* this) {
-	tuple1_1_smol_Int_ptr out;
-	out._1 = ALLOCATE(smol_Int);
-	out._1->value = -this->value;
-	return out;
-}
-
-// Int method lessThan(Int) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Int_lessThan(smol_Int* this, smol_Int* smol_local_one) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = this->value < smol_local_one->value;
-	return out;
-}
-
-// Int method eq(Int) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_Int_eq(smol_Int* this, smol_Int* smol_local_other) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	out._1->value = this->value == smol_local_other->value;
-	return out;
-}
-
-// Int method quotient(Int) Int
-tuple1_1_smol_Int_ptr smol_method_Int_quotient(smol_Int* this, smol_Int* smol_local_other) {
-	tuple1_1_smol_Int_ptr out;
-	out._1 = ALLOCATE(smol_Int);
-	out._1->value = this->value / smol_local_other->value;
-	return out;
-}
-
-// Int method product(Int) Int
-tuple1_1_smol_Int_ptr smol_method_Int_product(smol_Int* this, smol_Int* smol_local_other) {
-	tuple1_1_smol_Int_ptr out;
-	out._1 = ALLOCATE(smol_Int);
-	out._1->value = this->value * smol_local_other->value;
-	return out;
-}
-
-// Int method sum(Int) Int
-tuple1_1_smol_Int_ptr smol_method_Int_sum(smol_Int* this, smol_Int* smol_local_other) {
-	tuple1_1_smol_Int_ptr out;
-	out._1 = ALLOCATE(smol_Int);
-	out._1->value = this->value + smol_local_other->value;
-	return out;
-}
-
-// Int method difference(Int) Int
-tuple1_1_smol_Int_ptr smol_method_Int_difference(smol_Int* this, smol_Int* smol_local_other) {
-	tuple1_1_smol_Int_ptr out;
-	out._1 = ALLOCATE(smol_Int);
-	out._1->value = this->value - smol_local_other->value;
-	return out;
-}
-
-// String method concatenate(String) String
-tuple1_1_smol_String_ptr smol_method_String_concatenate(smol_String* this, smol_String* other) {
-	tuple1_1_smol_String_ptr out;
-	out._1 = ALLOCATE(smol_String);
-	out._1->length = this->length + other->length;
-	out._1->text = ALLOCATE_ARRAY(out._1->length, char);
-	for (size_t i = 0; i < this->length; i++) {
-		out._1->text[i] = this->text[i];
-	}
-	for (size_t i = 0; i < other->length; i++) {
-		out._1->text[i + this->length] = other->text[i];
-	}
-	return out;
-}
-
-// String method eq(String) Boolean
-tuple1_1_smol_Boolean_ptr smol_method_String_eq(smol_String* this, smol_String* other) {
-	tuple1_1_smol_Boolean_ptr out;
-	out._1 = ALLOCATE(smol_Boolean);
-	size_t length = this->length;
-	if (length != other->length) {
-		out._1->value = 0;
-	} else {
-		out._1->value = 0 == memcmp(this->text, other->text, length);
-	}
-	return out;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-// core:Out static println(String) Unit
-tuple1_1_smol_Unit_ptr smol_static_core_Out_println(smol_String* message) {
-	// TODO: allow nulls, etc.
-	for (size_t i = 0; i < message->length; i++) {
-		putchar(message->text[i]);
-	}
-	printf("\n");
-	return (tuple1_1_smol_Unit_ptr){0};
-}
-
-// <Arrays>
-typedef struct {
-	size_t size;
-	void** data;
-} realarray;
-
-// core:Array[#T] static make() Array[#T]
-tuple1_1_smol_class_core_Array_T_ptr smol_static_core_Array_make() {
-	realarray* real = ALLOCATE(realarray);
-	real->size = 0;
-	real->data = NULL;
-
-	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
-	out->foreign = real;
-	return (tuple1_1_smol_class_core_Array_T_ptr){out};
-}
-
-// core:Array[#T] method get(Int) #T
-tuple1_1_void_ptr smol_method_core_Array_get(smol_class_core_Array_T* this, smol_Int* smol_local_index) {
-	realarray* real = this->foreign;
-	if (smol_local_index->value < 0) {
-		PANIC("negative array index");
-	} else if (smol_local_index->value >= (int)real->size) {
-		PANIC("past end array index");
-	}
-	void* out = real->data[smol_local_index->value];
-	return (tuple1_1_void_ptr){out};
-}
-
-// core:Array[#T] method set(Int, #T) Array[#T]
-tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_set(smol_class_core_Array_T* this, smol_Int* smol_local_index, void* smol_local_value) {
-	realarray* old = this->foreign;
-	if (smol_local_index->value < 0) {
-		PANIC("negative array index");
-	} else if (smol_local_index->value >= (int)old->size) {
-		PANIC("past end array index");
-	}
-
-	realarray* prime = ALLOCATE(realarray);
-	prime->size = old->size;
-	prime->data = ALLOCATE_ARRAY(prime->size, void*);
-	for (size_t i = 0; i < old->size; i++) {
-		prime->data[i] = old->data[i];
-	}
-
-	// Update the value
-	prime->data[smol_local_index->value] = smol_local_value;
-
-	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
-	out->foreign = prime;
-
-	return (tuple1_1_smol_class_core_Array_T_ptr){out};
-}
-
-// core:Array method append(#T) Array[#T]
-tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_append(smol_class_core_Array_T* this, void* smol_local_value) {
-	realarray* old = this->foreign;
-	realarray* prime = ALLOCATE(realarray);
-	prime->size = old->size + 1;
-	prime->data = ALLOCATE_ARRAY(prime->size, void*);
-	for (size_t i = 0; i < old->size; i++) {
-		prime->data[i] = old->data[i];
-	}
-
-	// Update the value
-	prime->data[old->size] = smol_local_value;
-
-	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
-	out->foreign = prime;
-
-	return (tuple1_1_smol_class_core_Array_T_ptr){out};
-}
-
-// core:Array method pop() Array[#T]
-tuple1_1_smol_class_core_Array_T_ptr smol_method_core_Array_pop(smol_class_core_Array_T* this) {
-	realarray* old = this->foreign;
-	realarray* prime = ALLOCATE(realarray);
-	prime->size = old->size - 1;
-	prime->data = ALLOCATE_ARRAY(prime->size, void*);
-	for (size_t i = 0; i < old->size - 1; i++) {
-		prime->data[i] = old->data[i];
-	}
-
-	smol_class_core_Array_T* out = ALLOCATE(smol_class_core_Array_T);
-	out->foreign = prime;
-
-	return (tuple1_1_smol_class_core_Array_T_ptr){out};
-}
-
-// core:Array method size() Int
-tuple1_1_smol_Int_ptr smol_method_core_Array_size(smol_class_core_Array_T* this) {
-	realarray* real = this->foreign;
-	smol_Int* out = ALLOCATE(smol_Int);
-	out->value = (int64_t)real->size;
-	return (tuple1_1_smol_Int_ptr){out};
-}
-
-// core:ASCII static formatInt(Int) String
-tuple1_1_smol_String_ptr smol_static_core_ASCII_formatInt(smol_Int* smol_local_value) {
-	tuple1_1_smol_String_ptr out;
-	out._1 = ALLOCATE(smol_String);
-	out._1->text = ALLOCATE_ARRAY(32, char);
-	out._1->length = (size_t)sprintf(out._1->text, "%" PRId64, smol_local_value->value);
-	return out;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-]])
-
-	demandTuple {"smol_String*"}
-	demandTuple {"smol_class_core_Array_T*"}
 
 	-- Generate the main function
-	table.insert(code, "// Main " .. semantics.main)
-	table.insert(code, "int main(int argv, char** argc) {")
-	table.insert(code, "\t" .. staticFunctionName(semantics.main .. ":main") .. "();")
-	table.insert(code, "\treturn 0;")
-	table.insert(code, "}")
+	local main = code:defineFunction("main", "int", {{name = "argc", type = "int"}, {name = "argv", type = "char**"}})
+	main:write(staticFunctionName(semantics.main .. ":main") .. "(NULL);")
+	main:write("return 0;")
 
 	-- Write the code to the output file
-	for _, line in ipairs(code) do
-		if type(line) == "string" then
-			file:write(line .. "\n")
-		else
-			assertis(line, listType "string")
-			for _, subline in ipairs(line) do
-				file:write(subline .. "\n")
-			end
-		end
-	end
+	file:write(code:serialize())
 	file:close()
 end

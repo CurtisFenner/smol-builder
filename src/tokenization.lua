@@ -79,7 +79,7 @@ local function lexSmol(source, filename)
 			"#[A-Z][A-Za-z0-9]*",
 			function(x)
 				if IS_KEYWORD[x:sub(2)] then
-					return {tag = "keyword-generic", name = "Self"}
+					return {tag = "keyword-generic", name = x:sub(2)}
 				end
 				return {tag = "generic", name = x:sub(2)}
 			end

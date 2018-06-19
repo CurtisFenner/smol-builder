@@ -1,0 +1,17 @@
+package test;
+
+interface Foo {
+	static f() Int ensures return == 7;
+}
+
+class C[#T | #T is Foo] {
+	static f() Unit {
+		assert #T.f() == 7;
+	}
+}
+
+class Test {
+	static main() Unit {
+
+	}
+}

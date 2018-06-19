@@ -1,0 +1,10 @@
+package test;
+
+class Test {
+	static nothing() Unit {
+	}
+
+	static main() Unit {
+		do #Self.nothing();
+	}
+}

@@ -19,10 +19,10 @@ class Test {
 		var x Int = u;
 
 		match opaque {
-			case a a {
+			case a is a {
 				x = 0;
 			}
-			case b b {
+			case b is b {
 				x = 1;
 			}
 		}

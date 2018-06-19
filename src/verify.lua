@@ -19,17 +19,12 @@ local BOOLEAN_TYPE = common.BOOLEAN_TYPE
 local UNIT_TYPE = common.UNIT_TYPE
 local NEVER_TYPE = common.NEVER_TYPE
 
-local BUILTIN_DEFINITIONS = common.BUILTIN_DEFINITIONS
-
-local BOOLEAN_DEF = table.findwith(BUILTIN_DEFINITIONS, "name", "Boolean")
-
 local typeOfAssertion = common.typeOfAssertion
 
 local excerpt = common.excerpt
-local variableDescription = common.variableDescription
 
 local assertionExprString = common.assertionExprString
-local showType = common.showType
+local showTypeKind = common.showTypeKind
 
 --------------------------------------------------------------------------------
 
@@ -67,7 +62,7 @@ REGISTER_TYPE("Assertion", choiceType(
 	},
 	recordType {
 		tag = constantType "this",
-		type = "Type+",
+		type = "TypeKind",
 	},
 	recordType {
 		tag = constantType "unit",
@@ -86,7 +81,8 @@ REGISTER_TYPE("Assertion", choiceType(
 		tag = constantType "field",
 		base = "Assertion",
 		fieldName = "string",
-		definition = "VariableIR",
+		fieldType = "TypeKind",
+		definition = "nil",
 	},
 	recordType {
 		tag = constantType "eq",
@@ -104,12 +100,12 @@ REGISTER_TYPE("Assertion", choiceType(
 	recordType {
 		tag = constantType "variant",
 		variantName = "string",
+		variantType = "TypeKind",
 		base = "Assertion",
-		definition = "VariableIR",
 	},
 	recordType {
 		tag = constantType "forall",
-		quantified = "Type+",
+		quantified = "TypeKind",
 		location = "Location",
 
 		-- (self, constantName string) => Assertion
@@ -130,15 +126,24 @@ local function andAssertion(a, b)
 	assertis(a, "Assertion")
 	assertis(b, "Assertion")
 
-	local BUILTIN_LOC = {
-		begins = "builtin",
-		ends = "builtin",
+	local p = freeze {
+		tag = "fn",
+		arguments = {a, b},
+		signature = common.builtinDefinitions.Boolean.functionMap["and"].signature,
+		index = 1,
 	}
+	return p
+end
+
+-- RETURNS an Assertion representing a || b
+local function orAssertion(a, b)
+	assertis(a, "Assertion")
+	assertis(b, "Assertion")
 
 	local p = freeze {
 		tag = "fn",
 		arguments = {a, b},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "and"),
+		signature = common.builtinDefinitions.Boolean.functionMap["or"].signature,
 		index = 1,
 	}
 	return p
@@ -157,7 +162,7 @@ local function impliesAssertion(a, b)
 	local p = freeze {
 		tag = "fn",
 		arguments = {a, b},
-		signature = table.findwith(BOOLEAN_DEF.signatures, "memberName", "implies"),
+		signature = common.builtinDefinitions.Boolean.functionMap["implies"].signature,
 		index = 1,
 	}
 	return p
@@ -260,17 +265,14 @@ local function valueBoolean(bool)
 end
 
 local uniqueNameID = 1000
-local function uniqueVariable(type, location)
-	assertis(type, "Type+")
-	assertis(location, "Location")
+local function uniqueVariable(type)
+	assertis(type, "TypeKind")
 
 	uniqueNameID = uniqueNameID + 1
 
 	return freeze {
-		location = location,
 		type = type,
 		name = "__unique" .. uniqueNameID,
-		description = false,
 	}
 end
 
@@ -320,7 +322,7 @@ end
 
 -- RETURNS a Symbol Assertion
 local function variantSymbol(type, variant)
-	assertis(type, "Type+")
+	assertis(type, "TypeKind")
 	assertis(variant, "string")
 
 	-- TODO: be more specific and include type
@@ -333,20 +335,16 @@ end
 -- RETURNS an Assertion
 -- MODIFIES scope
 local snapshotID = 0
-local function addSnapshot(scope, assertion, location)
+local function addSnapshot(scope, assertion)
 	assertis(scope, listType "Action")
 	assertis(assertion, "Assertion")
-	assertis(location, "Location")
 
 	snapshotID = snapshotID + 1
 	local name = "snapshot'" .. snapshotID
 	local variable = freeze {
 		type = typeOfAssertion(assertion),
 		name = name,
-		location = location,
-		description = false,
 	}
-
 	assignRaw(scope, variable, assertion)
 
 	return variableAssertion(variable)
@@ -381,9 +379,7 @@ local function getPredicateSet(scope, assignments, path, skip)
 			local newID = action.destination.name .. "'" .. i .. "'" .. path
 			local newVariable = freeze {
 				type = action.destination.type,
-				location = action.destination.location,
 				name = newID,
-				description = action.destination.description,
 			}
 			local newV = variableAssertion(newVariable)
 
@@ -483,53 +479,27 @@ end
 local function resultAssertion(statement, index)
 	assertis(statement, "StatementIR")
 	statement = freeze(statement)
+	assert(statement.tag == "static-call" or statement.tag == "dynamic-call")
+	assertis(index, "integer")
 
-	if statement.tag == "method-call" or statement.tag == "generic-method-call" then
-		assertis(index, "integer")
+	local arguments = table.map(variableAssertion, statement.arguments)
 
-		local arguments = {}
-		table.insert(arguments, variableAssertion(statement.baseInstance))
-		for _, argument in ipairs(statement.arguments) do
-			table.insert(arguments, variableAssertion(argument))
-		end
-
-		if statement.signature.memberName == "eq" then
-			assert(#arguments == 2)
-			return freeze {
-				tag = "eq",
-				left = arguments[1],
-				right = arguments[2],
-			}
-		end
+	-- eq is a special name
+	if statement.signature.memberName == "eq" then
+		assert(#arguments == 2)
 
 		return freeze {
-			tag = "fn",
-			arguments = freeze(arguments),
-			signature = statement.signature,
-			index = index,
-		}
-	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
-		assertis(index, "integer")
-
-		return freeze {
-			tag = "fn",
-			arguments = table.map(variableAssertion, statement.arguments),
-			signature = statement.signature,
-			index = index,
+			tag = "eq",
+			left = arguments[1],
+			right = arguments[2],
 		}
 	end
-	error("unknown statement tag `" .. statement.tag .. "` in resultAssertion")
-end
-
--- RETURNS an Assertion
-local function fieldAssertion(statement)
-	assertis(statement, "FieldSt")
 
 	return freeze {
-		tag = "field",
-		fieldName = statement.name,
-		base = variableAssertion(statement.base),
-		definition = statement.fieldDefinition,
+		tag = "fn",
+		arguments = arguments,
+		signature = statement.signature,
+		index = index,
 	}
 end
 
@@ -540,8 +510,8 @@ local function variantAssertion(statement)
 	return freeze {
 		tag = "variant",
 		variantName = statement.variant,
+		variantType = statement.destination.type,
 		base = variableAssertion(statement.base),
-		definition = statement.variantDefinition,
 	}
 end
 
@@ -572,65 +542,34 @@ local function scopeAdditional(old, new)
 	return out
 end
 
--- RETURNS a list of VariableIRs
-local function localsInStatement(statement)
-	assertis(statement, "StatementIR")
+-- TODO: communicate enum-finiteness to the theory somehow so that this
+-- isn't necessary here
+-- RETURNS an Assertion
+local function finitenessAssertion(v, semantics)
+	local unionType = v.type
+	local unionName = unionType.packageName .. ":" .. unionType.definitionName
 
-	if statement.tag == "local" then
-		return {statement.variable}
-	elseif statement.tag == "block" then
-		local out = {}
-		for _, child in ipairs(statement.statements) do
-			for _, e in ipairs(localsInStatement(child)) do
-				table.insert(out, e)
-			end
-		end
-		return out
-	elseif statement.tag == "match" then
-		local out = {}
-		for _, case in ipairs(statement.cases) do
-			for _, e in ipairs(localsInStatement(case.statement)) do
-				table.insert(out, e)
-			end
-		end
-		return out
-	end
+	local unionDefinition = table.findwith(semantics.compounds, "fullName", unionName)
 
-	local terminal = {
-		assume = {},
-		verify = {},
-
-		-- Proofs are recursive
-		proof = {"body"},
-
-		string = {},
-		nothing = {},
-		assign = {},
-		["return"] = {},
-		["if"] = {"bodyThen", "bodyElse"},
-		int = {},
-		["new-class"] = {},
-		["new-union"] = {},
-		["static-call"] = {},
-		["method-call"] = {},
-		["generic-method-call"] = {},
-		["generic-static-call"] = {},
-		boolean = {},
-		field = {},
-		this = {},
-		unit = {},
-		variant = {},
-		isa = {},
-		forall = {},
+	local tag = freeze {
+		tag = "gettag",
+		base = variableAssertion(v),
 	}
 
-	local out = {}
-	for _, property in ipairs(terminal[statement.tag]) do
-		for _, e in ipairs(localsInStatement(statement[property])) do
-			table.insert(out, e)
-		end
+	local possibleVariants = {}
+	for _, f in spairs(unionDefinition._fieldMap, tostring) do
+		table.insert(possibleVariants, freeze {
+			tag = "eq",
+			left = variantSymbol(v.type, f.name),
+			right = tag,
+		})
 	end
-	return out
+
+	local anyOf = possibleVariants[1]
+	for i = 2, #possibleVariants do
+		anyOf = orAssertion(anyOf, possibleVariants[i])
+	end
+	return anyOf
 end
 
 -- MODIFIES scope
@@ -646,7 +585,7 @@ local function verifyStatement(statement, scope, semantics)
 	)
 	allDefinitions = freeze(allDefinitions)
 
-	if statement.tag == "block" then
+	if statement.tag == "sequence" then
 		for _, sub in ipairs(statement.statements) do
 			verifyStatement(sub, scope, semantics)
 		end
@@ -682,7 +621,12 @@ local function verifyStatement(statement, scope, semantics)
 		assignRaw(scope, statement.destination, VALUE_UNIT)
 		return
 	elseif statement.tag == "field" then
-		local assertion = fieldAssertion(statement)
+		local assertion = freeze {
+			tag = "field",
+			fieldName = statement.name,
+			fieldType = statement.destination.type,
+			base = variableAssertion(statement.base),
+		}
 		assignRaw(scope, statement.destination, assertion)
 		return
 	elseif statement.tag == "variant" then
@@ -690,11 +634,11 @@ local function verifyStatement(statement, scope, semantics)
 		local assertion = variantAssertion(statement)
 		assignRaw(scope, statement.destination, assertion)
 		return
-	elseif statement.tag == "int" then
+	elseif statement.tag == "int-load" then
 		-- Integer literal
 		assignRaw(scope, statement.destination, valueInt(statement.number))
 		return
-	elseif statement.tag == "string" then
+	elseif statement.tag == "string-load" then
 		-- String literal
 		assignRaw(scope, statement.destination, valueString(statement.string))
 		return
@@ -702,15 +646,7 @@ local function verifyStatement(statement, scope, semantics)
 		-- Boolean literal
 		assignRaw(scope, statement.destination, valueBoolean(statement.boolean))
 		return
-	elseif statement.tag == "method-call" or statement.tag == "generic-method-call" then
-		-- TODO: reject impure
-		for i, destination in ipairs(statement.destinations) do
-			local source = resultAssertion(statement, i)
-			assignRaw(scope, destination, source)
-		end
-		return
-	elseif statement.tag == "static-call" or statement.tag == "generic-static-call" then
-		-- TODO: reject impure
+	elseif statement.tag == "static-call" or statement.tag == "dynamic-call" then
 		for i, destination in ipairs(statement.destinations) do
 			local source = resultAssertion(statement, i)
 			assignRaw(scope, destination, source)
@@ -725,9 +661,9 @@ local function verifyStatement(statement, scope, semantics)
 			fields[n] = variableAssertion(v)
 		end
 
-		assertis(statement.type, "ConcreteType+")
+		assertis(statement.destination.type, "CompoundTypeKind")
 
-		local instance = variableAssertion(uniqueVariable(statement.type, statement.location))
+		local instance = variableAssertion(uniqueVariable(statement.destination.type))
 		assignRaw(scope, statement.destination, instance)
 
 		for fieldName, value in pairs(statement.fields) do
@@ -735,7 +671,7 @@ local function verifyStatement(statement, scope, semantics)
 				tag = "field",
 				base = instance,
 				fieldName = fieldName,
-				definition = statement.memberDefinitions[fieldName],
+				fieldType = value.type,
 			}
 			assertis(assertion, "Assertion")
 			assertis(value, "VariableIR")
@@ -761,8 +697,8 @@ local function verifyStatement(statement, scope, semantics)
 		local extract = freeze {
 			tag = "variant",
 			variantName = statement.field,
+			variantType = statement.value.type,
 			base = variableAssertion(statement.destination),
-			definition = statement.variantDefinition,
 		}
 		assertis(extract, "Assertion")
 
@@ -774,6 +710,13 @@ local function verifyStatement(statement, scope, semantics)
 		return
 	elseif statement.tag == "match" then
 		local branches = {}
+		
+		addPredicate(scope, finitenessAssertion(statement.base, semantics))
+		
+		local tag = freeze {
+			tag = "gettag",
+			base = variableAssertion(statement.base),
+		}
 
 		-- Check each case
 		assert(#statement.cases > 0)
@@ -783,16 +726,13 @@ local function verifyStatement(statement, scope, semantics)
 
 			local condition = freeze {
 				tag = "eq",
-				left = {
-					tag = "gettag",
-					base = variableAssertion(statement.base),
-				},
+				left = tag,
 				right = variantSymbol(statement.base.type, case.variant),
 			}
 
 			-- Remember whether or not the condition was true when we started
 			-- evaluating it
-			local snappedCondition = addSnapshot(scope, condition, statement.base.location)
+			local snappedCondition = addSnapshot(scope, condition)
 
 			-- Add variant predicate
 			addPredicate(subscope, condition)
@@ -831,8 +771,7 @@ local function verifyStatement(statement, scope, semantics)
 		-- Capture the truth value of the condition at evaluation time
 		local snappedCondition = addSnapshot(
 			scope,
-			conditionAssertion,
-			statement.condition.location
+			conditionAssertion
 		)
 
 
@@ -884,6 +823,8 @@ local function verifyStatement(statement, scope, semantics)
 
 		return
 	elseif statement.tag == "isa" then
+		addPredicate(scope, finitenessAssertion(statement.base, semantics))
+
 		assertis(statement, "IsASt")
 		assignRaw(scope, statement.destination, freeze {
 			tag = "eq",
@@ -908,10 +849,7 @@ local function verifyStatement(statement, scope, semantics)
 			local arbitrary = freeze {
 				name = name,
 				type = statement.quantified,
-				location = statement.location,
-				description = false,
 			}
-			assertis(arbitrary, "VariableIR")
 
 			local subscope = scopeCopy(subscopePrime)
 			local inCode, instanceTruth = statement.instantiate(arbitrary)
@@ -976,6 +914,22 @@ end
 
 -- RETURNS nothing
 return function(semantics)
+	for _, c in ipairs(semantics.compounds) do
+		assertis(c, recordType {
+			tag = choiceType(constantType("union-definition"), constantType("class-definition")),
+			_fieldMap = mapType("string", recordType {
+				name = "string",
+				type = "TypeKind",
+			}),
+			constraintArguments = "object",
+		})
+		assertis(c.constraintArguments, listType(recordType {
+			name = "string",
+			concerningIndex = "integer",
+			constraintListIndex = "integer",
+			constraint = "ConstraintKind",
+		}))
+	end
 	assertis(semantics, "Semantics")
 
 	-- Verify all functions

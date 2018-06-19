@@ -59,10 +59,10 @@ class List[#T] {
 	method length() Int
 	ensures (0 == return).or(0 < return) {
 		match this.inner {
-			case n nil {
+			case n is nil {
 				return 0;
 			}
-			case c cons {
+			case c is cons {
 				assert (this.rest().length() == 0).or(0 < this.rest().length());
 				assert 1 == (0 + 1);
 				assert 0 < (this.rest().length() + 1);

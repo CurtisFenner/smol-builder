@@ -1,0 +1,11 @@
+package test;
+
+interface Foo {
+	method shouldReject() Unit
+	requires 5;
+}
+
+class Test {
+	static main() Unit {
+	}
+}

@@ -4,7 +4,9 @@ class Test {
 	static main() Unit {
 		var x String = "foo";
 	}
+}
 
-	static bar(t #T) Unit {
-	}
+
+interface IFace {
+	static foo() #T;
 }

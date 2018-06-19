@@ -1,59 +1,69 @@
 local Report = {}
 
-function Report.TYPE_DEFINED_TWICE(first, second)
-	assertis(first.name, "string")
-	assertis(second.name, "string")
-	assert(first.name == second.name)
-
-	local name = first.name
+function Report.DEFINITION_DEFINED_TWICE(p)
+	assertis(p, recordType {
+		fullName = "string",
+		firstLocation = "Location",
+		secondLocation = "Location",
+	})
 
 	quit(
-		"The type `",
-		name,
-		"` was already defined ",
-		first.location,
-		"\nHowever, you are attempting to redefine it ",
-		second.location
-	)
-end
-
-function Report.GENERIC_DEFINED_TWICE(p)
-	quit(
-		"The generic variable `#",
-		p.name,
-		"` was already defined ",
+		"A definition for `",
+		p.fullName,
+		"` was already made ",
 		p.firstLocation,
 		"\nHowever, you are attempting to redefine it ",
 		p.secondLocation
 	)
 end
 
-function Report.MEMBER_DEFINED_TWICE(p)
+function Report.IMPORT_PACKAGE_TWICE(p)
 	quit(
-		"The member `" .. p.name .. "` was already defined ",
+		"The package `", p.packageName, "` was already imported ",
 		p.firstLocation,
-		"\nHowever, you are attempting to redefine it ",
+		"\nHowever, you try to import it again ",
 		p.secondLocation
+)
+end
+
+function Report.SELF_OUTSIDE_INTERFACE(p)
+	quit(
+		"A `#Self` type can only be used in an interface, but is mentioned ",
+		p.location
 	)
 end
 
-function Report.TYPE_BROUGHT_INTO_SCOPE_TWICE(p)
+function Report.WRONG_ARITY(p)
+	assertis(p.definitionLocation, "Location")
+
 	quit(
-		"The type `",
+		"The definition `",
 		p.name,
-		"` was first brought into scope ",
-		p.firstLocation,
-		"\nHowever, you try to bring the name `",
-		p.name,
-		"` into scope again ",
-		p.secondLocation
+		"` was defined ",
+		p.definitionLocation,
+		"to take exactly ",
+		p.expectedArity,
+		" type arguments.",
+		"\nHowever, you provide ",
+		p.givenArity,
+		" ",
+		p.location
 	)
 end
 
-function Report.UNKNOWN_TYPE_IMPORTED(p)
+function Report.INTERFACE_USED_AS_TYPE(p)
+	quit(
+		"The definition for `",
+		p.interface,
+		"` is an interface, so you cannot use it as a type as you are ",
+		p.location
+	)
+end
+
+function Report.UNKNOWN_DEFINITION_IMPORTED(p)
 	p = freeze(p)
 	quit(
-		"A type called `",
+		"A definition called `",
 		p.name,
 		"` has not been defined.",
 		"\nHowever, you are trying to import it ",
@@ -72,6 +82,14 @@ function Report.UNKNOWN_PACKAGE_USED(p)
 	)
 end
 
+function Report.UNKNOWN_DEFINITION_USED(p)
+	quit(
+		"No definition called `" .. p.name .. "` has been defined in scope.",
+		"\nHowever, you are trying to use it ",
+		p.location
+	)
+end
+
 function Report.UNKNOWN_GENERIC_USED(p)
 	quit(
 		"A generic variable called `#" .. p.name .. "` has not been defined.",
@@ -80,197 +98,14 @@ function Report.UNKNOWN_GENERIC_USED(p)
 	)
 end
 
-function Report.UNKNOWN_TYPE_USED(p)
+function Report.GENERIC_DEFINED_TWICE(p)
 	quit(
-		"No type called `" .. p.name .. "` has been defined.",
-		"\nHowever, you are trying to use it ",
-		p.location
-	)
-end
-
-function Report.UNKNOWN_LOCAL_TYPE_USED(p)
-	quit(
-		"There is no type called `" .. p.name .. "` in scope.",
-		"\nHowever, you are trying to use it ",
-		p.location
-	)
-end
-
-function Report.INTERFACE_REQUIRES_MEMBER(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"` ",
-		p.implementsLocation,
-		"\nHowever, `" .. p.class .. "` does not implement the required",
-		" member `" .. p.memberName .. "` which is required by the interface `",
-		p.interface,
-		"` ",
-		p.memberLocation
-	)
-end
-
-function Report.WRONG_ARITY(p)
-	assertis(p.definitionLocation, "Location")
-
-	quit(
-		"The type `",
+		"The generic variable `#",
 		p.name,
-		"` was defined ",
-		p.definitionLocation,
-		"to take exactly ",
-		p.expectedArity,
-		" type arguments.",
-		"\nHowever, you provide ",
-		p.givenArity,
-		" ",
-		p.location
-	)
-end
-
-function Report.INTERFACE_REQUIRES_MODIFIER(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a ",
-		p.interfaceModifier,
-		" member called `",
-		p.name,
-		"` ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.name,
-		"` to be a ",
-		p.classModifier,
-		" ",
-		p.classLocation
-	)
-end
-
-function Report.INTERFACE_PARAMETER_COUNT_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.name,
-		"` with ",
-		p.interfaceCount,
-		" parameter(s) ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.name,
-		"` with ",
-		p.classCount,
-		" parameter(s)",
-		p.classLocation
-	)
-end
-
-function Report.INTERFACE_PARAMETER_TYPE_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.name,
-		"` with the ",
-		string.ordinal(p.index),
-		" parameter of type `",
-		p.interfaceType,
-		"` ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.name,
-		"` with the ",
-		string.ordinal(p.index),
-		" parameter of type `",
-		p.classType,
-		"` ",
-		p.classLocation
-	)
-end
-
-function Report.INTERFACE_RETURN_COUNT_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.member,
-		"` with ",
-		p.interfaceCount,
-		" return value(s) ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.member,
-		"` with ",
-		p.classCount,
-		" return values(s) ",
-		p.classLocation
-	)
-end
-
-function Report.INTERFACE_RETURN_TYPE_MISMATCH(p)
-	quit(
-		"The class/union `",
-		p.class,
-		"` claims to implement interface",
-		" `",
-		p.interface,
-		"`.",
-		"\nThe interface `",
-		p.interface,
-		"` defines a member called `",
-		p.member,
-		"` with the ",
-		string.ordinal(p.index),
-		" return-value of type `",
-		p.interfaceType,
-		"` ",
-		p.interfaceLocation,
-		"\nHowever, `",
-		p.class,
-		"` defines `",
-		p.member,
-		"` with the ",
-		string.ordinal(p.index),
-		" return-value of type `",
-		p.classType,
-		"` ",
-		p.classLocation
+		"` was already defined ",
+		p.firstLocation,
+		"\nHowever, you are attempting to redefine it ",
+		p.secondLocation
 	)
 end
 
@@ -305,13 +140,12 @@ function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 	)
 end
 
-function Report.VARIABLE_DEFINITION_COUNT_MISMATCH(p)
+function Report.MEMBER_DEFINED_TWICE(p)
 	quit(
-		p.valueCount,
-		" value(s) are provided but ",
-		p.variableCount,
-		" variable(s) are defined ",
-		p.location
+		"The member `" .. p.name .. "` was already defined ",
+		p.firstLocation,
+		"\nHowever, you are attempting to redefine it ",
+		p.secondLocation
 	)
 end
 
@@ -329,195 +163,183 @@ function Report.VARIABLE_DEFINED_TWICE(p)
 	)
 end
 
-function Report.INTERFACE_USED_AS_VALUE(p)
+function Report.INTERFACE_REQUIRES_MEMBER(p)
 	quit(
-		"The definition for `",
+		"The class/union `",
+		p.class,
+		"` claims to implement the interface",
+		" `",
 		p.interface,
-		"` is an interface,",
-		" so you cannot use it as the type of a variable or value as you are ",
-		p.location
+		"` ",
+		p.implementsLocation,
+		"\nHowever, `" .. p.class .. "` does not implement the required",
+		" member `" .. p.memberName .. "` which is required by the interface `",
+		p.interface,
+		"` ",
+		p.interfaceLocation
 	)
 end
 
-function Report.WRONG_VALUE_COUNT(p)
+function Report.INTERFACE_MODIFIER_MISMATCH(p)
 	quit(
-		"The ",
-		p.purpose,
-		" needs ",
-		p.expectedCount,
-		" value(s),",
-		" but was given ",
-		p.givenCount,
+		"The class/union `",
+		p.class,
+		"` claims to implement interface",
+		" `",
+		p.interface,
+		"` ",
+		p.claimLocation,
+		"\nThe interface `",
+		p.interface,
+		"` defines a ",
+		p.interfaceModifier,
+		" member called `",
+		p.memberName,
+		"` ",
+		p.interfaceLocation,
+		"\nHowever, `",
+		p.class,
+		"` defines `",
+		p.memberName,
+		"` to be a ",
+		p.classModifier,
 		" ",
-		p.location
+		p.classLocation
 	)
 end
 
-function Report.TYPES_DONT_MATCH(p)
-	assertis(p.expectedType, "string")
-	assertis(p.givenType, "string")
-	assertis(p.location, "Location")
-	assertis(p.purpose, "string")
+function Report.INTERFACE_BANG_MISMATCH(p)
 	quit(
-		"The ",
-		p.purpose,
-		" expects `",
-		p.expectedType,
-		"` as defined ",
-		p.expectedLocation,
-		"\nHowever, you pass a `",
-		p.givenType,
+		"The class/union `",
+		p.class,
+		"` claims to implement interface `",
+		p.interface,
 		"` ",
-		p.location
+		p.claimLocation,
+		"\nHowever, `" .. p.class .. "` implements the ",
+		p.modifier,
+		"`" .. p.memberName .. "` ",
+		not p.expectedBang and "with" or "without",
+		" an action `!`, which disagrees with the interface."
 	)
 end
 
-function Report.EXPECTED_DIFFERENT_TYPE(p)
-	assertis(p.expectedType, "string")
-	assertis(p.givenType, "string")
-	assertis(p.location, "Location")
-	assertis(p.purpose, "string")
+function Report.INTERFACE_COUNT_MISMATCH(p)
 	quit(
-		"The ",
-		p.purpose,
-		" expects `",
-		p.expectedType,
-		"` but was given `",
-		p.givenType,
-		"` ",
-		p.location
-	)
-end
-
-function Report.EQ_TYPE_MISMATCH(p)
-	quit(
-		"The operands of `==` must be of the same type.",
-		"\nHowever, the left operand to `==` is of type `",
-		p.leftType,
-		"` while the right operand is of type `",
-		p.rightType,
-		"` ",
-		p.location
-	)
-end
-
-function Report.NO_SUCH_FIELD(p)
-	quit(
-		"The type `",
-		p.container,
-		"` does not have a field called `",
-		p.name,
-		"`",
-		"\nHowever, you try to access `",
-		p.name,
-		"` ",
-		p.location
-	)
-end
-
-function Report.NO_SUCH_VARIANT(p)
-	quit(
-		"The type `",
-		p.container,
-		"` does not have a variant called `",
-		p.name,
-		"`",
-		"\nHowever, you try to access variant `",
-		p.name,
-		"` ",
-		p.location
-	)
-end
-
-function Report.NO_SUCH_VARIABLE(p)
-	quit("There is no variable named `", p.name, "` in scope ", p.location)
-end
-
-function Report.NO_SUCH_METHOD(p)
-	quit(
-		"The type `",
-		p.type,
-		"` does not have a ",
+		"The class/union `",
+		p.class,
+		"` claims to implement interface",
+		" `",
+		p.interface,
+		"`.",
+		"\nThe interface `",
+		p.interface,
+		"` defines a ",
 		p.modifier,
 		" called `",
-		p.name,
-		"`.",
-		"\nAvailable members include ",
-		"\n\t",
-		table.concat(p.alternatives, ", "),
-		"\nHowever, you try to call `",
-		p.type,
-		".",
-		p.name,
+		p.memberName,
+		"` with ",
+		p.interfaceCount,
+		" " .. p.thing .. "(s) ",
+		p.interfaceLocation,
+		"\nHowever, `",
+		p.class,
+		"` defines `",
+		p.memberName,
+		"` with ",
+		p.classCount,
+		" " .. p.thing .. "(s) ",
+		p.classLocation
+	)
+end
+
+function Report.INTERFACE_TYPE_MISMATCH(p)
+	quit(
+		"The class/union `",
+		p.class,
+		"` claims to implement interface",
+		" `",
+		p.interface,
 		"` ",
-		p.location
-	)
-end
-
-function Report.CONFLICTING_INTERFACES(p)
-	quit(
-		"The method `",
-		p.method,
-		"` is ambiguous ",
-		p.location,
-		"because `",
-		p.method,
-		"` is defined in both `",
-		p.interfaceOne,
-		"` and `",
-		p.interfaceTwo,
-		"`"
-	)
-end
-
-function Report.TYPE_MUST_BE_CLASS(p)
-	assertis(p.purpose, "string")
-	assertis(p.givenType, "string")
-	assertis(p.location, "Location")
-
-	quit(
-		"The ",
-		p.purpose,
-		" must be a class instance. However, it is a ",
-		p.givenType,
-		" ",
-		p.location
-	)
-end
-
-function Report.TYPE_MUST_BE_UNION(p)
-	quit(
-		"The ",
-		p.purpose,
-		" must be a union instance. However, you try to use a ",
-		"`",
-		p.givenType,
-		"` ",
-		p.location
-	)
-end
-
-function Report.MISSING_VALUE(p)
-	quit(
-		"The ",
-		p.purpose,
-		" requires a value for field `",
-		p.name,
-		"`.",
-		"\nHowever, it is missing ",
-		p.location
-	)
-end
-
-function Report.FUNCTION_DOESNT_RETURN(p)
-	quit(
-		"The ",
+		p.claimLocation,
+		"\nThe interface `",
+		p.interface,
+		"` defines a ",
 		p.modifier,
-		" ",
+		" called `",
+		p.memberName,
+		"` with the ",
+		string.ordinal(p.index),
+		" " .. p.thing .. " of type `",
+		p.interfaceType,
+		"` ",
+		p.interfaceLocation,
+		"\nHowever, `",
+		p.class,
+		"` defines `",
+		p.memberName,
+		"` with the ",
+		string.ordinal(p.index),
+		" " .. p.thing .." of type `",
+		p.classType,
+		"` ",
+		p.classLocation
+	)
+end
+
+function Report.UNREACHABLE_STATEMENT(p)
+	quit(
+		"Statements following a `return` can never be reached.",
+		"\nThis makes an unreachable point in your code ",
+		p.location
+	)
+end
+
+function Report.TYPE_MISMATCH(p)
+	quit(
+		"The " .. p.purpose,
+		" expects a value of type `",
+		p.expected,
+		"` as defined ",
+		p.expectedLocation,
+		"\nHowever, the " .. p.purpose,
+		" was `",
+		p.given,
+		"` ",
+		p.givenLocation
+	)
+end
+
+function Report.EVALUATION_ORDER(p)
+	quit(
+		"The evaluation order of an expressions.",
+		"\nThe first is ",
+		p.first,
+		"\nThe second is ",
+		p.second
+	)
+end
+
+function Report.NO_SUCH_MEMBER(p)
+	quit(
+		"The type `",
+		p.container,
+		"` does not have a " .. p.memberType .. " called `",
 		p.name,
-		" does not always `return` ",
-		p.returns,
-		" as it says it does ",
+		"`",
+		"\nHowever, you try to use `",
+		p.name,
+		"` ",
+		p.location
+	)
+end
+
+function Report.BANG_NOT_ALLOWED(p)
+	quit(
+		"A `!` action is not allowed in ",
+		p.context,
+		".",
+		"\nHowever, you try to invoke one ",
 		p.location
 	)
 end
@@ -551,12 +373,104 @@ function Report.BANG_MISMATCH(p)
 	)
 end
 
-function Report.BANG_NOT_ALLOWED(p)
+function Report.NO_SUCH_VARIABLE(p)
+	quit("There is no variable named `", p.name, "` in scope ", p.location)
+end
+
+function Report.NEW_IN_INTERFACE(p)
 	quit(
-		"A `!` action is not allowed in ",
-		p.context,
-		".",
-		"\nHowever, you try to invoke one ",
+		"Interfaces do not have constructors.\n",
+		"However, you try to use `new()` ",
+		p.location
+	)
+end
+
+function Report.DUPLICATE_INITIALIZATION(p)
+	if p.first == p.second then
+		quit("The ", p.purpose, " is initialized twice ", p.location)
+	end
+	quit(
+		"The ",
+		p.purpose,
+		" is initialized twice. The first initialization is ",
+		p.first,
+		"\nThe second initialization is ",
+		p.second
+	)
+end
+
+function Report.MISSING_INITIALIZATION(p)
+	quit(
+		"The ",
+		p.purpose,
+		" is never initialized ",
+		p.location
+	)
+end
+
+function Report.WRONG_VALUE_COUNT(p)
+	quit(
+		"Expected ",
+		p.expectedCount,
+		" ",
+		p.purpose,
+		" but got ",
+		p.givenCount,
+		" ",
+		p.givenLocation
+	)
+end
+
+function Report.TYPE_MUST_BE(p)
+	quit(
+		"The type `",
+		p.givenType,
+		"` cannot be used as ",
+		p.purpose,
+		" as it is ",
+		p.givenLocation
+	)
+end
+
+function Report.THIS_USED_OUTSIDE_METHOD(p)
+	quit("You try to use `this` in a non-method function ", p.location)
+end
+
+
+function Report.CONFLICTING_INTERFACES(p)
+	quit(
+		"The call `",
+		p.method,
+		"` is ambiguous ",
+		p.location,
+		"because `",
+		p.method,
+		"` is defined in both `",
+		p.interfaceOne,
+		"` and `",
+		p.interfaceTwo,
+		"`"
+	)
+end
+
+--------------------------------------------------------------------------------
+
+function Report.FUNCTION_DOESNT_RETURN(p)
+	assertis(p, recordType {
+		modifier = "string",
+		name = "string",
+		returns = "string",
+		location = "Location",
+	})
+
+	quit(
+		"The ",
+		p.modifier,
+		" ",
+		p.name,
+		" does not always `return` ",
+		p.returns,
+		" as it says it does ",
 		p.location
 	)
 end
@@ -587,11 +501,13 @@ function Report.UNKNOWN_OPERATOR_USED(p)
 	)
 end
 
-function Report.THIS_USED_OUTSIDE_METHOD(p)
-	quit("You try to use `this` in a non-method function ", p.location)
-end
-
 function Report.VARIANT_USED_TWICE(p)
+	assertis(p, recordType {
+		variant = "string",
+		firstLocation = "Location",
+		secondLocation = "Location",
+	})
+
 	quit(
 		"You use the variant `case ",
 		p.variant,
@@ -622,6 +538,10 @@ function Report.INEXHAUSTIVE_MATCH(p)
 	)
 end
 
+function Report.CANNOT_USE_RETURN(p)
+	quit("The `return` expression cannot be used ", p.location)
+end
+
 function Report.RETURN_USED_IN_IMPLEMENTATION(p)
 	quit(
 		"The `return` keyword can only be used as an expression in",
@@ -644,8 +564,13 @@ function Report.QUANTIFIER_USED_IN_IMPLEMENTATION(p)
 	)
 end
 
-function Report.EVALUATION_ORDER(p)
-	quit("The evaluation order of an expression is not defined ", p.location)
+function Report.RECURSIVE_REQUIRES(p)
+	quit(
+		"The preconditions of `",
+		p.func,
+		"` are recursive ",
+		p.location
+	)
 end
 
 return Report

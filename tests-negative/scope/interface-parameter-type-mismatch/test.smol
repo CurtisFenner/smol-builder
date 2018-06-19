@@ -1,0 +1,15 @@
+package test;
+
+interface I {
+	method m(a Int) Int;
+}
+
+class C is I {
+	method m(b String) Int {
+		return 1;
+	}
+}
+
+class Test {
+	static main() Unit {}
+}

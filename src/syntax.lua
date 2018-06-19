@@ -137,6 +137,13 @@ end
 local T_IDENTIFIER = TOKEN("identifier", "lexeme")
 local T_TYPENAME = TOKEN("typename", "lexeme")
 local T_GENERIC = TOKEN("generic", "name")
+local TR_GENERIC = parser.map(
+	T_GENERIC,
+	function(x)
+		return {tag = "generic", name = x}
+	end,
+	true
+)
 local T_INTEGER_LITERAL = TOKEN("integer-literal", "value")
 local T_STRING_LITERAL = TOKEN("string-literal", "value")
 local T_OPERATOR = TOKEN("operator", "lexeme")
@@ -159,9 +166,9 @@ local parsers = {
 
 	-- Represents a package declaration
 	["package"] = parser.composite {
-		tag = "***package",
+		tag = "package",
 		{"_", K_PACKAGE},
-		{"#name", T_IDENTIFIER, "an identifier"},
+		{"name", T_IDENTIFIER, "an identifier"},
 		{"_", K_SEMICOLON, "`;` to finish package declaration"},
 	},
 
@@ -169,9 +176,9 @@ local parsers = {
 	["import"] = parser.composite {
 		tag = "import",
 		{"_", K_IMPORT},
-		{"package", T_IDENTIFIER, "an imported package name"},
+		{"packageName", T_IDENTIFIER, "an imported package name"},
 		{
-			"class",
+			"definitionName",
 
 			-- string | false
 			parser.optional(parser.composite {
@@ -193,7 +200,6 @@ local parsers = {
 	-- Represents a class
 	["class-definition"] = parser.composite {
 		tag = "class-definition",
-		{"foreign", parser.query "`foreign`?"},
 		{"_", K_CLASS},
 		{"name", T_TYPENAME, "a type name"},
 		{
@@ -253,6 +259,7 @@ local parsers = {
 		{"_", K_CURLY_OPEN, "`{` to begin interface body"},
 		{"signatures", parser.query "interface-signature*"},
 		{"_", K_CURLY_CLOSE, "`}` to end interface body"},
+		{"implements", parser.constant {}},
 	},
 
 	-- Represents a generics definition
@@ -261,7 +268,7 @@ local parsers = {
 		{"_", K_SQUARE_OPEN},
 		{
 			"parameters",
-			parser.delimited(T_GENERIC, "1+", ",", "generic parameter"),
+			parser.delimited(TR_GENERIC, "1+", ",", "generic parameter"),
 			"generic parameter variables",
 		},
 		{"constraints", parserOtherwise(parser.query "generic-constraints?", {})},
@@ -276,7 +283,7 @@ local parsers = {
 
 	["generic-constraint"] = parser.composite {
 		tag = "constraint",
-		{"parameter", T_GENERIC},
+		{"parameter", TR_GENERIC},
 		{"_", K_IS, "`is` after generic parameter"},
 		{"constraint", parser.named "concrete-type", "a type constrain after `is`"},
 	},
@@ -292,13 +299,7 @@ local parsers = {
 		K_SELF,
 
 		-- User defined types
-		parser.map(
-			T_GENERIC,
-			function(x)
-				return {tag = "generic", name = x}
-			end,
-			true
-		),
+		TR_GENERIC,
 		parser.named "concrete-type",
 	},
 
@@ -495,8 +496,21 @@ local parsers = {
 		{"_", K_IF},
 		{"condition", parser.named "expression", "expected a condition in `if` statement"},
 		{"body", parser.named "block", "expected a block to follow `if` condition"},
-		{"elseifs", parser.query "else-if-clause*"},
-		{"else", parser.query "else-clause?"},
+		{"elseifClauses", parser.query "else-if-clause*"},
+		{"elseClause", parser.query "else-clause?"},
+	},
+
+	["else-if-clause"] = parser.composite {
+		tag = "else-if-clause",
+		{"_", K_ELSEIF},
+		{"condition", parser.named "expression", "expected a condition in `elseif` clause"},
+		{"body", parser.named "block", "expected a block to follow `elseif` condition"},
+	},
+
+	["else-clause"] = parser.composite {
+		tag = "else-clause",
+		{"_", K_ELSE},
+		{"body", parser.named "block", "expected a block to follow `else`"},
 	},
 
 	["match-statement"] = parser.composite {
@@ -516,29 +530,17 @@ local parsers = {
 			parser.composite {
 				tag = "case-head",
 				{"variable", T_IDENTIFIER, "expected a variable name"},
+				{"_", K_IS, "expected `is`"},
 				{"variant", T_IDENTIFIER, "expected a union tag name"},
 			},
 		},
 		{"body", parser.named "block", "expected a block to follow case"},
 	},
 
-	["else-if-clause"] = parser.composite {
-		tag = "else-if-clause",
-		{"_", K_ELSEIF},
-		{"condition", parser.named "expression", "expected a condition in `elseif` clause"},
-		{"body", parser.named "block", "expected a block to follow `elseif` condition"},
-	},
-
-	["else-clause"] = parser.composite {
-		tag = "else-clause",
-		{"_", K_ELSE},
-		{"body", parser.named "block", "expected a block to follow `else`"},
-	},
-
 	["isa"] = parser.composite {
 		tag = "isa",
 		{"_", K_IS},
-		{"field", T_IDENTIFIER, "expected a variant identifier"},
+		{"variant", T_IDENTIFIER, "expected a variant identifier"},
 	},
 
 	-- Expressions!
@@ -550,7 +552,7 @@ local parsers = {
 			{"isa", parser.query "isa?"},
 		},
 		function(x)
-			-- XXX: no precedence yet; assume left-associative
+			-- XXX: no precedence yet; reject unparenthesized
 			local out = x.base
 			assertis(out.tag, "string")
 
@@ -574,7 +576,7 @@ local parsers = {
 				return freeze {
 					tag = "isa",
 					base = out,
-					variant = isa.field,
+					variant = isa.variant,
 				}
 			end
 
@@ -594,7 +596,7 @@ local parsers = {
 		tag = "new-expression",
 		{"_", K_NEW},
 		{"_", K_ROUND_OPEN, "`(` after `new`"},
-		{"arguments", parser.query "named-argument,0+"},
+		{"fields", parser.query "named-argument,0+"},
 		{"_", K_ROUND_CLOSE, "`)` to end `new` expression"},
 	},
 
@@ -629,7 +631,7 @@ local parsers = {
 	["method-access"] = parser.composite {
 		tag = "method-call",
 		{"_", K_DOT},
-		{"methodName", T_IDENTIFIER, "a method/field name"},
+		{"funcName", T_IDENTIFIER, "a method/field name"},
 
 		-- What follows is optional, since a field access is also possible
 		{"bang", parser.optional(K_BANG)},
@@ -644,12 +646,15 @@ local parsers = {
 		}
 	},
 	["field-access"] = parser.composite {
-		tag = "field",
+		tag = "field-access",
 		{"_", K_DOT},
 		{"field", T_IDENTIFIER, "a field name"},
 	},
 
-	["access"] = parser.choice {parser.named "method-access", parser.named "field-access"},
+	["access"] = parser.choice {
+		parser.named "method-access",
+		parser.named "field-access",
+	},
 
 	["static-call"] = parser.composite {
 		tag = "static-call",
@@ -668,14 +673,18 @@ local parsers = {
 		{"_", K_ROUND_OPEN, "`(` after `forall`"},
 		{"variable", parser.named "variable", "variable after `forall (`"},
 		{"_", K_ROUND_CLOSE, "`)` after variable"},
-		{"predicate", parser.named "expression", "predicate expression"},
+		{"condition", parser.named "expression", "predicate expression"},
 		{
-			"when",
-			parser.optional(parser.composite {
-				tag = "forall-when",
-				{"_", K_WHEN},
-				{"#e", parser.named "expression", "expression"},
-			}),
+			"whens",
+			parserOtherwise(
+				parser.optional(parser.composite {
+					tag = "forall-when",
+					location = false,
+					{"_", K_WHEN},
+					{"#when", parser.query "expression,1+", "an expression"},
+				}),
+				{}
+			),
 		}
 	},
 
