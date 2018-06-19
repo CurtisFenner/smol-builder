@@ -167,7 +167,7 @@ function Report.INTERFACE_REQUIRES_MEMBER(p)
 	quit(
 		"The class/union `",
 		p.class,
-		"` claims to implement interface",
+		"` claims to implement the interface",
 		" `",
 		p.interface,
 		"` ",

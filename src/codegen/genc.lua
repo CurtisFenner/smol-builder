@@ -635,7 +635,11 @@ local function generateStatement(statement, program, info)
 	program:comment(statement.tag)
 
 	if statement.tag == "proof" then
-		program:comment("skipping proof")
+		if statement.returns == "yes" then
+			program:write("assert(0); // assert false;")
+		else
+			program:comment("skipping proof")
+		end
 		return
 	elseif statement.tag == "sequence" then
 		for _, s in ipairs(statement.statements) do

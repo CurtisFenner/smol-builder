@@ -34,6 +34,10 @@ local ansi = import "ansi.lua"
 -- DOES NOT RETURN.
 function quit(first, ...)
 	local rest = {...}
+	for i = 1, select("#", ...) do
+		assert(rest[i] ~= nil)
+	end
+
 	for i = 1, #rest do
 		if type(rest[i]) == "number" then
 			rest[i] = tostring(rest[i])

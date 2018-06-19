@@ -577,10 +577,11 @@ local function getVTable(implementer, constraint, context)
 			concrete = implementer,
 			arguments = arguments,
 		}
-	elseif implementer.tag == "generic-type" then
-		assert(context.constraintMap[implementer.name], "type parameter must be inscope")
+	elseif implementer.tag == "generic-type" or implementer.tag == "self-type" then
+		local name = implementer.tag == "generic-type" and implementer.name or "Self"
+		assert(context.constraintMap[name], "type parameter must be inscope")
 		local fit = false
-		for _, c in pairs(context.constraintMap[implementer.name]) do
+		for _, c in pairs(context.constraintMap[name]) do
 			if common.areConstraintsEqual(c.constraint, constraint) then
 				assert(not fit, "must be unique fit")
 				fit = {
@@ -1203,10 +1204,6 @@ local function compileExpression(expressionAST, scope, context)
 		end
 
 		if baseType.tag == "generic-type" or baseType.tag == "self-type" then
-			if baseType.tag == "self-type" then
-				assert(context.genericMap.Self)
-			end
-
 			-- Find the matching method
 			local matching, matchingConstraint = findConstraint(
 				baseType,
@@ -2042,6 +2039,10 @@ local function compileStatement(statementAST, scope, context)
 			expectedLocation = statementAST.expression.location,
 		}
 
+		-- `assert false;` is a special case meaning "unreachable"
+		local expressionAST = statementAST.expression
+		local unreachable = expressionAST.tag == "keyword" and expressionAST.keyword == "false"
+
 		assert(#results == 1)
 		local code = {
 			tag = "proof",
@@ -2056,7 +2057,7 @@ local function compileStatement(statementAST, scope, context)
 					returns = "no",
 				}
 			},
-			returns = "no",
+			returns = unreachable and "yes" or "no",
 		}
 
 		return code, scope
@@ -2554,6 +2555,7 @@ local function semanticsSmol(sources, main)
 									class = definition.fullName,
 									interface = showConstraintKind(constraint),
 									memberName = name,
+									implementsLocation = implement.claimLocation,
 									interfaceLocation = f.definitionLocation,
 								}
 							end
