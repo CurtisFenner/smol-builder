@@ -1335,14 +1335,28 @@ local function compileExpression(expressionAST, scope, context)
 				destinations = destinations,
 				returns = "no",
 			}
+			assertis(call, "DynamicCallSt")
+			table.insert(code, call)
+
+			if #destinations == 1 then
+				-- return is allowed in ensures (but not in requires)
+				proofScope = proofScope:with("return", destinations[1])
+			end
 
 			-- Assume that the function's post-conditions hold
 			for _, e in ipairs(matching.signature.ensuresASTs) do
-				print("TODO: assume post-conditions after dynamic-call")
+				if not context.suppressContracts[suppressKey] then
+					local preAssume, assumeVariable = compilePredicate(e, proofScope, proofContext, "ensures")
+					table.insert(code, proofSt(sequenceSt {
+						preAssume,
+						{
+							tag = "assume",
+							variable = assumeVariable,
+							returns = "no",
+						},
+					}))
+				end
 			end
-
-			assertis(call, "DynamicCallSt")
-			table.insert(code, call)
 
 			return sequenceSt(code), destinations, impure or matching.signature.bang
 		elseif baseType.tag == "compound-type" or baseType.tag == "keyword-type" then
@@ -1438,16 +1452,6 @@ local function compileExpression(expressionAST, scope, context)
 				table.insert(constraintArguments, vtable)
 			end
 
-			local call = {
-				tag = "static-call",
-				arguments = arguments,
-				destinations = destinations,
-				returns = "no",
-				signature = member.signature,
-				constraintArguments = constraintArguments,
-			}
-			assertis(call, "StaticCallSt")
-
 			-- Create the context for requires/ensures
 			local childSuppressContracts = {}
 			for k, v in pairs(context.suppressContracts) do
@@ -1505,6 +1509,16 @@ local function compileExpression(expressionAST, scope, context)
 				}))
 			end
 
+			-- Make the static call
+			local call = {
+				tag = "static-call",
+				arguments = arguments,
+				destinations = destinations,
+				returns = "no",
+				signature = member.signature,
+				constraintArguments = constraintArguments,
+			}
+			assertis(call, "StaticCallSt")
 			table.insert(code, call)
 
 			if #destinations == 1 then
@@ -1522,7 +1536,7 @@ local function compileExpression(expressionAST, scope, context)
 							tag = "assume",
 							variable = assumeVariable,
 							returns = "no",
-						}
+						},
 					}))
 				end
 			end
