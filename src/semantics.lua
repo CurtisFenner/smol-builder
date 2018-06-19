@@ -2566,7 +2566,7 @@ local function semanticsSmol(sources, main)
 						Report.MEMBER_DEFINED_TWICE {
 							name = signature.memberName,
 							firstLocation = previous.definitionLocation,
-							secondLocation = signature.definitionLocation,
+							secondLocation = methodAST.signature.location,
 						}
 					end
 
