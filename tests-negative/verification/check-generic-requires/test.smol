@@ -1,0 +1,31 @@
+package test;
+
+class B3[#T, #C | #C is ListLike[#T]] is ListLike[#T] {
+	var one #C;
+	var two #C;
+	var three #C;
+
+	method size() Int {
+		return (this.one.size() + this.two.size()) + this.three.size();
+	}
+
+	method get(n Int) #T {
+		// This should be rejected
+		return this.one.get(n);
+	}
+}
+
+interface ListLike[#T] {
+	method get(n Int) #T
+	requires 0 < n
+	requires (n < this.size()).or(n == this.size());
+
+	method size() Int;
+}
+
+class Test {
+	static main() Unit {
+
+	}
+}
+

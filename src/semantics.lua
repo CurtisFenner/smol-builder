@@ -599,8 +599,8 @@ local function getVTable(implementer, constraint, context)
 	error("unknown implementer tag `" .. implementer.tag .. "`")
 end
 
--- RETURNS a function (with definitionLocation and signature) and a
--- ConstraintKind
+-- RETURNS a function (with definitionLocation, interfaceDefinition, signature)
+-- and a ConstraintKind
 local function findConstraint(baseType, memberName, location, context)
 	assertis(baseType, "TypeKind")
 	assertis(memberName, "string")
@@ -648,6 +648,8 @@ local function findConstraint(baseType, memberName, location, context)
 
 				matchingConstraint = c
 				matching = {
+					interfaceDefinition = interface,
+					substitutionMap = substitutionMap,
 					signature = substitutedSignature(hit.signature, substitutionMap),
 					definitionLocation = hit.definitionLocation,
 				}
@@ -1262,6 +1264,68 @@ local function compileExpression(expressionAST, scope, context)
 				table.insert(destinations, destination)
 			end
 
+			-- Create the context for requires/ensures
+			local childSuppressContracts = {}
+			for k, v in pairs(context.suppressContracts) do
+				childSuppressContracts[k] = v
+			end
+
+			local uninstantiatedInterface = showConstraintKind(matching.interfaceDefinition.kind)
+			local suppressKey = uninstantiatedInterface .. "/" .. matching.signature.memberName
+			if context.proof then
+				childSuppressContracts[suppressKey] = true
+			end
+			local trc = table.with(
+				matching.interfaceDefinition.resolverContext,
+				"template",
+				matching.substitutionMap
+			)
+			local proofContext = {
+				canUseBang = false,
+				proof = true,
+				definitionMap = context.definitionMap,
+
+				-- Type specific
+				newType = false,
+				typeResolver = matching.interfaceDefinition.resolver,
+
+				-- Use template instantiation: their generics will NOT appear
+				typeResolverContext = trc,
+				constraintMap = context.constraintMap,
+
+				-- Prevent cursion in contracts
+				suppressContracts = childSuppressContracts,
+			}
+
+			-- Make arguments/this the appropriate values for requires/ensures
+			local proofScope = Map.new()
+			for i, p in ipairs(matching.signature.parameters) do
+				proofScope = proofScope:with(p.name, arguments[i])
+			end
+
+			-- Verify that the function's pre-conditions hold
+			for i, ast in ipairs(matching.signature.requiresASTs) do
+				if context.suppressContracts[suppressKey] then
+					Report.RECURSIVE_REQUIRES {
+						func = matching.signature.fullName,
+						location = ast.location,
+					}
+				end
+
+				local preVerify, verifyVariable = compilePredicate(ast, proofScope, proofContext, "requires")
+				table.insert(code, proofSt(sequenceSt {
+					preVerify,
+					{
+						tag = "verify",
+						variable = verifyVariable,
+						checkLocation = expressionAST.location,
+						conditionLocation = ast.location,
+						reason = "the " .. string.ordinal(i) .. " precondition",
+						returns = "no",
+					}
+				}))
+			end
+
 			-- Make the indirect call
 			local call = {
 				tag = "dynamic-call",
@@ -1271,6 +1335,12 @@ local function compileExpression(expressionAST, scope, context)
 				destinations = destinations,
 				returns = "no",
 			}
+
+			-- Assume that the function's post-conditions hold
+			for _, e in ipairs(matching.signature.ensuresASTs) do
+				print("TODO: assume post-conditions after dynamic-call")
+			end
+
 			assertis(call, "DynamicCallSt")
 			table.insert(code, call)
 
@@ -1383,6 +1453,7 @@ local function compileExpression(expressionAST, scope, context)
 			for k, v in pairs(context.suppressContracts) do
 				childSuppressContracts[k] = v
 			end
+
 			-- Note that we do NOT include the parameters in this key
 			local suppressKey = showTypeKind(definition.kind) .. "/" .. member.signature.memberName
 			if context.proof then
@@ -1401,7 +1472,7 @@ local function compileExpression(expressionAST, scope, context)
 				typeResolverContext = table.with(definition.resolverContext, "template", substitutionMap),
 				constraintMap = context.constraintMap,
 
-				-- TODO
+				-- Prevent recursion in contracts
 				suppressContracts = childSuppressContracts,
 			}
 
