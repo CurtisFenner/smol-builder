@@ -116,8 +116,16 @@ class B3[#T, #C | #C is ListLike[#T]] is ListLike[#T] {
 		return (this.one.size() + this.two.size()) + this.three.size();
 	}
 
-	method get(n Int) #T {
-		return this.one.get(n);
+	method get(n Int) #T
+	requires 0 < n
+	requires (n < this.size()).or(n == this.size()) {
+		if (n < this.one.size()).or(n == this.one.size()) {
+			return this.one.get(n);
+		} elseif n < (this.one.size() + this.two.size()) {
+			assert this.one.size() < n;
+			return this.two.get(n - this.one.size());
+		}
+		assert false;
 	}
 }
 
@@ -126,7 +134,8 @@ interface ListLike[#T] {
 	requires 0 < n
 	requires (n < this.size()).or(n == this.size());
 
-	method size() Int;
+	method size() Int
+	ensures (0 == return).or(0 < return);
 }
 
 class Test {
@@ -134,3 +143,4 @@ class Test {
 
 	}
 }
+

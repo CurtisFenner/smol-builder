@@ -1,0 +1,18 @@
+package test;
+
+class Test {
+
+	static f(a Int, n Int) Unit {
+		if (a < n).or(a == n) {
+
+		} elseif true {
+			assert (a < n).or(a == n).not();
+			assert (a < n).not();
+			assert n < a;
+		}
+	}
+
+	static main() Unit {
+
+	}
+}

@@ -1,0 +1,20 @@
+package test;
+
+class Test {
+	static f() Boolean {
+		return true;
+	}
+
+	static main() Unit {
+		if Test.f() {
+
+		} else {
+			assert Test.f().not();
+		}
+
+		if Test.f() {
+		} elseif true {
+			assert Test.f().not();
+		}
+	}
+}
