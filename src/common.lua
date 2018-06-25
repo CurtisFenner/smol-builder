@@ -653,6 +653,9 @@ local BUILTIN_DEFINITIONS = {
 
 						-- Antisymmetric
 						parseKind("ensures return.not() when arg2 < this", "ensures"),
+
+						-- Total order
+						parseKind("ensures (this == arg2).or(arg2 < this) when return.not()", "ensures"),
 					},
 				}),
 				bodyAST = false,
@@ -706,6 +709,15 @@ local BUILTIN_DEFINITIONS = {
 					ensuresASTs = {
 						-- Ordered field
 						parseKind("ensures this < return when 0 < arg2", "ensures"),
+
+						-- Inverse
+						parseKind("ensures (return - arg2) == this", "ensures"),
+
+						-- Commutative
+						parseKind("ensures return == (arg2 + this)", "ensures"),
+
+						-- Identity
+						parseKind("ensures return == this when arg2 == 0", "ensures"),
 					},
 				}),
 				bodyAST = false,
