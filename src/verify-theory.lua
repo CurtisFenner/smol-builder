@@ -243,7 +243,7 @@ local function showVTable(v)
 	error "unreachable"
 end
 
-local function m_typeparameters(as)
+local function identifyConstraintArguments(as)
 	assertis(as, listType "VTableIR")
 
 	local m = {}
@@ -282,7 +282,7 @@ local function m_fresh(self, object)
 			"fn",
 			object.index,
 			object.signature.longName,
-			m_typeparameters(object.typeArguments),
+			identifyConstraintArguments(object.typeArguments),
 		}
 		local arguments = {}
 		for _, a in ipairs(object.arguments) do
@@ -495,7 +495,7 @@ local function recursiveStructure(e)
 		if #e.arguments == 0 then
 			return false
 		end
-		return "fn-" .. e.signature.longName, e.arguments
+		return "fn-" .. e.signature.longName .. "[" .. tostring(identifyConstraintArguments(e.typeArguments)) .. "]", e.arguments
 	elseif e.tag == "eq" then
 		return "eq", {e.left, e.right}
 	end
