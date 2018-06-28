@@ -61,10 +61,6 @@ REGISTER_TYPE("Assertion", choiceType(
 		value = "boolean",
 	},
 	recordType {
-		tag = constantType "this",
-		type = "TypeKind",
-	},
-	recordType {
 		tag = constantType "unit",
 	},
 	recordType {
@@ -76,13 +72,13 @@ REGISTER_TYPE("Assertion", choiceType(
 		arguments = listType "Assertion",
 		signature = "Signature",
 		index = "integer",
+		typeArguments = listType "VTableIR",
 	},
 	recordType {
 		tag = constantType "field",
 		base = "Assertion",
 		fieldName = "string",
 		fieldType = "TypeKind",
-		definition = "nil",
 	},
 	recordType {
 		tag = constantType "eq",
@@ -131,6 +127,7 @@ local function andAssertion(a, b)
 		arguments = {a, b},
 		signature = common.builtinDefinitions.Boolean.functionMap["and"].signature,
 		index = 1,
+		typeArguments = {},
 	}
 	return p
 end
@@ -145,6 +142,7 @@ local function orAssertion(a, b)
 		arguments = {a, b},
 		signature = common.builtinDefinitions.Boolean.functionMap["or"].signature,
 		index = 1,
+		typeArguments = {},
 	}
 	return p
 end
@@ -164,6 +162,7 @@ local function impliesAssertion(a, b)
 		arguments = {a, b},
 		signature = common.builtinDefinitions.Boolean.functionMap["implies"].signature,
 		index = 1,
+		typeArguments = {},
 	}
 	return p
 end
@@ -495,11 +494,19 @@ local function resultAssertion(statement, index)
 		}
 	end
 
+	local typeArguments
+	if statement.tag == "static-call" then
+		typeArguments = statement.constraintArguments
+	else
+		typeArguments = {}
+	end
+
 	return freeze {
 		tag = "fn",
 		arguments = arguments,
 		signature = statement.signature,
 		index = index,
+		typeArguments = typeArguments,
 	}
 end
 

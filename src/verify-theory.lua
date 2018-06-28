@@ -23,6 +23,52 @@ local typeOfAssertion = common.typeOfAssertion
 
 --------------------------------------------------------------------------------
 
+-- list: [](A, B)
+-- RETURNS {A => B}
+local function listToMap(list)
+	assertis(list, listType(tupleType("any", "any")))
+
+	local m = {}
+	for _, pair in ipairs(list) do
+		m[pair[1]] = pair[2]
+	end
+	return m
+end
+
+-- Represents a canonicalizing system
+local HashCache = {}
+function HashCache.new()
+	return setmetatable({_data = {}}, {__index = HashCache})
+end
+
+-- RETURNS previously placed value if keys is not new
+-- RETURNS value otherwise
+-- MODIFIES this if the value was not present so that future :place(keys)
+-- calls return value
+-- NOTE: a value of `nil` will not be placed into this map and will just return
+-- any existing value
+-- `HashCache` is not a valid key.
+-- REQUIRES at least one key is given
+function HashCache:place(keys, value)
+	assert(#keys ~= 0)
+
+	local map = self._data
+	for i = 1, #keys do
+		if map[keys[i]] == nil then
+			map[keys[i]] = {}
+		end
+		map = map[keys[i]]
+	end
+
+	if map[HashCache] == nil then
+		map[HashCache] = value
+	end
+
+	return map[HashCache]
+end
+
+--------------------------------------------------------------------------------
+
 -- RETURNS an Assertion representing a.not()
 local function notAssertion(a)
 	assertis(a, "Assertion")
@@ -32,6 +78,7 @@ local function notAssertion(a)
 		arguments = {a},
 		signature = common.builtinDefinitions.Boolean.functionMap["not"].signature,
 		index = 1,
+		typeArguments = {},
 	}
 end
 notAssertion = memoized(1, notAssertion)
@@ -86,21 +133,6 @@ local function constantAssertion(constant)
 	error("Unknown constant type value")
 end
 constantAssertion = memoized(1, constantAssertion)
-
--- RETURNS an Assertion
-local function fnAssertion(signature, arguments, index)
-	assertis(signature, "Signature")
-	assertis(arguments, listType("Assertion"))
-	assertis(index, "integer")
-
-	return freeze {
-		tag = "fn",
-		signature = signature,
-		arguments = arguments,
-		index = index,
-	}
-end
-fnAssertion = memoized(4, fnAssertion)
 
 --------------------------------------------------------------------------------
 
@@ -193,89 +225,138 @@ local function isLiteralAssertion(e)
 	return nil
 end
 
-local globalCanon = {}
+local globalCanon = HashCache.new()
+
+local function showVTable(v)
+	assertis(v, "VTableIR")
+
+	if v.tag == "parameter-vtable" then
+		return "(" .. v.name .. ")"
+	elseif v.tag == "concrete-vtable" then
+		local arguments = {}
+		for _, a in ipairs(v.arguments) do
+			table.insert(arguments, showVTable(a))
+		end
+		local base = common.showTypeKind(v.concrete) .. " is " .. common.showConstraintKind(v.interface)
+		return "(" .. base .. ")[" .. table.concat(arguments, ", ") .. "]"
+	end
+	error "unreachable"
+end
+
+local function m_typeparameters(as)
+	assertis(as, listType "VTableIR")
+
+	local m = {}
+	for i = 1, #as do
+		m[i] = showVTable(as[i])
+	end
+	return table.concat(m, ", ")
+end
+
+local m_scan
+
+local function m_fresh(self, object)
+	assertis(object, "Assertion")
+
+	if object.tag == "int" then
+		local keys = {"int", object.value}
+		return globalCanon:place(keys, object)
+	elseif object.tag == "string" then
+		local keys = {"string", object.value}
+		return globalCanon:place(keys, object)
+	elseif object.tag == "boolean" then
+		local keys = {"boolean", object.value}
+		return globalCanon:place(keys, object)
+	elseif object.tag == "unit" then
+		local keys = {"unit"}
+		return globalCanon:place(keys, object)
+	elseif object.tag == "variable" then
+		local keys = {
+			"variable",
+			object.variable.name,
+			showTypeKind(object.variable.type),
+		}
+		return globalCanon:place(keys, object)
+	elseif object.tag == "fn" then
+		local keys = {
+			"fn",
+			object.index,
+			object.signature.longName,
+			m_typeparameters(object.typeArguments),
+		}
+		local arguments = {}
+		for _, a in ipairs(object.arguments) do
+			local argument = m_scan(self, a)
+			table.insert(arguments, argument)
+			table.insert(keys, argument)
+		end
+
+		return globalCanon:place(keys, freeze {
+			tag = "fn",
+			arguments = arguments,
+			signature = object.signature,
+			index = object.index,
+			typeArguments = object.typeArguments,
+		})
+	elseif object.tag == "field" then
+		local keys = {
+			"field",
+			object.fieldName,
+		}
+		local base = m_scan(self, object.base)
+		table.insert(keys, base)
+		return globalCanon:place(keys, freeze {
+			tag = "field",
+			base = base,
+			fieldName = object.fieldName,
+			fieldType = object.fieldType,
+		})
+	elseif object.tag == "eq" then
+		local left = m_scan(self, object.left)
+		local right = m_scan(self, object.right)
+		local keys = {"eq", left, right}
+		return globalCanon:place(keys, freeze {
+			tag = "eq",
+			left = left,
+			right = right,
+		})
+	elseif object.tag == "gettag" then
+		local base = m_scan(self, object.base)
+		local keys = {"gettag", base}
+		return globalCanon:place(keys, freeze {
+			tag = "gettag",
+			base = base,
+		})
+	elseif object.tag == "symbol" then
+		local keys = {"symbol", object.symbol}
+		return globalCanon:place(keys, object)
+	elseif object.tag == "variant" then
+		local base = m_scan(self, object.base)
+		local keys = {"variant", object.variantName, base}
+		return globalCanon:place(keys, freeze {
+			tag = "variant",
+			variantName = object.variantName,
+			variantType = object.variantType,
+			base = base,
+		})
+	elseif object.tag == "forall" then
+		local keys = {"forall", object.unique, object.instance}
+		return globalCanon:place(keys, object)
+	end
+
+	error("unhandled tag `" .. object.tag .. "`")
+end
 
 -- Canonicalizes objects so that syntactically equivalent subtrees become the
 -- same reference
-local function m_scan(self, object)
-	assertis(object, "Assertion")
-
-	local shown = showAssertion(object)
-	if self.relevant[shown] then
-		return self.relevant[shown]
+function m_scan(self, object)
+	if self.relevant[object] ~= nil then
+		return object
 	end
 
-	local pre = globalCanon[shown]
-	if pre ~= nil then
-		self.relevant[shown] = pre
-
-		if TERMINAL_TAG[pre.tag] then
-			-- Do nothing
-		elseif pre.tag == "fn" then
-			for _, argument in ipairs(pre.arguments) do
-				assert(argument == m_scan(self, argument))
-			end
-		elseif pre.tag == "field" or pre.tag == "variant" or pre.tag == "gettag" then
-			assert(pre.base == m_scan(self, pre.base))
-		elseif pre.tag == "forall" then
-			-- Do nothing
-		elseif pre.tag == "eq" then
-			assert(pre.left == m_scan(self, pre.left))
-			assert(pre.right == m_scan(self, pre.right))
-		else
-			error("unhandled tag " .. pre.tag)
-		end
-
-		return pre
-	end
-
-	if TERMINAL_TAG[object.tag] then
-		self.relevant[shown] = object
-	elseif object.tag == "fn" then
-		local arguments = {}
-		for _, argument in ipairs(object.arguments) do
-			table.insert(arguments, m_scan(self, argument))
-		end
-		local real = fnAssertion(object.signature, arguments, object.index)
-		self.relevant[shown] = real
-	elseif object.tag == "field" then
-		local real = freeze {
-			tag = "field",
-			base = self:scan(object.base),
-			fieldName = object.fieldName,
-			fieldType = object.fieldType,
-		}
-		self.relevant[shown] = real
-	elseif object.tag == "variant" then
-		local real = freeze {
-			tag = "variant",
-			base = self:scan(object.base),
-			variantName = object.variantName,
-			variantType = object.variantType,
-		}
-		self.relevant[shown] = real
-	elseif object.tag == "gettag" then
-		local real = freeze {
-			tag = "gettag",
-			base = self:scan(object.base),
-		}
-		self.relevant[shown] = real
-	elseif object.tag == "forall" then
-		-- Comparing by object identity is OK
-		self.relevant[shown] = object
-	elseif object.tag == "eq" then
-		local real = freeze {
-			tag = "eq",
-			left = self:scan(object.left),
-			right = self:scan(object.right),
-		}
-		self.relevant[shown] = real
-	end
-
-	assert(self.relevant[shown], "unhandled tag `" .. object.tag .. "`")
-	showSkip[self.relevant[shown]] = shown
-	globalCanon[shown] = self.relevant[shown]
-	return self.relevant[shown]
+	local canonicalized = m_fresh(self, object)
+	self.relevant[canonicalized] = canonicalized
+	return canonicalized
 end
 
 local cID = 0
@@ -478,18 +559,6 @@ local function fnLiteralEvaluation(expression, eq)
 
 	-- All the arguments were successfully evaluated
 	return expression.signature.eval(table.unpack(argumentLiterals)), reasons
-end
-
--- list: [](A, B)
--- RETURNS {A => B}
-local function listToMap(list)
-	assertis(list, listType(tupleType("any", "any")))
-
-	local m = {}
-	for _, pair in ipairs(list) do
-		m[pair[1]] = pair[2]
-	end
-	return m
 end
 
 --------------------------------------------------------------------------------

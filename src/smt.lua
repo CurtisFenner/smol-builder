@@ -119,6 +119,7 @@ function CNF.new(theory, clauses, rawAssignment)
 		_satisfiedCount = 0,
 		_contradictCount = 0,
 		_allClauses = {},
+		_rawClauses = {},
 		_learned = {},
 		_canon = {},
 		_isCanon = {},
@@ -401,6 +402,7 @@ function CNF:addClause(rawClause)
 	end
 
 	table.insert(self._learned, rawClause)
+	table.insert(self._rawClauses, rawClause)
 	table.insert(self._allClauses, clause)
 
 	self:validate()
@@ -517,7 +519,7 @@ end
 -- REQUIRES set is initially good
 -- REQUIRES isGood mutates nothing
 local function minimizeSet(set, isGood)
-	assert(isGood(set))
+	assert(isGood(set), "initial set must be good")
 
 	-- Make a copy
 	local keys = {}
@@ -569,18 +571,48 @@ local function cnfSAT(theory, cnf, meta, model)
 
 	local stack = {}
 
+	-- Get those initial, unchangeable variable assignments
+	local preAssignment = {}
+	for k, v in pairs(cnf:getAssignment()) do
+		preAssignment[k] = v
+	end
+
 	while true do
+		local debugCore
 		if false then
 			-- Debug printing
+			local description = {}
+
 			local assignment = cnf:getAssignment()
 			local keys = table.keys(assignment)
+
+			function debugCore(core)
+				local s = {table.unpack(description)}
+				for _, k in ipairs(core) do
+					local key = k[1]
+					local index = table.indexof(keys, key)
+					assert(index)
+					local sym = k[2] and "+" or "-"
+					s[index] = ansi.red(sym) .. s[index]:sub(2, -2) .. ansi.red(sym)
+				end
+				print(table.concat(s))
+				print()
+			end
+
 			for _, t in ipairs(cnf:freeTermSet()) do
 				table.insert(keys, t)
 			end
 			table.sort(keys, function(a, b)
 				return theory:canonKey(a) < theory:canonKey(b)
 			end)
-			local description = {}
+
+			local isImplied = {}
+			for _, s in ipairs(stack) do
+				if s.implied then
+					isImplied[s.variable] = true
+				end
+			end
+
 			for i = 1, #keys do
 				if assignment[keys[i]] == nil then
 					description[i] = "."
@@ -589,8 +621,31 @@ local function cnfSAT(theory, cnf, meta, model)
 				else
 					description[i] = "0"
 				end
+
+				if preAssignment[keys[i]] ~= nil then
+					description[i] = ansi.gray(description[i])
+				elseif isImplied[keys[i]] then
+					description[i] = ansi.blue(description[i])
+				end
+
+				description[i] = " " .. description[i] .. " "
 			end
-			print(table.concat(description))
+			-- print(table.concat(description))
+			-- print()
+		end
+
+		-- Make a choice
+		while not cnf:isDecided() do
+			local term, prefer, implied = cnf:pickUnassigned()
+			table.insert(stack, {
+				variable = term,
+				preferTruth = prefer,
+				first = true,
+				model = model,
+				implied = implied,
+			})
+			cnf:assign(term, prefer)
+			model = model:assigned(term, prefer)
 		end
 
 		if cnf:isTautology() then
@@ -604,6 +659,7 @@ local function cnfSAT(theory, cnf, meta, model)
 				for k, v in pairs(conflicting) do
 					table.insert(coreClause, {k, not v})
 				end
+				-- debugCore(coreClause)
 				cnf:addClause(coreClause)
 			else
 				-- Expand quantified statements using the theory
@@ -679,6 +735,47 @@ local function cnfSAT(theory, cnf, meta, model)
 				cnf:addClause(learnedClause)
 			end
 		elseif cnf:isContradiction() then
+			-- Get decision set
+			local decisionSet = {}
+			local assignment = cnf:getAssignment()
+			for _, s in ipairs(stack) do
+				if not s.implied then
+					decisionSet[s.variable] = assignment[s.variable]
+				end
+			end
+
+			-- Find the core of the problem; this is an expensive form of
+			-- conflict-driven clause-learning (CDCL)
+			local newCNF = CNF.new(theory, cnf._rawClauses, preAssignment)
+			local problemCore = minimizeSet(decisionSet, function(m)
+				-- Reset the new CNF
+				for k in pairs(newCNF:getAssignment()) do
+					if preAssignment[k] == nil then
+						newCNF:unassign(k)
+					end
+				end
+
+				-- Do the partial assignment
+				for k, v in pairs(m) do
+					newCNF:assign(k, v)
+				end
+
+				-- Do unit propagation
+				newCNF:forceAssignments()
+				return newCNF:isContradiction()
+			end)
+			
+			if #table.keys(problemCore) == 0 then
+				return false
+			else
+				local coreClause = {}
+				for k, v in pairs(problemCore) do
+					table.insert(coreClause, {k, not v})
+				end
+				cnf:addClause(coreClause)
+				-- debugCore(coreClause)
+			end
+
 			-- Some assignment made by the SAT solver is bad
 			-- TODO: conflict clauses
 			while true do
@@ -696,25 +793,16 @@ local function cnfSAT(theory, cnf, meta, model)
 					cnf:unassign(variable)
 					cnf:assign(variable, not preferred)
 					model = model:assigned(variable, not preferred)
-					break
+
+					if not cnf:isContradiction() then
+						break
+					end
 				else
 					-- Backtrack
 					cnf:unassign(variable)
 					stack[#stack] = nil
 				end
 			end
-		else
-			-- Make a choice
-			local term, prefer, implied = cnf:pickUnassigned()
-			table.insert(stack, {
-				variable = term,
-				preferTruth = prefer,
-				first = true,
-				model = model,
-				implied = implied,
-			})
-			cnf:assign(term, prefer)
-			model = model:assigned(term, prefer)
 		end
 	end
 end

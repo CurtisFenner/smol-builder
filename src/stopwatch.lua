@@ -51,7 +51,7 @@ end
 
 function Stopwatch:finish()
 	local totalTime = os.clock() - self._began
-	if totalTime < self._limit or true then
+	if totalTime < self._limit then
 		return
 	end
 
