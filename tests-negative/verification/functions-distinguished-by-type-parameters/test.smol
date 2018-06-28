@@ -1,0 +1,26 @@
+package test;
+
+interface Distinguisher {
+	static distinguish(n Int) Int;
+}
+
+class Foo[#T | #T is Distinguisher] {
+	static f(n Int) Int {
+		return 0;
+	}
+}
+
+class Bar[#A, #B | #A is Distinguisher, #B is Distinguisher] {
+	static m(n Int) Int {
+		var a Int = Foo[#A].f(n);
+		var b Int = Foo[#B].f(n);
+		assert a == b;
+		return a + b;
+	}
+}
+
+class Test {
+	static main() Unit {
+
+	}
+}
