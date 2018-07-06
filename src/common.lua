@@ -526,7 +526,7 @@ local BUILTIN_DEFINITIONS = {
 					requiresASTs = {},
 					ensuresASTs = {},
 					logic = {
-						[true] = {{true, "*"}, {false, true}},
+						[true] = {{true, "*"}, {"*", true}},
 						[false] = {{false, false}},
 					},
 					eval = function(a, b)

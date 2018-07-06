@@ -1018,7 +1018,6 @@ function theory:breakup(assertion, target)
 		for _, argument in ipairs(assertion.arguments) do
 			table.insert(values, argument)
 		end
-		assertis(values, listType "Assertion")
 
 		for _, row in ipairs(logic[target]) do
 			assert(#row == #values)
