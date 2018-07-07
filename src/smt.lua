@@ -530,10 +530,11 @@ end
 -- the specified CNF expression. Does NOT ensure that all terms are represented.
 -- RETURNS false when no such satisfaction exists
 -- MODIFIES cnf to strengthen its clauses
-local function cnfSAT(theory, cnf, meta, model)
+local function cnfSAT(theory, cnf, meta, initialModel)
 	assertis(theory, "Theory")
-	assertis(model, "TheoryModel")
+	assertis(initialModel, "TheoryModel")
 
+	local modelStack = {[0] = initialModel}
 	local stack = {}
 
 	-- Get those initial, unchangeable variable assignments
@@ -548,11 +549,8 @@ local function cnfSAT(theory, cnf, meta, model)
 			preferTruth = prefer,
 			first = true,
 			implied = true,
-			model = model,
 		})
-		model = model:assigned(term, prefer)
 	end
-	cnf:printStats()
 
 	while true do
 		local debugCore
@@ -620,25 +618,37 @@ local function cnfSAT(theory, cnf, meta, model)
 				variable = term,
 				preferTruth = prefer,
 				first = true,
-				model = model,
 				implied = implied,
 			})
 			cnf:assign(term, prefer)
-			model = model:assigned(term, prefer)
 		end
 
 		if cnf:isTautology() then
+			-- Update the model with changes since last theory consulation
+			local model = modelStack[#modelStack]
+			for i = #modelStack + 1, #stack do
+				local truth = stack[i].preferTruth
+				if not stack[i].first then
+					truth = not truth
+				end
+				model = model:assigned(stack[i].variable, truth)
+				modelStack[i] = model
+			end
+
+			-- Ask the theory whether or not the CNF satisfaction actually
+			-- works in the given theory
 			local out, conflicting = model:isSatisfiable()
 			if not out then
 				assert(conflicting)
 
 				-- While this truth model satisfies the CNF, the satisfaction
-				-- doesn't work in the theory
+				-- doesn't work in the theory.
+				-- The core clause "explains" the problem and is a constraint
+				-- that the current assignment violates
 				local coreClause = {}
 				for k, v in pairs(conflicting) do
 					table.insert(coreClause, {k, not v})
 				end
-				-- debugCore(coreClause)
 				cnf:addClause(coreClause)
 			else
 				-- Expand quantified statements using the theory
@@ -763,15 +773,18 @@ local function cnfSAT(theory, cnf, meta, model)
 					return false
 				end
 
+				assert(#modelStack <= #stack)
+				if #modelStack == #stack then
+					table.remove(modelStack)
+				end
+
 				local variable = stack[#stack].variable
 				local preferred = stack[#stack].preferTruth
-				model = stack[#stack].model
 				if stack[#stack].first and not stack[#stack].implied then
 					-- Flip the assignment
 					stack[#stack].first = false
 					cnf:unassign(variable)
 					cnf:assign(variable, not preferred)
-					model = model:assigned(variable, not preferred)
 
 					if not cnf:isContradiction() then
 						break
