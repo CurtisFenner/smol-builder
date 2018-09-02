@@ -19,16 +19,17 @@ lowercase letter.
 By convention, the package should reflect the source file's path and name;
 however, this is unchecked, and two source files may have the same package name.
 
-The `core` package is reserved for standard definitions. Source files should not
-declare themselves to be in `package core`.
+The `core` package is reserved for standard definitions. Programmers should not
+write source files that declare themselves to be in `package core` because they
+could conflict with internal or future names.
 
 ## Source File Syntax
 
 Source files must be encoded in an ASCII-compatible encoding (such as UTF-8).
+Non-ASCII bytes may appear only in comments and string literals.
 
-Source files are interpretted as a sequence of tokens. Tokens can be split by
-interpretting the ASCII bytes of the source file; non-ASCII bytes can appear
-only in comments and string literals.
+Source files are interpretted as a sequence of tokens. A source file can be
+split into tokens using simple rules on the ASCII bytes in the file.
 
 ### Tokens
 
@@ -65,8 +66,7 @@ The following words are reserved type keywords:
 
 * `Boolean`
 * `Int`
-* `Never`
-* `#Self`
+* `Never` Reserved, but currently unused.
 * `String`
 * `Unit`
 * `#Self`
@@ -74,21 +74,23 @@ The following words are reserved type keywords:
 Smol source files are made of sequences of the following tokens:
 
 * `[a-z][A-Za-z0-9]*` are variable, package, and field identifiers, except for
-  the reserved keywords above
+    the reserved keywords above
 * `[A-Z][A-Za-z0-9]*` are type identifiers, except for the reserved type
-  keywords above
+    keywords above
 * `#[A-Z][A-Za-z0-9]*` are type parameter identifiers, except for the reserved
-  `#Self` keyword
-* `[\n\r\t\v ]+` are whitespace, which are ignored and can separate tokens
+    `#Self` keyword
+* `[\n\r\t\v ]+` are whitespace, which are ignored except for separating tokens
 * `//[^\n]*` are comments, which continue to the end of the line and are ignored
 * `[0-9]+` are integer literals
 * `,`, `;`, `|`, `!`, `.`, `(`, `)`, `[`, `]`, `{`, `}` are all one-character
-	tokens
+    tokens
 * `"` begins string literals. String literals continue until an unescaped `"` is
-  reached. `\` escapes the next character, with `\0`, `\n`, `\t`, `\\`, `\"`.
-  A string literal cannot contain a literal newline (byte 10) or carriage return
-  (byte 13).
-* `[<=>%/*+-]+` are operators
+    reached. `\` escapes the next character, with `\0`, `\n`, `\r`, `\t`, `\\`,
+    `\"`.
+    A string literal cannot contain a literal newline (byte 10) or carriage
+    return (byte 13).
+* `[<=>%/*+-]+` are operators, excepting those containing `//`, which begins a
+    comment as mentioned above
 
 ### Grammar
 The grammar of Smol follows, with the following conventions:
@@ -103,9 +105,8 @@ The grammar of Smol follows, with the following conventions:
 * `x,*` means 0 or more occurences of `x` separated by a literal `","`
 
 > IMPLEMENTATION NOTE:
-> The grammar is simple to parse and unambiguous, with the
-> exception of `when` for `forall` being higher precedence than for `ensures`,
-> `requries`, and `assert`
+> The grammar is simple to parse, and unambiguous. A PEG parser is suitable for
+> parsing Smol.
 
 	Source :=
 		PackageDef
@@ -203,7 +204,7 @@ The grammar of Smol follows, with the following conventions:
 	
 	Statement :=
 		| "var" Variable, "=" Expression ";"
-		| "do" Block
+		| "do" Expression ";"
 		| IfSt
 		| MatchSt
 		| "assertion" Expression ";"
@@ -225,7 +226,7 @@ The grammar of Smol follows, with the following conventions:
 	Expression :=
 		| ExpressionBase (operator ExpressionBase)? ("isa" variable_iden)?
 		// "when" has higher precedence here than in ensures/requires/asserts
-		| "forall" "(" Variable ")" Expression ("when" Expression)?
+		| "forall" "(" Variable ")" Expression ("if" Expression,+)?
 
 	ExpressionBase :=
 		| "(" Expression ")"
@@ -251,16 +252,25 @@ Smol is statically typed. There are several built-in types:
   ..., `-3`, `-2`, `-1`, `0`, `1`, `2`, `3`, ...
 * `String` which represents sequences of bytes such as `""` and `"Smol"`
 
-Smol has two kinds of type definitions: `class` and `union`. Smol has no concept
-of "null" or any other value which is of "any" type; it also does not have an
-"Any" type which encompasses all values.
+There is no "any" type in Smol that encompasses all values
+(like Java's `Object`).
+There is no value in Smol that is of any type (like Java's `null`).
 
-`class` types correspond to records (product types) and have zero or more 
+Smol does not have inheritance or subtyping.
+
+In addition to the four built-in types, Smol has two kinds of type definitions:
+`class` and `union`.
+
+### Classes
+
+`class` types correspond to records (product types) and have zero or more
 *fields*.
 Each field is given a name and a type. Each instance of a `class` type has a
-value for each field. Class instances are created with `new` by providing a
-value for each field. There is no special notion of a "constructor"; instances
-can be created by any function in the class.
+value for each field. Class instances are created with `new`-expressions by
+providing assigning a value to each field.
+
+Smol has no special "constructor" members; `new`-expressions can be invoked in
+any function in the class.
 
 	class Pair {
 		var myInt Int;
@@ -269,7 +279,13 @@ can be created by any function in the class.
 		static make(n Int, s String) Pair {
 			return new(myString = s, myInt = n);
 		}
+
+		method getInt() Int {
+			return this.myInt;
+		}
 	}
+
+### Unions
 
 `union` types correspond to enums (sum types) and have one or more *variants*.
 Each variant is given a name and a type.
@@ -278,7 +294,7 @@ instance is, and a value of that variant's type.
 
 Variants are distinguished by their tag and not their type: a `union` may have
 multiple variants with the same type. Union instances are created with `new`
-by providing a value for one variant.
+by providing a value for exactly one variant.
 
 	union Either {
 		var success String;
@@ -291,15 +307,20 @@ by providing a value for one variant.
 		static makeFailure() Either {
 			return new(errorCode = 418);
 		}
+
+		method isSuccess() Boolean {
+			return this is success;
+		}
 	}
 
 ### Parameterized Types (Generics)
 
 `class` and `union` types may be parameterized by type parameters. Type
-parameter tokens begin with `#`; for example, `#Foo` or `#T`. Type parameters
-are regular types and can be used anywhere that other types can be used,
+parameter tokens begin with `#`; for example, `#Foo` or `#T`.
+
+Type parameters can be used anywhere that other types can be used,
 including as function parameter types, function return types, field types, and
-static function invocations.
+in static function invocations.
 
 	class Pair[#Left, #Right] {
 		var left #Left;
@@ -325,8 +346,8 @@ Parameterized types are allowed to be *recursive*:
 	}
 
 > IMPLEMENTATION NOTE:
-> As a result of the above kind of recursion, template instantiation as in
-> C++ is *not* sufficient to implement Smol generics. Instead, a function
+> As a result of the above kind of recursion, static template instantiation as
+> in C++ is *not* sufficient to implement Smol generics. Instead, a function
 > v-table must be used, in at least some circumstances.
 
 ### Constraints on Type Parameters: Interfaces
@@ -356,28 +377,34 @@ Interfaces may use the `#Self` type to refer to the implementer's type.
 		method reciprocal() #Self;
 	}
 
-	// A three-dimensional vector over an arbitrary field
+	// A two-dimensional vector over an arbitrary field
 	// #F will have all of the functions of Field available because
 	// `#F is Field`.
-	class V3[#F | #F is Field] {
+	class V2[#F | #F is Field] {
 		var x #F;
 		var y #F;
-		var z #F;
 
-		static make(x #F, y #F, z #F) {
-			return new(x = x, y = y, z = z);
+		static make(x #F, y #F) {
+			return new(x = x, y = y);
 		}
 
-		method sum(other V3[#F]) V3[#F] {
-			// "+" here is another name for "sum"
+		static zero() V2[#F] {
+			// We can invoke the static members of a type parameter
 			return new(
-				x = this.x + other.x,
-				y = this.y + other.y,
-				z = this.z + other.z
+				x = #F.zero(),
+				y = #F.zero()
 			);
 		}
 
-		method scale(c #F) V3[#F] {
+		method sum(other V2[#F]) V2[#F] {
+			// "+" here is another name for "sum"
+			return new(
+				x = this.x + other.x,
+				y = this.y + other.y
+			);
+		}
+
+		method scale(c #F) V2[#F] {
 			return new(
 				x = c * this.x,
 				y = c * this.y,
@@ -385,28 +412,25 @@ Interfaces may use the `#Self` type to refer to the implementer's type.
 			);
 		}
 
-		static zero() V3[#F] {
-			// We can invoke the static members of a type parameter
-			return new(
-				x = #F.zero(),
-				y = #F.zero(),
-				z = #F.zero()
-			);
+		method dot(other V2[#F]) #F {
+			return (this.x * other.x) + (this.y * other.y);
 		}
 	}
 
 Interfaces are *not* types; instead, they are used only to *constrain* type
-parameters and thereby provide functions that can operate on values of generic
-type.
+parameters, allowing algorithms and data-structures that require something of
+the types they contain or use.
 
 ### Values and Identity
 
-All values in Smol are **immutable**; the values associated with the fields of a
-`class` or `union` cannot change. Instead, you can create a new value which has
-been modified from the previous value.
+All values in Smol are **immutable**. In particular, the values associated with
+the fields of a `class` or `union` cannot change.
+
+Instead, you can create a new value which has been modified from the previous
+value.
 
 In particular, this means "copying" a data structure in its entireity is never
-necessary: if the fields of two class or union instances of the same tyoe are
+necessary: if the fields of two class or union instances of the same type are
 the same, then the values are the same.
 Thus, there is no concept of object identity in Smol.
 
@@ -441,6 +465,104 @@ For example, standard input and output functions are marked with `!`:
 
 	static main!() Unit {
 		do core:Out.println!("Hello, world!");
+	}
+
+## Semantics
+
+A *function* in Smol has several components:
+
+* A set of *parameters* which are assigned values at run-time
+* A function body
+
+The function body is a *block* of statements. A block of statements is executed
+one at a time from the top to the bottom.
+
+### `var` declaration statement
+
+A `var` declaration statement declares at least one variable and assigns it an
+initial value.
+
+	var foo Int = 7;
+
+A variable name cannot be used in a `var` declaration statement if a variable
+(or function parameter) with that name is already in scope.
+
+The scope of a variable begins in the next statement in its containing block and
+ends at last statement of the variable's containing block.
+
+Multiple variables may be defined at once in one `var` declaration statement.
+
+	var num Int, name String = 1, "one";
+
+### `do` statement
+
+A `do` statement executes an expression.
+
+	do core:Out.println!("Hello, world!");
+
+The return value is discarded.
+
+### `assert` statement
+
+An `assert` statement asserts that a given boolean expression has value `true`
+when it is reached. `assert` statements are not run at run-time. See the section
+on Verification for more information.
+
+### `return` statement
+
+A `return` statement exits the currently executing function, assigning the
+values to be returned.
+
+	return 100;
+
+The number and type of return values must match the function signature. Multiple
+values can be returned in one `return` statement.
+
+	return 1, "one";
+
+### Assignment statement
+
+Variables can be assigned new values with an assigment statement.
+
+	num, name = 2, "two";
+
+Multiple variables may be assigned in a single assignment statement. The
+expression on the right-hand-side is evaluated before modifying any variables,
+thus this can be used to "swap" the values of two variables of the same type:
+
+	foo, bar = bar, foo;
+
+Future references to the variable will use the newly assigned value.
+
+### `if` statement
+
+An `if` statement is a form of control flow. If the condition evaluates to
+`true`, the first branch block is executed. If the condition evaluates to
+`false`, the statement in the `else` or `elseif` branch is executed.
+
+Only the *first* `if` or `elseif` branch with a condition evaluating to `true`
+is taken.
+
+	if 5 < 10 {
+		do core:Out.println!("Five is less than ten.");
+	} else {
+		do core:Out.println!("Something is wrong!");
+	}
+
+### `match` statement
+
+A `match` statement is a form of control flow. The tag of the matched expression
+determines which branch is taken. As a convenience, the branch brings a variable
+into scope and assigns it an initial value of the variant's value.
+
+	do core:Out.println!("The optional value has:");
+	match option {
+		case nothing None {
+			do core:Out.println!("Nothing at all!");
+		}
+		case something String {
+			do core:Out.println!(something);
+		}
 	}
 
 ## Verification

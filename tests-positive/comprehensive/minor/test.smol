@@ -2,7 +2,7 @@ package test;
 
 class Foo {
 	method bar(n Int) Boolean
-	ensures forall (other Int) return when true {
+	ensures forall (other Int) return if true {
 		return true;
 	}
 
@@ -20,7 +20,7 @@ class Test {
 
 	static main() Unit {
 		//assert Test.positive() < (Test.positive() + 1);
-		// assume forall (middle Int) 0 < (Test.positive() + 1) when (0 < middle).and(middle < (Test.positive() + 1))
+		// assume forall (middle Int) 0 < (Test.positive() + 1) if (0 < middle).and(middle < (Test.positive() + 1))
 		var p Int = Test.positive();
 		//var x Boolean = 0 < (p + 1);
 		//assert (0 < p).and(p < (p + 1));

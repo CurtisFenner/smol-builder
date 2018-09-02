@@ -646,7 +646,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 					ensuresASTs = {
 						-- Transitive
-						parseKind("ensures (forall (middle Int) return when (this < middle).and(middle < arg2))", "ensures"),
+						parseKind("ensures (forall (middle Int) return if (this < middle).and(middle < arg2))", "ensures"),
 
 						-- Antireflexive
 						parseKind("ensures return.not() when this == arg2", "ensures"),

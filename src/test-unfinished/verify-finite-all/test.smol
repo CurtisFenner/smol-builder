@@ -22,7 +22,7 @@ class Sorted {
 	}
 
 	static sorted(list Li) Boolean
-	ensures (forall (i Int) list.get(i) < list.get(i + 1) when list.validIndex(i).and(list.validIndex(i+1))) == return {
+	ensures (forall (i Int) list.get(i) < list.get(i + 1) if list.validIndex(i).and(list.validIndex(i+1))) == return {
 		return Sorted.sortedFrom(list, 0);
 	}
 }

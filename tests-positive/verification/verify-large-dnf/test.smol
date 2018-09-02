@@ -1,0 +1,25 @@
+package test;
+
+class Test {
+	static f(n Int) Boolean ensures return {
+		return true;
+	}
+
+	static main() Unit {
+		// Ensure there isn't any exponential blow up in formula size
+		assert (Test.f(1).and(Test.f(2)).and(Test.f(7)))
+			.or(Test.f(2).and(Test.f(3)).and(Test.f(7)))
+			.or(Test.f(4).and(Test.f(5)).and(Test.f(7)))
+			.or(Test.f(6).and(Test.f(7)).and(Test.f(7)))
+			.or(Test.f(8).and(Test.f(9)).and(Test.f(7)))
+			.or(Test.f(10).and(Test.f(11)).and(Test.f(7)))
+			.or(Test.f(12).and(Test.f(13)).and(Test.f(7)))
+			.or(Test.f(14).and(Test.f(15)).and(Test.f(7)))
+			.or(Test.f(16).and(Test.f(17)).and(Test.f(7)))
+			.or(Test.f(18).and(Test.f(19)).and(Test.f(7)))
+			.or(Test.f(20).and(Test.f(21)).and(Test.f(7)))
+			.or(Test.f(22).and(Test.f(23)).and(Test.f(7)))
+			.or(Test.f(24).and(Test.f(25)).and(Test.f(7)))
+			.or(Test.f(24).and(Test.f(25)).and(Test.f(7)));
+	}
+}

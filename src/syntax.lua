@@ -680,7 +680,7 @@ local parsers = {
 				parser.optional(parser.composite {
 					tag = "forall-when",
 					location = false,
-					{"_", K_WHEN},
+					{"_", K_IF},
 					{"#when", parser.query "expression,1+", "an expression"},
 				}),
 				{}
