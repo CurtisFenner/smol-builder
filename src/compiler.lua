@@ -3,12 +3,12 @@
 
 local ARGV = arg
 
-INVOKATION = table.concat {
+INVOCATION = table.concat {
+	ARGV[-1],
+	" ",
 	ARGV[0],
 	" ",
 	table.concat(ARGV, " "),
-	"\non ",
-	os.date("!%c"),
 	"\nsmol version 0??"
 }
 
