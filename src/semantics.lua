@@ -10,7 +10,7 @@ local showTypeKind = common.showTypeKind
 local showConstraintKind = common.showConstraintKind
 local areTypesEqual = common.areTypesEqual
 
-local UNKNOWN_LOCATION = freeze {begins = "???", ends = "???"}
+local UNKNOWN_LOCATION = {begins = "???", ends = "???"}
 
 local UNIT_TYPE = {
 	tag = "keyword-type",
@@ -3029,7 +3029,7 @@ local function semanticsSmol(sources, main)
 		end
 	end
 
-	return freeze {
+	return {
 		builtins = common.builtinDefinitions,
 		compounds = compounds,
 		interfaces = interfaces,

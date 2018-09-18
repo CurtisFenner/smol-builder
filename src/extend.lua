@@ -105,7 +105,7 @@ function table.with(object, key, newValue)
 	end
 
 	newObject[key] = newValue
-	return freeze(newObject)
+	return newObject
 end
 
 -- RETURNS whether or not a table has a given key

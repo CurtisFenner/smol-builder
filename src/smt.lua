@@ -991,8 +991,6 @@ function plaintheory:additionalClauses(model, meta)
 	return out, newMeta
 end
 
-plaintheory = freeze(plaintheory)
-
 -- Establish the domain of the theory
 assert(not isSatisfiable(plaintheory, {"f", "x == 0"}), "unsat x == 0")
 assert(isSatisfiable(plaintheory, {"f", "x == 1"}), "sat x == 1")
@@ -1101,9 +1099,9 @@ for N = 50, 0, 10 do
 			"x " .. string.rep(" ", i + 1) .. " == 1"
 		}
 
-		local a = freeze {"f", table.remove(clause, math.random(#clause))}
-		local b = freeze {"f", table.remove(clause, math.random(#clause))}
-		local c = freeze {"f", table.remove(clause, math.random(#clause))}
+		local a = {"f", table.remove(clause, math.random(#clause))}
+		local b = {"f", table.remove(clause, math.random(#clause))}
+		local c = {"f", table.remove(clause, math.random(#clause))}
 		local f = {"or", a, {"or", b, c}}
 		q = {"and", q, f}
 	end
@@ -1121,9 +1119,9 @@ for N = 50, 0, 10 do
 			clause[3] = "x == " .. math.random(6, 999)
 		end
 
-		local a = freeze {"f", table.remove(clause, math.random(#clause))}
-		local b = freeze {"f", table.remove(clause, math.random(#clause))}
-		local c = freeze {"f", table.remove(clause, math.random(#clause))}
+		local a = {"f", table.remove(clause, math.random(#clause))}
+		local b = {"f", table.remove(clause, math.random(#clause))}
+		local c = {"f", table.remove(clause, math.random(#clause))}
 		local f = {"or", a, {"or", b, c}}
 		q = {"and", q, f}
 	end
@@ -1180,7 +1178,7 @@ end
 
 --------------------------------------------------------------------------------
 
-return freeze {
+return {
 	isSatisfiable = isSatisfiable,
 	implies = implies,
 }

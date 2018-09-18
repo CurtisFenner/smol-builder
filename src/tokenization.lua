@@ -186,7 +186,7 @@ local function lexSmol(source, filename)
 
 	while #source > 0 do
 		local location = {
-			begins = freeze {
+			begins = {
 				filename = filename,
 				sourceLines = sourceLines,
 				line = line,
@@ -239,7 +239,7 @@ local function lexSmol(source, filename)
 
 					-- String literal is complete
 					source = source:sub(i + 1)
-					table.insert(tokens, freeze {
+					table.insert(tokens, {
 						tag = "string-literal",
 						value = content,
 						location = location,
@@ -267,7 +267,7 @@ local function lexSmol(source, filename)
 					if token then
 						token.location = location
 						token.lexeme = match
-						table.insert(tokens, freeze(token))
+						table.insert(tokens, token)
 					end
 
 					-- Advance the cursor through the text file
@@ -286,7 +286,7 @@ local function lexSmol(source, filename)
 		end
 	end
 
-	return freeze(tokens)
+	return tokens
 end
 
 return lexSmol

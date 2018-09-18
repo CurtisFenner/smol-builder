@@ -127,38 +127,38 @@ end
 
 --------------------------------------------------------------------------------
 
-local STRING_TYPE = freeze {
+local STRING_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "String",
 }
 
-local INT_TYPE = freeze {
+local INT_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "Int",
 }
 
-local BOOLEAN_TYPE = freeze {
+local BOOLEAN_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "Boolean",
 }
 
-local UNIT_TYPE = freeze {
+local UNIT_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "Unit",
 }
 
-local NEVER_TYPE = freeze {
+local NEVER_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "Never",
 }
 
--- TODO: This is not a real type!
-local SYMBOL_TYPE = freeze {
+-- TODO: This is not a real Smol type!
+local SYMBOL_TYPE = {
 	tag = "keyword-type",
 	role = "type",
 	name = "_Symbol",
@@ -180,7 +180,7 @@ local OPERATOR_ALIAS = {
 
 --------------------------------------------------------------------------------
 
-local BUILTIN_LOC = freeze {
+local BUILTIN_LOC = {
 	begins = "builtin",
 	ends = "builtin",
 }

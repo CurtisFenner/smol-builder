@@ -1,11 +1,10 @@
 -- Curtis Fenner, copyright (C) 2017
 -- Defines
 -- + `show`
--- Redefines `pairs` and `ipairs` to respect metatables
 -- Defines
 -- + isstring, isobject, isnumber, isboolean, isinteger, isfunction
 -- Defines
--- + memoized, freeze
+-- + memoized
 -- Defines
 -- + REGISTER_TYPE, EXTEND_TYPE
 -- Defines
@@ -90,36 +89,6 @@ function show(value)
 	return table.concat(out)
 end
 
--- Redefine `pairs` to use `__next` metamethod
-function pairs(object)
-	return next, object
-end
-
-local realNext = next
-function next(object, from)
-	assert(
-		isobject(object),
-		"object must be reference type in next()"
-	)
-	local metatable = getmetatable(object)
-	if metatable and metatable.__next then
-		return metatable.__next(object, from)
-	end
-	return realNext(object, from)
-end
-
--- Redefine `ipairs` to respect `__index` metamethod
-local function ipairsIterator(list, i)
-	if list[i + 1] == nil then
-		return nil
-	end
-	return i + 1, list[i + 1]
-end
-
-function ipairs(list)
-	return ipairsIterator, list, 0
-end
-
 local realUnpack = table.unpack or _G.unpack
 if rawget(_G, "unpack") then
 	-- Make 5.1 look like 5.2
@@ -146,7 +115,7 @@ end
 
 -- RETURNS whether or not instance is a Lua object (table or userdata)
 function isobject(instance)
-	return type(instance) == "userdata" or type(instance) == "table"
+	return type(instance) == "table"
 end
 
 -- RETURNS whether or not instance is a Lua number
@@ -239,78 +208,6 @@ function memoized(count, f)
 	return memoizedF
 end
 
---------------------------------------------------------------------------------
-
-local traces = {}
-
--- RETURNS an immutable copy of `object` that errors when a non-existent key
--- is read.
--- REQUIRES all components are immutable, including functions
-function freeze(object)
-	if not isobject(object) then
-		return object
-	elseif isimmutable(object) then
-		return object
-	end
-
-	local copy = {}
-	for k, v in pairs(object) do
-		copy[k] = freeze(v)
-	end
-
-	local out = {}
-	if rawget(_G, "newproxy") then
-		-- Lua 5.1 does not respect the __len metamethod for tables
-		-- Lua 5.2 does, which has dropped the newproxy function
-		out = _G.newproxy(true)
-	else
-		setmetatable(out, {})
-	end
-	traces[out] = "debug.traceback(2)"
-
-	local metatable = getmetatable(out)
-	local mem = {}
-	metatable.__index = function(_, key)
-		if copy[key] == nil then
-			local available = {}
-			for key, value in pairs(copy) do
-				table.insert(available, tostring(key) .. "=" .. tostring(value))
-			end
-
-			if type(key) == "number" then
-				-- XXX: allow reading one past end of arrays
-				local previous = copy[key - 1]
-				if previous ~= nil or key == 1 then
-					return nil
-				end
-			end
-
-			error(
-				"frozen object has no field `" .. tostring(key) .. "`: available `" .. show(object),
-				2
-			)
-		end
-
-		-- Recursively freeze and cache
-		return copy[key]
-	end
-	metatable.__newindex = function(_, key)
-		error("cannot write to field `" .. tostring(key) .. "` on frozen object", 2)
-	end
-	metatable.__next = function(o, k)
-		return next(copy, k)
-	end
-	metatable.__len = function()
-		return #object
-	end
-
-	IMMUTABLE_OBJECTS[out] = true
-	return out
-end
-
-assert(#freeze {"a", "b", "c"} == 3)
-assert(next(freeze {"a", "b", "c"}) ~= nil)
-
 -- Lua Type Specifications -----------------------------------------------------
 
 local _TYPE_SPEC_BY_NAME = {}
@@ -325,7 +222,7 @@ function REGISTER_TYPE(name, t)
 		return name
 	end
 
-	_TYPE_SPEC_BY_NAME[name] = freeze {
+	_TYPE_SPEC_BY_NAME[name] = {
 		predicate = t.predicate,
 		describe = describe,
 	}
@@ -409,7 +306,7 @@ assertis = memoized(2, assertis)
 
 -- RETURNS a type-predicate
 function constantType(value)
-	return freeze {
+	return {
 		predicate = function(object)
 			return object == value, "value must be `" .. show(value) .. "`"
 		end,
@@ -478,7 +375,7 @@ function recordType(record)
 		return "{" .. table.concat(kv, ", ") .. "}"
 	end
 
-	local out = freeze {predicate = predicate, describe = describe}
+	local out = {predicate = predicate, describe = describe}
 	recordMemoize[recordID] = out
 	return out
 end
@@ -518,7 +415,7 @@ function listType(elementType)
 		return "[" .. TYPE_DESCRIPTION(elementType) .. "]"
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	return {predicate = predicate, describe = describe}
 end
 listType = memoized(1, listType)
 
@@ -555,7 +452,7 @@ function mapType(from, to)
 		return "{" .. map .. "}"
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	return {predicate = predicate, describe = describe}
 end
 mapType = memoized(2, mapType)
 
@@ -588,7 +485,7 @@ function choiceType(...)
 		return "(" .. table.concat(c, " | ") .. ")"
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	return {predicate = predicate, describe = describe}
 end
 
 -- RETURNS a type-predicate
@@ -617,7 +514,7 @@ function intersectType(...)
 		return "(" .. table.concat(c, " & ") .. ")"
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	return {predicate = predicate, describe = describe}
 end
 
 function EXTEND_TYPE(child, parent, definition)
@@ -641,7 +538,7 @@ function predicateType(f)
 		return false, "value does not satisfy predicate from line " .. debug.getinfo(f).linedefined
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	return {predicate = predicate, describe = describe}
 end
 predicateType = memoized(1, predicateType)
 
@@ -684,7 +581,7 @@ function tupleType(...)
 		return "(" .. table.concat(s, ", ") .. ")"
 	end
 
-	return freeze {predicate = predicate, describe = describe}
+	return {predicate = predicate, describe = describe}
 end
 
 --------------------------------------------------------------------------------

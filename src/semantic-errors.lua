@@ -61,7 +61,6 @@ function Report.INTERFACE_USED_AS_TYPE(p)
 end
 
 function Report.UNKNOWN_DEFINITION_IMPORTED(p)
-	p = freeze(p)
 	quit(
 		"A definition called `",
 		p.name,
@@ -72,7 +71,6 @@ function Report.UNKNOWN_DEFINITION_IMPORTED(p)
 end
 
 function Report.UNKNOWN_PACKAGE_USED(p)
-	p = freeze(p)
 	quit(
 		"The package `",
 		p.package,

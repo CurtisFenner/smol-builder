@@ -53,10 +53,7 @@ end
 
 -- RETURNS a parser
 function parser.choice(options)
-	assert(
-		type(options) == "table" or type(options) == "userdata",
-		"parser.choice expects a list"
-	)
+	assert(type(options) == "table", "parser.choice expects a list")
 	assert(#options >= 1)
 
 	return function(stream, grammar)
@@ -77,7 +74,7 @@ end
 -- RETURNS a parser for a record type
 function parser.composite(components)
 	-- validate input
-	assert(type(components) == "table" or type(components) == "userdata")
+	assert(type(components) == "table")
 	assert(type(components.tag) == "string")
 
 	-- A human readable context of the fields
@@ -445,7 +442,7 @@ function parser.Stream(list, offset)
 		end
 	end
 
-	return freeze {
+	return {
 		_list = list,
 		_offset = offset,
 		head = function(self)

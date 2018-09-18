@@ -73,7 +73,7 @@ end
 local function notAssertion(a)
 	assertis(a, "Assertion")
 
-	return freeze {
+	return {
 		tag = "fn",
 		arguments = {a},
 		signature = common.builtinDefinitions.Boolean.functionMap["not"].signature,
@@ -89,7 +89,7 @@ local function eqAssertion(a, b, t)
 	assertis(b, "Assertion")
 	assertis(t, "TypeKind")
 
-	local p = freeze {
+	local p = {
 		tag = "eq",
 		left = a,
 		right = b,
@@ -102,7 +102,7 @@ eqAssertion = memoized(3, eqAssertion)
 local function variableAssertion(variable)
 	assertis(variable, "VariableIR")
 
-	return freeze {
+	return {
 		tag = "variable",
 		variable = variable,
 	}
@@ -115,17 +115,17 @@ local function constantAssertion(constant)
 		-- Assert that constant is finite and an integer
 		assert(constant % 1 == 0)
 
-		return freeze {
+		return {
 			tag = "int",
 			value = constant,
 		}
 	elseif type(constant) == "string" then
-		return freeze {
+		return {
 			tag = "string",
 			value = constant,
 		}
 	elseif type(constant) == "boolean" then
-		return freeze {
+		return {
 			tag = "boolean",
 			value = constant,
 		}
@@ -146,7 +146,6 @@ local function showAssertion(assertion)
 	end
 
 	assertis(assertion, "Assertion")
-	assert(isimmutable(assertion))
 
 	if assertion.tag == "unit" then
 		return "(unit)"
@@ -291,7 +290,7 @@ local function m_fresh(self, object)
 			table.insert(keys, argument)
 		end
 
-		return globalCanon:place(keys, freeze {
+		return globalCanon:place(keys, {
 			tag = "fn",
 			arguments = arguments,
 			signature = object.signature,
@@ -305,7 +304,7 @@ local function m_fresh(self, object)
 		}
 		local base = m_scan(self, object.base)
 		table.insert(keys, base)
-		return globalCanon:place(keys, freeze {
+		return globalCanon:place(keys, {
 			tag = "field",
 			base = base,
 			fieldName = object.fieldName,
@@ -315,7 +314,7 @@ local function m_fresh(self, object)
 		local left = m_scan(self, object.left)
 		local right = m_scan(self, object.right)
 		local keys = {"eq", left, right}
-		return globalCanon:place(keys, freeze {
+		return globalCanon:place(keys, {
 			tag = "eq",
 			left = left,
 			right = right,
@@ -323,7 +322,7 @@ local function m_fresh(self, object)
 	elseif object.tag == "gettag" then
 		local base = m_scan(self, object.base)
 		local keys = {"gettag", base}
-		return globalCanon:place(keys, freeze {
+		return globalCanon:place(keys, {
 			tag = "gettag",
 			base = base,
 		})
@@ -333,7 +332,7 @@ local function m_fresh(self, object)
 	elseif object.tag == "variant" then
 		local base = m_scan(self, object.base)
 		local keys = {"variant", object.variantName, base}
-		return globalCanon:place(keys, freeze {
+		return globalCanon:place(keys, {
 			tag = "variant",
 			variantName = object.variantName,
 			variantType = object.variantType,
@@ -365,10 +364,10 @@ local function newConst()
 	return "const." .. cID
 end
 
-local TRUE_ASSERTION = freeze {tag = "boolean", value = true}
-local FALSE_ASSERTION = freeze {tag = "boolean", value = false}
+local TRUE_ASSERTION = {tag = "boolean", value = true}
+local FALSE_ASSERTION = {tag = "boolean", value = false}
 
-local INT_ASSERTIONS = freeze {
+local INT_ASSERTIONS = {
 	[10] = {tag = "int", value = 10},
 	[3] = {tag = "int", value = 3},
 	[2] = {tag = "int", value = 2},
@@ -1023,11 +1022,11 @@ function theory:breakup(assertion, target)
 			assert(#row == #values)
 		end
 
-		return freeze(values), logic[target]
+		return values, logic[target]
 	elseif assertion.tag == "eq" then
 		if areTypesEqual(BOOLEAN_TYPE, typeOfAssertion(assertion.left)) then
 			-- if and only if
-			return freeze {assertion.left, assertion.right}, IFF[target]
+			return {assertion.left, assertion.right}, IFF[target]
 		end
 	end
 
@@ -1036,7 +1035,6 @@ end
 
 --------------------------------------------------------------------------------
 
-theory = freeze(theory)
 assertis(theory, "Theory")
 return {
 	theory = theory,

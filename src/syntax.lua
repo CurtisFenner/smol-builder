@@ -265,7 +265,7 @@ local parsers = {
 		{"base", T_TYPENAME},
 
 		--: string
-		{"arguments", parserOtherwise(parser.query "type-arguments?", freeze {})},
+		{"arguments", parserOtherwise(parser.query "type-arguments?", {})},
 
 		--: [ Type ]
 	},
@@ -514,7 +514,7 @@ local parsers = {
 			end
 
 			for _, operation in ipairs(x.operations) do
-				out = freeze {
+				out = {
 					tag = "binary",
 					left = out,
 					right = operation.operand,
@@ -524,7 +524,7 @@ local parsers = {
 			end
 
 			if isa then
-				return freeze {
+				return {
 					tag = "isa",
 					base = out,
 					variant = isa.variant,
@@ -567,7 +567,7 @@ local parsers = {
 		function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
-				local loc = freeze {
+				local loc = {
 					begins = out.location.begins,
 					ends = access.location.ends,
 				}
