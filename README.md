@@ -87,14 +87,13 @@ $
 
 ## Running the Smol compiler tests
 
-While the compiler itself is intended to be very portable, the tests are not
-*quite* as portable.
+The tests have a few extra dependencies:
 
-You need to have `ls` available in your path (Cygwin/MinGW will work on Windows)
-and your installation of Lua 5.1/5.2/5.3 must support `io.popen`
-(most installations of Lua support `io.popen` by default).
-
-You also must have a version of `gcc` installed that supports (pedantic) C99.
+* You need to have `ls` available in your path
+    (Cygwin/MinGW will work on Windows)
+* Your installation of Lua 5.1/5.2/5.3 must support `io.popen`
+    (most installations of Lua support `io.popen` by default)
+* You need a version of `gcc` installed in your path that supports pedantic C99
 
 To run all the tests, run the following from the smol-builder directory:
 
