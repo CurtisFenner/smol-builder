@@ -575,43 +575,44 @@ Among programming languages, some of the most common runtime crashes are caused
 by
 
 * Null pointer dereference.
-  Smol does not have any concept of "null" or "nil".
+    Smol does not have any concept of "null" or "nil".
 * Type downcast failure.
-  Smol does not have any unsafe casts or inheritance.
+    Smol does not have any unsafe casts or inheritance.
 * Array out of bounds.
-  Smol does not have any unchecked array accesses.
-* Unwrapping optional vlaues.
-  Smol does not have an unchecked way to unwrap unions.
+    Smol does not have any unchecked array accesses.
+* Unwrapping union variants at runtime.
+    Smol does not have an unchecked way to unwrap unions.
 
-Smol prevents all of these common runtime errors. In fact, during normal
-circumstances, no primitive function of Smol can fail at runtime.
+Smol catches all of these common runtime errors *at compile time*.
+In fact, during normal circumstances, no primitive component of Smol can fail at
+runtime.
 
-In order to prevent failure without mandating excessive (unreachable) error
-handling code or forcing the programmer to handle errors by ignoring them,
-Smol is equipped with a *verification framework*.
+In order to accomplish this without mandating excessive (unreachable) error
+handling code, Smol is equipped with a *verification framework*.
 
-Smol provides precondition and postcondition *contracts* which allow
-functions to state the conditions they require and the conditions that they
-guarantee to hold following the function's invocation. These contracts are
-checked at compile time and have no runtime cost.
+Smol checks precondition and postcondition *contracts* which allow
+functions to state the conditions they require and the conditions that their
+execution guarantees. These contracts are checked at compile time and have no
+runtime cost.
 
 For example, here are possible signatures for an array that allows only
 in-bounds accesses:
 
 	method get(i Int) #T
-		requires this.inBounds(i)
+		requires this.inBounds(i);
 
 	method set(i Int, value #T) Array[#T]
 		requires this.inBounds(i)
 		ensures return.get(i) == value
 		ensures return.size() == this.size()
 		ensures forall (j Int)
-			this.get(i) == this.get(j) when this.inBounds(j), (i == j).not()
+			this.get(i) == this.get(j) when this.inBounds(j), (i == j).not();
 
-At every use of `.get` and `.set`, Smol *statically* checks that the
-preconditions hold. If Smol cannot statically prove that the conditions will
-always hold at that point in the program's execution, the program will be
-rejected.
+With these requirements in place, Smol will *statically* check the usage of
+every `.get` and `.set`.
+
+If Smol cannot statically prove that the preconditions hold, Smol points out the
+problem and rejects the program.
 
 ### Satisfiability Modulo Theories (SMT)
 
@@ -681,8 +682,8 @@ statically known. The tag can be tested dynamically using `isa` or `match`:
 		foo.one.bar();
 	}
 
-Matches are typically required to be exhaustive, but if a tag has been ruled
-out, it does not need to be handled:
+Matches must be exhaustive. However, variants which are not possible do not need
+to be handled:
 
 	union Three {
 		a A;
@@ -728,7 +729,7 @@ is `false` because `-1` is an `Int` and `0 < -1` is false.
 
 However,
 
-	forall (x Int) 0 < x when 10 < x
+	forall (x Int) 0 < x if 10 < x
 
 is `true` because *every* number bigger than `10` is also bigger than `0`.
 
@@ -737,12 +738,12 @@ can construct a value to show that it exists.
 
 ## Failure and Unsoundness
 
-Smol attempts to be as *sound* as possible. A *sound* analysis ensures that a
+Smol attempts to be *as sound* as possible. A *sound* analysis ensures that a
 program that compiles will never
 
 * crash at runtime
 * violate at runtime any of the functional correctness propositions expressed in
-  an `assert` or `requires` or `ensures`
+    an `assert` or `requires` or `ensures`
 
 However, Smol as designed is **not** entirely sound.
 
@@ -755,15 +756,14 @@ cannot help you catch programs where these runtime crashes can occur.
 #### Allocation
 Smol currently assumes that all allocating operations succeed.
 
-In the real world, `new` may fail because the program has run out of all memory.
-However, Smol assumes it will always succeed and has no way to handle allocation
-failures.
+In the real world, `new` may fail because the program has exhausted all
+available memory. A Smol program that exhausts its memory may stop or misbehave.
 
 #### Stack Overflow
 Smol currently assumes you have enough stack space to run your program.
 Because Smol has no looping construct, it's not possible to bound the growth of
 the stack. As a result, recursion may require an unpredictable amount of space.
-However, there is no way to handle running out of stack space.
+A Smol program that exhausts its stack may stop or misbehave.
 
 ### Nonterminating Conditions
 
@@ -804,10 +804,9 @@ require examining every triple of elements in a list that you're trying to
 sort!) or in some cases impossible (for example, in the case of a
 `forall (n Int) Foo.foo(n)`).
 
-Thus, the compiler must check that all assertions *are guaranteed to halt*. This
-can be checked easily for non-recursive functions, but recursive functions must
-be analyzed or annotated further.
+Thus, a sound analysis must check that all assertions *are guaranteed to halt*.
+This can be checked easily for non-recursive functions, but recursive functions
+must be analyzed or annotated further.
 
-The current implementation does not attempt to check termination.
-
-This is a future area of work for Smol.
+The current implementation does **not** attempt to check termination, which
+leads to the above unsoundness.
