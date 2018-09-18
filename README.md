@@ -61,7 +61,7 @@ $ cd smol-builder
 ```
 
 The compiler does not need to be built or prepared in any way and it does not
-have any dependencies other than Lua 5.1/5.2.
+have any dependencies other than Lua 5.1/5.2/5.3.
 
 ## Using the Smol compiler
 
