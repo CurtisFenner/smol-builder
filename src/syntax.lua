@@ -247,7 +247,6 @@ local parsers = {
 		K_INT,
 		K_BOOLEAN,
 		K_UNIT_TYPE,
-		K_NEVER,
 		K_SELF,
 
 		-- User defined types

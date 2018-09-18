@@ -10,11 +10,7 @@ local BUILTIN_NAME_MAP = {
 
 --------------------------------------------------------------------------------
 
-
---------------------------------------------------------------------------------
-
 local FOREIGN_IMPLEMENTATION = {}
-
 
 FOREIGN_IMPLEMENTATION["core:ASCII.formatInt"] = [[
 	smol_String_T* out1;
@@ -864,13 +860,6 @@ return function(semantics, arguments)
 
 #define PANIC(message) do { printf(message "\n"); exit(1); } while (0)
 
-typedef struct {
-	void* instance;
-	int (*eq)(void*, void*);
-	void (*destruct)(void*);
-} object_T;
-
-
 ////////////////////////////////////////////////////////////////////////////////
 ]])
 
@@ -1071,7 +1060,11 @@ typedef struct {
 	end
 
 	-- Generate the main function
-	local main = code:defineFunction("main", "int", {{name = "argc", type = "int"}, {name = "argv", type = "char**"}})
+	local argc_argv = {
+		{name = "argc", type = "int"},
+		{name = "argv", type = "char**"},
+	}
+	local main = code:defineFunction("main", "int", argc_argv)
 	main:write(staticFunctionName(semantics.main .. ":main") .. "(NULL);")
 	main:write("return 0;")
 
