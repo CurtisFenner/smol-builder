@@ -85,27 +85,23 @@ function parser.composite(components)
 	local contextBegin = " to begin " .. components.tag
 	local contextFinish = " to finish " .. components.tag
 
+	-- Validate the structure of the composite definition
 	for i = 1, #components do
-		assert(#components[i] >= 2)
-		assert(
-			type(components[i][1]) == "string",
-			"component must provide key as string"
-		)
-		assert(components[i][1] ~= "tag", "component cannot use key 'tag'")
-		assert(
-			components[i][1] ~= "location",
-			"component cannot use key 'location'"
-		)
+		local row = components[i]
+		assert(#row >= 2)
+		assert(type(row[1]) == "string", "component must provide key as string")
+		assert(row[1] ~= "tag", "component cannot use key 'tag'")
+		assert(row[1] ~= "location", "component cannot use key 'location'")
 
-		assert(
-			type(components[i][2]) == "function",
-			"component must provide member as parser" .. " (key `" .. components[
-				i
-			][1] .. "`" .. "; " .. i .. " of " .. #components .. ")"
-		)
+		assert(type(row[2]) == "function", string.format(
+			"not-a-parser given for key `%s` at %d/%d)",
+			row[1],
+			i,
+			#components
+		))
 
-		assert(#components[i] <= 3)
-		assert(components[i][3] == nil or type(components[i][3]) == "string")
+		assert(#row <= 3)
+		assert(row[3] == nil or type(row[3]) == "string")
 	end
 
 	return function(stream, parsers)
@@ -431,6 +427,65 @@ function parser.query(query, tag)
 	end
 
 	return parser.composite(components)
+end
+
+-- REPRESENTS a streamable sequence of tokens
+function parser.Stream(list, offset)
+	if offset then
+		offset = offset or 0
+		assert(type(offset) == "number", "offset must be an integer")
+		assert(offset % 1 == 0, "offset must be an integer")
+	else
+		offset = 0
+
+		-- Validate that it looks like a list of tokens
+		for i = 1, #list do
+			assert(list[i].location)
+			assert(list[i].location.begins)
+		end
+	end
+
+	return freeze {
+		_list = list,
+		_offset = offset,
+		head = function(self)
+			return self._list[1 + self._offset]
+		end,
+		rest = function(self)
+			assert(self:size() > 0, "stream:rest() requires stream:size() > 0")
+			return parser.Stream(self._list, self._offset + 1)
+		end,
+		size = function(self)
+			return #self._list - self._offset
+		end,
+		location = function(self)
+			if self:size() == 0 then
+				local spot = {
+					filename = self._list[1].location.begins.filename,
+					sourceLines = self._list[1].location.begins.sourceLines,
+					column = 1,
+					index = 0,
+					line = #self._list[1].location.begins.sourceLines,
+				}
+				return {begins = spot, ends = spot}
+			else
+				return self:head().location
+			end
+		end,
+		priorLocation = function(self)
+			if self._offset == 0 then
+				local spot = {
+					filename = self._list[1].location.begins.filename,
+					sourceLines = self._list[1].location.begins.sourceLines,
+					column = 1,
+					index = 0,
+					line = 1,
+				}
+				return {begins = spot, ends = spot}
+			end
+			return self._list[self._offset].location
+		end,
+	}
 end
 
 return parser

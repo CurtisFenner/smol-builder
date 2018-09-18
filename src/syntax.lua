@@ -1,54 +1,6 @@
 local parser = import "parser.lua"
 
--- REPRESENTS a streamable sequence of tokens
-local function Stream(list, offset)
-	offset = offset or 0
-	assert(isinteger(offset), "offset must be an integer")
-	list = freeze(list)
-	assertis(list, listType "Token")
-
-	return freeze {
-		_list = list,
-		_offset = offset,
-		head = function(self)
-			return self._list[1 + self._offset]
-		end,
-		rest = function(self)
-			assert(self:size() > 0, "stream:rest() requires stream:size() > 0")
-			return Stream(self._list, self._offset + 1)
-		end,
-		size = function(self)
-			return #self._list - self._offset
-		end,
-		location = function(self)
-			if self:size() == 0 then
-				local spot = {
-					filename = self._list[1].location.begins.filename,
-					sourceLines = self._list[1].location.begins.sourceLines,
-					column = 1,
-					index = 0,
-					line = #self._list[1].location.begins.sourceLines,
-				}
-				return {begins = spot, ends = spot}
-			else
-				return self:head().location
-			end
-		end,
-		priorLocation = function(self)
-			if self._offset == 0 then
-				local spot = {
-					filename = self._list[1].location.begins.filename,
-					sourceLines = self._list[1].location.begins.sourceLines,
-					column = 1,
-					index = 0,
-					line = 1,
-				}
-				return {begins = spot, ends = spot}
-			end
-			return self._list[self._offset].location
-		end,
-	}
-end
+local Stream = parser.Stream
 
 -- PARSER for literal lexeme (keywords, punctuation, etc.)
 local function LEXEME(lexeme)
