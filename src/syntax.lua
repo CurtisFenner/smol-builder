@@ -110,11 +110,13 @@ end
 -- DEFINES the grammar for the language
 local parsers = {
 	-- Represents an entire source file
-	["source"] = parser.query [[(source
-			package =package !a_package_definition
-			import* =imports
-			definition* =definitions
-		)]],
+	["source"] = parser.composite {
+		tag = "source",
+		{"package", parser.named "package", "a package definition"},
+		{"imports", parser.query "import*"},
+		{"definitions", parser.query "definition*"},
+		{"_", parser.endOfStream(), "another definition"},
+	},
 
 	-- Represents a package declaration
 	["package"] = parser.composite {
@@ -681,12 +683,7 @@ local parsers = {
 local function parseKind(tokens, kind)
 	local stream = Stream(tokens)
 
-	local source, rest = parsers[kind](stream, parsers)
-	assert(rest ~= nil, "failed to parse `" .. kind .. "`")
-	if rest:size() ~= 0 then
-		quit("The compiler expected another definition ", rest:location())
-	end
-
+	local source = parsers[kind](stream, parsers)
 	return source
 end
 

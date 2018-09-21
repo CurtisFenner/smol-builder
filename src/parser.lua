@@ -426,6 +426,15 @@ function parser.query(query, tag)
 	return parser.composite(components)
 end
 
+function parser.endOfStream()
+	return function(stream)
+		if stream:size() ~= 0 then
+			return nil
+		end
+		return true, stream
+	end
+end
+
 -- REPRESENTS a streamable sequence of tokens
 function parser.Stream(list, offset)
 	if offset then
