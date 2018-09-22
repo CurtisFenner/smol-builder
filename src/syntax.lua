@@ -87,6 +87,7 @@ local function TOKEN(tokenType, field)
 	end
 end
 local T_IDENTIFIER = TOKEN("identifier", "lexeme")
+local TR_IDENTIFIER = TOKEN("identifier")
 local T_TYPENAME = TOKEN("typename", "lexeme")
 local TR_TYPENAME = TOKEN("typename")
 local T_GENERIC = TOKEN("generic")
@@ -644,13 +645,7 @@ local parsers = {
 		T_STRING_LITERAL,
 		T_INTEGER_LITERAL,
 		parser.named "static-call",
-		parser.map(
-			T_IDENTIFIER,
-			function(n)
-				return {tag = "identifier", name = n}
-			end,
-			true
-		),
+		TR_IDENTIFIER,
 		parser.composite {
 			tag = "***parenthesized expression",
 			{"_", K_ROUND_OPEN},
