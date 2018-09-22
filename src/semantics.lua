@@ -156,23 +156,26 @@ local function makeDefinitionASTResolver(info, definitionMap)
 	for _, importAST in ipairs(info.source.imports) do
 		assertis(importAST, recordType {
 			packageName = "string",
-			definitionName = choiceType(constantType(false), "string"),
+			definition = choiceType(constantType(false), recordType {
+				name = "string"
+			}),
 		})
-		if importAST.definitionName then
-			assert(not shortNameMap[importAST.definitionName])
+		if importAST.definition then
+			local name = importAST.definition.name
+			assert(not shortNameMap[name])
 
 			-- Check if such a definition really exists
-			if not definitionMap[importAST.packageName][importAST.definitionName] then
+			if not definitionMap[importAST.packageName][name] then
 				Report.UNKNOWN_DEFINITION_IMPORTED {
-					name = importAST.packageName .. ":" .. importAST.definitionName,
+					name = importAST.packageName .. ":" .. name,
 					location = importAST.location,
 				}
 			end
 
 			-- Remember the short name
-			shortNameMap[importAST.definitionName] = {
+			shortNameMap[name] = {
 				package = importAST.packageName,
-				name = importAST.definitionName,
+				name = name,
 			}
 		else
 			-- Check if such a package really exists
@@ -717,7 +720,7 @@ local function compileExpression(expressionAST, scope, context)
 			},
 		}
 		return sequenceSt(code), {destination}, false
-	elseif expressionAST.tag == "int-literal" then
+	elseif expressionAST.tag == "integer-literal" then
 		local destination = {
 			name = vendUniqueIdentifier(),
 			type = INT_TYPE,
@@ -2256,15 +2259,16 @@ local function semanticsSmol(sources, main)
 		-- Get a set of imported names
 		local importsByName = {}
 		for _, import in ipairs(source.imports) do
-			if import.definitionName then
-				if importsByName[import.definitionName] then
+			if import.definition then
+				local name = import.definition.name
+				if importsByName[name] then
 					Report.NAME_IMPORTED_TWICE {
-						name = import.definitionName,
-						firstLocation = importsByName[import.definitionName].location,
+						name = name,
+						firstLocation = importsByName[name].location,
 						secondLocation = import.location,
 					}
 				end
-				importsByName[import.definitionName] = import
+				importsByName[name] = import
 			end
 		end
 

@@ -73,7 +73,7 @@ local K_SELF = LEXEME "#Self"
 -- PARSER for token tag ("typename", "identifier", "operator", etc)
 local function TOKEN(tokenType, field)
 	assertis(tokenType, "string")
-	assertis(field, "string")
+	assert(type(field) == "string" or field == nil)
 
 	return function(stream, parsers)
 		assert(parsers)
@@ -81,24 +81,22 @@ local function TOKEN(tokenType, field)
 			return nil
 		end
 		if stream:head().tag == tokenType then
-			return stream:head()[field], stream:rest()
+			if field then
+				return stream:head()[field], stream:rest()
+			else
+				return stream:head(), stream:rest()
+			end
 		end
 		return nil
 	end
 end
 local T_IDENTIFIER = TOKEN("identifier", "lexeme")
 local T_TYPENAME = TOKEN("typename", "lexeme")
-local T_GENERIC = TOKEN("generic", "name")
-local TR_GENERIC = parser.map(
-	T_GENERIC,
-	function(x)
-		return {tag = "generic", name = x}
-	end,
-	true
-)
-local T_INTEGER_LITERAL = TOKEN("integer-literal", "value")
-local T_STRING_LITERAL = TOKEN("string-literal", "value")
-local T_OPERATOR = TOKEN("operator", "lexeme")
+local TR_TYPENAME = TOKEN("typename")
+local T_GENERIC = TOKEN("generic")
+local T_INTEGER_LITERAL = TOKEN("integer-literal")
+local T_STRING_LITERAL = TOKEN("string-literal")
+local T_OPERATOR = TOKEN("operator")
 
 local function parserOtherwise(p, value)
 	assert(type(p) == "function")
@@ -132,13 +130,12 @@ local parsers = {
 		{"_", K_IMPORT},
 		{"packageName", T_IDENTIFIER, "an imported package name"},
 		{
-			"definitionName",
-
 			-- string | false
+			"definition",
 			parser.optional(parser.composite {
 				tag = "***type name",
 				{"_", K_SCOPE},
-				{"#class", T_TYPENAME, "a type name"},
+				{"#class", TR_TYPENAME, "a type name"},
 			})
 		},
 		{"_", K_SEMICOLON, "`;` after import"},
@@ -222,7 +219,7 @@ local parsers = {
 		{"_", K_SQUARE_OPEN},
 		{
 			"parameters",
-			parser.delimited(TR_GENERIC, "1+", ",", "generic parameter"),
+			parser.delimited(T_GENERIC, "1+", ",", "generic parameter"),
 			"generic parameter variables",
 		},
 		{"constraints", parserOtherwise(parser.query "generic-constraints?", {})},
@@ -237,7 +234,7 @@ local parsers = {
 
 	["generic-constraint"] = parser.composite {
 		tag = "constraint",
-		{"parameter", TR_GENERIC},
+		{"parameter", T_GENERIC},
 		{"_", K_IS, "`is` after generic parameter"},
 		{"constraint", parser.named "concrete-type", "a type constrain after `is`"},
 	},
@@ -252,7 +249,7 @@ local parsers = {
 		K_SELF,
 
 		-- User defined types
-		TR_GENERIC,
+		T_GENERIC,
 		parser.named "concrete-type",
 	},
 
@@ -520,9 +517,9 @@ local parsers = {
 					tag = "binary",
 					left = out,
 					right = operation.operand,
-					operator = operation.operator,
+					operator = operation.operator.lexeme,
 				}
-				assert(isstring(out.operator))
+				assert(type(out.operator) == "string")
 			end
 
 			if isa then
@@ -648,20 +645,8 @@ local parsers = {
 		K_FALSE,
 		K_UNIT_VALUE,
 		parser.named "forall",
-		parser.map(
-			T_STRING_LITERAL,
-			function(v)
-				return {tag = "string-literal", value = v}
-			end,
-			true
-		),
-		parser.map(
-			T_INTEGER_LITERAL,
-			function(v)
-				return {tag = "int-literal", value = v}
-			end,
-			true
-		),
+		T_STRING_LITERAL,
+		T_INTEGER_LITERAL,
 		parser.named "static-call",
 		parser.map(
 			T_IDENTIFIER,

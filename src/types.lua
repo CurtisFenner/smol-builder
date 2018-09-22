@@ -56,7 +56,7 @@ local function showAdd(object, indent, out)
 			showAdd(key, indent + 1, line)
 			table.insert(line, "] = ")
 			if rawequal(key, "location") then
-				table.insert(line, "<location " .. (import "common.lua").locationBrief(value) .. ">")
+				table.insert(line, "<location...>")
 			else
 				showAdd(value, indent + 1, line)
 			end
