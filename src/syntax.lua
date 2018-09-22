@@ -20,11 +20,7 @@ local K_PIPE = LEXEME "|"
 local K_DOT = LEXEME "."
 local K_EQUAL = LEXEME "="
 local K_SCOPE = LEXEME ":"
-local K_BANG = parser.token(function(token)
-	if token.lexeme == "!" then
-		return true
-	end
-end)
+local K_BANG = LEXEME "!"
 
 local K_CURLY_OPEN = LEXEME "{"
 local K_CURLY_CLOSE = LEXEME "}"
