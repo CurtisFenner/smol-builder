@@ -20,7 +20,6 @@ FOREIGN_IMPLEMENTATION["core:ASCII.formatInt"] = [[
 ]]
 
 FOREIGN_IMPLEMENTATION["core:Out.println"] = [[
-	// TODO: allow nulls, etc.
 	for (size_t i = 0; i < smol_local_message->length; i++) {
 		putchar(smol_local_message->text[i]);
 	}
@@ -126,6 +125,7 @@ function Program.new(indent)
 	local instance = {
 		_chunks = {},
 		_indent = indent or 0,
+		_unique = {count = 0},
 	}
 	return setmetatable(instance, Program)
 end
@@ -142,8 +142,18 @@ end
 -- MODIFIES this
 function Program:section(indent)
 	local c = Program.new(self._indent + (indent or 0))
+	c._unique = self._unique
 	table.insert(self._chunks, c)
 	return c
+end
+
+-- RETURNS a unique string beginning with the given prefix
+-- MODIFIES this
+function Program:vendUnique(prefix)
+	assert(type(prefix) == "string")
+
+	self._unique.count = self._unique.count + 1
+	return prefix .. (self._unique.count - 1)
 end
 
 -- RETURNS a string representing all of the lines of this program
@@ -174,8 +184,11 @@ function CProgram.new()
 	-- Initialize root information
 	instance._tupleMap = {}
 	instance._closureMap = {}
+	instance._root = instance
 
-	instance.preamble = instance._program:section()
+	setmetatable(instance, CProgram)
+	
+	instance.preamble = instance:section()
 
 	instance._forward = instance._program:section()
 	instance._forward:write("// FORWARD DECLARATIONS")
@@ -189,9 +202,7 @@ function CProgram.new()
 	instance._functions = instance._program:section()
 	instance._functions:write("// FUNCTION IMPLEMENTATIONS")
 
-	instance._root = instance
-
-	return setmetatable(instance, CProgram)
+	return instance
 end
 
 -- RETURNS this program's text as a string
@@ -295,8 +306,8 @@ function CProgram:defineFunction(name, returns, parameters)
 		return self._root:defineFunction(name, returns, parameters)
 	end
 
-	assertis(name, "string")
-	assertis(returns, "string")
+	assert(type(name) == "string")
+	assert(type(returns) == "string")
 	assertis(parameters, listType(recordType {
 		type = "string",
 		name = "string",
@@ -306,7 +317,7 @@ function CProgram:defineFunction(name, returns, parameters)
 	for _, p in ipairs(parameters) do
 		table.insert(ps, p.type .. " " .. p.name)
 	end
-	
+
 	local prototype = returns .. " " .. name .. "(" .. table.concat(ps, ", ") .. ")"
 
 	self._prototypes:write(prototype .. ";")
@@ -323,6 +334,14 @@ function CProgram:defineFunction(name, returns, parameters)
 	}
 
 	return setmetatable(out, CProgram)
+end
+
+-- RETURNS a name, a C program section
+-- MODIFIES this
+function CProgram:defineLambda(hint, returns, parameters)
+	assert(type(hint) == "string")
+	local name = self._program:vendUnique("_lambda" .. hint)
+	return name, self:defineFunction(name, returns, parameters)
 end
 
 -- RETURNS a subsection of this program
@@ -347,9 +366,29 @@ end
 -- RETURNS nothing
 -- MODIFIES this
 function CProgram:comment(text)
-	assert(not text:find("\n"), "TODO: comment with newlines")
+	assert(not text:find "\r")
+	for line in (text .. "\n"):gmatch "([^\n]*)\n" do
+		self:write(line == "" and "//" or "// " .. line)
+	end
+end
 
-	self:write("// " .. text)
+-- Appends a variable declaration to the program
+-- RETURNS nothing
+-- MODIFIES this
+function CProgram:declareVariable(name, t)
+	assert(type(name) == "string" and not name:find "[*%s]")
+	assert(type(t) == "string")
+
+	self:write(t .. " " .. name .. ";")
+end
+
+-- Appends a variable declaration to the program
+-- RETURNS the name of the variable used
+-- MODIFIES this
+function CProgram:declareTemporary(t, hint)
+	local name = self._program:vendUnique("_tmpvar" .. (hint or ""))
+	self:declareVariable(name, t)
+	return name
 end
 
 -- Appends an assignment to the program
@@ -360,6 +399,15 @@ function CProgram:assign(lhs, rhs)
 	assert(type(rhs) == "string", type(rhs))
 
 	self:write(lhs .. " = " .. rhs .. ";")
+end
+
+-- Appends a return to the program
+-- RETURNS nothing
+-- MODIFIES this
+function CProgram:returnValue(value)
+	assert(type(value) == "string")
+
+	self:write("return " .. value .. ";")
 end
 
 --------------------------------------------------------------------------------
@@ -496,14 +544,6 @@ local function cVTableType(c)
 	error("TODO")
 end
 
-local _counter = 0
-
--- RETURNS a unique temporary variable name
-local function uniqueTmp()
-	_counter = _counter + 1
-	return "_tmp" .. _counter
-end
-
 -- RETURNS name, type as strings
 -- MODIFIES program
 local function generateVTable(a, program, info)
@@ -519,23 +559,19 @@ local function generateVTable(a, program, info)
 
 	if a.tag == "parameter-vtable" then
 		program:comment("<parameter-vtable>")
-		local tmp = uniqueTmp() .. "_vtable"
 		local tmpType = cVTableType(a.interface)
+		local tmp = program:declareTemporary(tmpType, "_vtable")
 		local i = info.parameterIndices[a.name]
-		program:assign(tmpType .. " " .. tmp, CONSTRAINT_PARAMETER .. "->_" .. i)
+		program:assign(tmp, CONSTRAINT_PARAMETER .. "->_" .. i)
 		program:comment("</parameter-vtable>")
 		return tmp, tmpType
 	elseif a.tag == "concrete-vtable" then
 		program:comment("<concrete-vtable>")
-		local tmp = uniqueTmp() .. "_vtable"
 		local tmpType = cVTableType(a.interface)
-
-		program:write(tmpType .. " " .. tmp .. ";")
+		local tmp = program:declareTemporary(tmpType, "_vtable")
 
 		local fullName = a.interface.packageName .. ":" .. a.interface.definitionName
 		for _, f in ipairs(info.constraints[fullName].members) do
-			local closureName = uniqueTmp() .. "_closure"
-
 			-- Get type parameters and return type
 			local rts = table.map(cType, f.returnTypes)
 			local rTuple = program:getTuple(rts)
@@ -567,43 +603,45 @@ local function generateVTable(a, program, info)
 				needed = "NULL"
 			else
 				local neededTuple = program:getTuple(neededTypes)
-				local neededName = uniqueTmp() .. "_closure_state"
-				program:assign(neededTuple .. "* " .. neededName, "ALLOCATE(" .. neededTuple .. ")")
+				local neededName = program:declareTemporary(neededTuple .. "*", "_closure_state")
+				program:assign(neededName, "ALLOCATE(" .. neededTuple .. ")")
 				for i, n in ipairs(neededVariables) do
 					program:assign(neededName .. "->_" .. i, n)
 				end
 				needed = neededName
 			end
 
-			local concreteFunctionName = a.concrete.packageName .. ":" .. a.concrete.definitionName .. "." .. f.memberName
-			local fptr = staticFunctionName(concreteFunctionName)
-
-			-- Generate wrapper
-			local concreteSignature = info.functionSignatures[concreteFunctionName]
-			local wrapperName = uniqueTmp() .. "_" .. fptr
+			-- Generate wrapper parameters
 			local wrapperParameters = {{name = "data", type = "void*"}}
 			local arguments = {"data"}
+			local concreteFunctionName = a.concrete.packageName .. ":" .. a.concrete.definitionName .. "." .. f.memberName
+			local concreteSignature = info.functionSignatures[concreteFunctionName]
 			assert(#pt == #concreteSignature.parameters)
 			for i, p in ipairs(pt) do
 				table.insert(wrapperParameters, {
 					name = "a" .. i,
 					type = p,
 				})
-				table.insert(arguments, "(" .. cType(concreteSignature.parameters[i].type) .. ")a" .. i)
+				local cast = "(" .. cType(concreteSignature.parameters[i].type) .. ")"
+				table.insert(arguments, cast .. "a" .. i)
 			end
-			local wrapperBody = program:defineFunction(wrapperName, rTuple, wrapperParameters)
+
+			-- Generate wrapper function
+			local fptr = staticFunctionName(concreteFunctionName)
+			local wrapperName, wrapperBody = program:defineLambda(fptr, rTuple, wrapperParameters)
 			wrapperBody:comment("Wrapper for `" .. concreteFunctionName .. "` impl `" .. common.showConstraintKind(a.interface))
 			wrapperBody:comment(common.showSignature(concreteSignature))
 			wrapperBody:comment(common.showSignature(f))
 			local rawTupleType = program:getTuple(table.map(cType, concreteSignature.returnTypes))
-			wrapperBody:write(rawTupleType .. " out = " .. fptr .. "(" .. table.concat(arguments, ", ") .. ");")
-			wrapperBody:write(program:getTuple(rts) .. " ret;")
+			wrapperBody:declareVariable("out", rawTupleType)
+			wrapperBody:assign("out", fptr .. "(" .. table.concat(arguments, ", ") .. ")")
+			wrapperBody:declareVariable("ret", program:getTuple(rts))
 			for i, r in ipairs(rts) do
 				wrapperBody:assign("ret._" .. i, "(" .. r .. ")out._" .. i)
 			end
-			wrapperBody:write("return ret;")
+			wrapperBody:returnValue("ret")
 
-			program:write(closureType .. " " .. closureName .. ";")
+			local closureName = program:declareTemporary(closureType, "_closure")
 			program:assign(closureName .. ".data", needed)
 			program:assign(closureName .. ".func", wrapperName)
 			program:assign(tmp .. "." .. vtableMemberName(f.memberName), closureName)
@@ -650,7 +688,7 @@ local function generateStatement(statement, program, info)
 		program:assign(lhs .. "->text", cEncodedString(statement.string))
 		return
 	elseif statement.tag == "local" then
-		program:write(cType(statement.variable.type) .. " " .. localName(statement.variable.name) .. ";")
+		program:declareVariable(localName(statement.variable.name), cType(statement.variable.type))
 		return
 	elseif statement.tag == "nothing" then
 		program:comment("nothing statement")
@@ -666,7 +704,7 @@ local function generateStatement(statement, program, info)
 			table.insert(values, localName(r.name))
 		end
 		local rhs = "(" .. program:getTuple(types) .. "){" .. table.concat(values, ", ") .. "}"
-		program:write("return " .. rhs .. ";")
+		program:returnValue(rhs)
 		return
 	elseif statement.tag == "if" then
 		local condition = localName(statement.condition.name) .. "->value"
@@ -711,19 +749,19 @@ local function generateStatement(statement, program, info)
 			table.insert(vtables, vName)
 			table.insert(vtableTypes, vType)
 		end
-		
+
 		local cArguments = {}
 		if #vtables == 0 then
 			table.insert(cArguments, "NULL")
 		else
 			-- Create constraint argument
-			local cTmp = uniqueTmp()
 			local tupleType = program:getTuple(vtableTypes)
 			local tupleValue = "(" .. tupleType .. "){" .. table.concat(vtables, ", ") .. "}"
-			program:assign(tupleType .. " " .. cTmp, tupleValue)
-			table.insert(cArguments, "&" .. cTmp)
+			local constraintArgument = program:declareTemporary(tupleType)
+			program:assign(constraintArgument, tupleValue)
+			table.insert(cArguments, "&" .. constraintArgument)
 		end
-		
+
 		-- Get static form of signature
 		local staticSignature = info.functionSignatures[statement.signature.longName]
 
@@ -734,14 +772,14 @@ local function generateStatement(statement, program, info)
 			local cast = "(" .. cType(staticSignature.parameters[i].type) .. ")"
 			table.insert(cArguments, cast .. localName(a.name))
 		end
-		
+
 		-- Invoke the function
 		program:comment("static-call " .. common.showSignature(statement.signature))
 		local tmpType = program:getTuple(table.map(cType, staticSignature.returnTypes))
-		local tmp = uniqueTmp()
+		local tmp = program:declareTemporary(tmpType)
 		local cName = staticFunctionName(statement.signature.longName)
 		local invocation = cName .. "(" .. table.concat(cArguments, ", ") .. ")"
-		program:assign(tmpType .. " " .. tmp, invocation)
+		program:assign(tmp, invocation)
 
 		-- Write to destinations
 		for i, d in ipairs(statement.destinations) do
@@ -766,11 +804,11 @@ local function generateStatement(statement, program, info)
 
 		-- Invoke the function
 		local tmpType = program:getTuple(table.map(cType, statement.signature.returnTypes))
-		local tmp = uniqueTmp()
+		local tmp = program:declareTemporary(tmpType)
 		local closure = vName .. "." .. vtableMemberName(statement.signature.memberName)
 		table.insert(cArguments, 1, closure .. ".data")
 		local invocation = closure .. ".func(" .. table.concat(cArguments, ", ") .. ")"
-		program:assign(tmpType .. " " .. tmp, invocation)
+		program:assign(tmp, invocation)
 
 		-- Write to destinations
 		for i, d in ipairs(statement.destinations) do
@@ -807,9 +845,9 @@ local function generateStatement(statement, program, info)
 		program:assign(lhs, rhs)
 		return
 	elseif statement.tag == "match" then
-		local tagVar = uniqueTmp() .. "tag"
+		local tagVar = program:declareTemporary(TAG_TYPE, "tag")
 		local getTag = localName(statement.base.name) .. "->" .. TAG_FIELD
-		program:assign(TAG_TYPE .. " " .. tagVar, getTag)
+		program:assign(tagVar, getTag)
 		local union = info.unions[statement.base.type.packageName .. ":" .. statement.base.type.definitionName]
 		for i, case in ipairs(statement.cases) do
 			local tagValue = union.tags[case.variant]
@@ -843,8 +881,8 @@ return function(semantics, arguments)
 	end
 
 	local code = CProgram.new()
-	code.preamble:write("// Generated by Smol Lua compiler")
-	code.preamble:write(commented(INVOCATION))
+	code.preamble:comment("Generated by Smol Lua compiler")
+	code.preamble:comment(INVOCATION)
 	code.preamble:write("")
 
 	code.preamble:write([[
@@ -879,7 +917,7 @@ return function(semantics, arguments)
 	code:defineStruct("smol_Int_T", {
 		{type = "int64_t", name = "value"},
 	})
-	
+
 	-- Maintain some global information needed to compile statements
 	local globalInfo = {
 		constraints = {},
@@ -959,7 +997,7 @@ return function(semantics, arguments)
 			local fields = {{type = TAG_TYPE, name = TAG_FIELD}}
 
 			-- Generate tag
-			assert(#table.keys(union._fieldMap) < 2^16, "TODO: Too many fields!")
+			assert(#table.keys(union._fieldMap) < 2 ^ 16, "TODO: Too many fields!")
 
 			-- Generate all value fields
 			local fieldList = {}
@@ -1043,11 +1081,11 @@ return function(semantics, arguments)
 			-- Get body from table
 			local impl = FOREIGN_IMPLEMENTATION[func.signature.longName]
 			assert(impl, "no impl for foreign `" .. func.signature.longName .. "`")
-			body:comment("Foreign function `" .. func.signature.longName .. "`")
-			body:write(impl)
+			body:write("// Foreign function `" .. func.signature.longName .. "`\n" .. impl)
 
 			-- Wrap for tuple type
-			local rhs = "(" .. cOutType .. "){"
+			local cast = "(" .. cOutType .. ")"
+			local rhs = "{"
 			for i = 1, #func.signature.returnTypes do
 				if i ~= 1 then
 					rhs = rhs .. ", "
@@ -1055,7 +1093,7 @@ return function(semantics, arguments)
 				rhs = rhs .. "out" .. i
 			end
 			rhs = rhs .. "}"
-			body:write("return " .. rhs .. ";")
+			body:returnValue(cast .. rhs)
 		end
 	end
 
@@ -1066,7 +1104,7 @@ return function(semantics, arguments)
 	}
 	local main = code:defineFunction("main", "int", argc_argv)
 	main:write(staticFunctionName(semantics.main .. ":main") .. "(NULL);")
-	main:write("return 0;")
+	main:returnValue("0")
 
 	-- Write the code to the output file
 	file:write(code:serialize())
