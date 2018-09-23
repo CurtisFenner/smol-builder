@@ -43,9 +43,6 @@ function quit(first, ...)
 			rest[i] = tostring(rest[i])
 		elseif type(rest[i]) ~= "string" then
 			assert(rest[i] ~= nil, "rest[i] ~= nil")
-			if not rest[i].ends then
-				print(...)
-			end
 			assertis(rest[i], "Location")
 			rest[i] = showLocation(rest[i])
 		end
@@ -74,24 +71,20 @@ local LOCATION_MODE = "column"
 function showLocation(location)
 	assertis(location, "Location")
 
-	local begins = location.begins
-	local ends = location.ends
-
-	if type(begins) == "string" or type(ends) == "string" then
-		return "at " .. begins
-	end
-
-	local source = begins.sourceLines
+	local from, to = location.from, location.to
+	local source = location.file.lines
 
 	-- Compute human-readable description of location
-	local context = {}
-	for line = math.max(1, begins.line - 1), math.min(#source, ends.line + 1) do
-		local num = string.rep(" ", #tostring(#source) - #tostring(line)) .. tostring(line) .. " "
-		table.insert(context, "\t" .. num .. "| " .. source[line])
+	local contextLines = {}
+	for line = math.max(1, from.line - 1), math.min(#source, to.line + 1) do
+		local lineNum = tostring(line)
+		local longestLineNumber = tostring(#source)
+		local num = string.rep(" ", #longestLineNumber - #lineNum) .. lineNum
+		table.insert(contextLines, "\t" .. num .. " | " .. source[line])
 		local pointy = ""
 		for i = 1, #source[line] do
-			local after = (line == begins.line and i >= begins.column) or line > begins.line
-			local before = (line == ends.line and i <= ends.column) or line < ends.line
+			local after = (line == from.line and i >= from.column) or from.line < line
+			local before = (line == to.line and i <= to.column) or line < to.line
 			if after and before and source[line]:sub(1, i):find "%S" then
 				pointy = pointy .. "^"
 			else
@@ -100,11 +93,11 @@ function showLocation(location)
 		end
 		if pointy:find "%S" then
 			local align = string.rep(" ", #tostring(#source))
-			table.insert(context, "\t" .. align .. " | " .. ansi.red(pointy))
+			table.insert(contextLines, "\t" .. align .. " | " .. ansi.red(pointy))
 		end
 	end
-	local sourceContext = table.concat(context, "\n")
-	local cite = begins.filename .. ":" .. begins.line .. ":" .. begins.column
+	local sourceContext = table.concat(contextLines, "\n")
+	local cite = location.file.filename .. ":" .. from.line .. ":" .. from.column
 	local location = "at " .. cite .. "\n" .. sourceContext .. "\n"
 
 	-- Include indexes for computer consumption of error messages
@@ -112,15 +105,15 @@ function showLocation(location)
 		location = table.concat {
 			location,
 			"@",
-			begins.filename,
+			location.file.filename,
 			":",
-			begins.line,
+			from.line,
 			":",
-			begins.index,
+			from.index,
 			"::",
-			ends.line,
+			to.line,
 			":",
-			ends.index,
+			to.index,
 		}
 	end
 	return location
@@ -134,7 +127,7 @@ local codegen = {
 	c = import "codegen/genc.lua",
 }
 local verify = import "verify.lua"
-local lexSmol = import "tokenization.lua"
+local tokenization = import "tokenization.lua"
 
 --------------------------------------------------------------------------------
 
@@ -363,7 +356,7 @@ for _, sourceFile in ipairs(sourceFiles) do
 	assert(contents)
 
 	-- Lex contents
-	local tokens = lexSmol(contents, sourceFile.short)
+	local tokens = tokenization(contents, sourceFile.short)
 
 	-- Parse contents
 	table.insert(sourceParses, syntax.parseFile(tokens))

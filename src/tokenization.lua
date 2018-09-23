@@ -1,134 +1,134 @@
--- RETURNS a list of tokens.
+local IS_KEYWORD = {
+	["case"] = true,
+	["class"] = true,
+	["do"] = true,
+	["foreign"] = true,
+	["if"] = true,
+	["else"] = true,
+	["elseif"] = true,
+	["import"] = true,
+	["interface"] = true,
+	["is"] = true,
+	["match"] = true,
+	["method"] = true,
+	["new"] = true,
+	["package"] = true,
+	["return"] = true,
+	["static"] = true,
+	["union"] = true,
+	["var"] = true,
+
+	-- verification
+	["assert"] = true,
+	["ensures"] = true,
+	["forall"] = true,
+	["requires"] = true,
+	["when"] = true,
+
+	-- built-in types
+	["Boolean"] = true,
+	["Int"] = true,
+	["Never"] = true,
+	["Self"] = true,
+	["String"] = true,
+	["Unit"] = true,
+
+	-- values
+	["this"] = true,
+	["true"] = true,
+	["false"] = true,
+	["unit"] = true,
+}
+
+-- Define token parsing rules
+local TOKENS = {
+	{
+		-- type keywords, type names
+		"[A-Z][A-Za-z0-9]*",
+		function(x)
+			if IS_KEYWORD[x] then
+				return {tag = "type-keyword", name = x}
+			end
+			return {tag = "typename", name = x}
+		end
+	},
+	{
+		-- keywords, local identifiers
+		"[a-z][A-Za-z0-9]*",
+		function(x)
+			if IS_KEYWORD[x] then
+				return {tag = "keyword", keyword = x}
+			end
+			return {tag = "identifier", name = x}
+		end
+	},
+	{
+		-- generic type parameters
+		"#[A-Z][A-Za-z0-9]*",
+		function(x)
+			if IS_KEYWORD[x:sub(2)] then
+				return {tag = "keyword-generic", name = x:sub(2)}
+			end
+			return {tag = "generic", name = x:sub(2)}
+		end
+	},
+	{
+		-- whitespace
+		"%s+",
+		function(x)
+			return false
+		end
+	},
+	{
+		-- comments
+		"//[^\n]*",
+
+		-- (greedy)
+		function(x)
+			return false
+		end
+	},
+	{
+		-- punctuation (braces, commas, etc)
+		"[.,:;!|()%[%]{}]",
+		function(x)
+			return {tag = "punctuation"}
+		end
+	},
+	{
+		-- operators and assignment
+		"[+%-*/<>=%%^]+",
+		function(x)
+			if x == "=" then
+				return {tag = "assign"}
+			end
+			return {tag = "operator"}
+		end
+	},
+	{
+		-- integer literals
+		"[0-9]+",
+		function(x)
+			return {tag = "integer-literal", value = tonumber(x)}
+		end
+	},
+}
+
+local QUOTE = "\""
+local BACKSLASH = "\\"
+
+-- RETURNS a list of tokens, with the list annotated with a .file field
 -- source: the contents of a source file.
 -- filename: a human-readable name indicating this source file.
 local function lexSmol(source, filename)
-	assert(isstring(source))
-	assert(isstring(filename))
+	assert(type(source) == "string")
+	assert(type(filename) == "string")
 
 	-- Normalize line end-ings
 	source = source:gsub("\r*\n\r*", "\n")
 	source = source:gsub("\r", "\n")
 	source = source .. "\n"
-
-	local IS_KEYWORD = {
-		["case"] = true,
-		["class"] = true,
-		["do"] = true,
-		["foreign"] = true,
-		["if"] = true,
-		["else"] = true,
-		["elseif"] = true,
-		["import"] = true,
-		["interface"] = true,
-		["is"] = true,
-		["match"] = true,
-		["method"] = true,
-		["new"] = true,
-		["package"] = true,
-		["return"] = true,
-		["static"] = true,
-		["union"] = true,
-		["var"] = true,
-
-		-- verification
-		["assert"] = true,
-		["ensures"] = true,
-		["forall"] = true,
-		["requires"] = true,
-		["when"] = true,
-
-		-- built-in types
-		["Boolean"] = true,
-		["Int"] = true,
-		["Never"] = true,
-		["Self"] = true,
-		["String"] = true,
-		["Unit"] = true,
-
-		-- values
-		["this"] = true,
-		["true"] = true,
-		["false"] = true,
-		["unit"] = true,
-	}
-
-	-- Define token parsing rules
-	local TOKENS = {
-		{
-			-- type keywords, type names
-			"[A-Z][A-Za-z0-9]*",
-			function(x)
-				if IS_KEYWORD[x] then
-					return {tag = "type-keyword", name = x}
-				end
-				return {tag = "typename", name = x}
-			end
-		},
-		{
-			-- keywords, local identifiers
-			"[a-z][A-Za-z0-9]*",
-			function(x)
-				if IS_KEYWORD[x] then
-					return {tag = "keyword", keyword = x}
-				end
-				return {tag = "identifier", name = x}
-			end
-		},
-		{
-			-- generic type parameters
-			"#[A-Z][A-Za-z0-9]*",
-			function(x)
-				if IS_KEYWORD[x:sub(2)] then
-					return {tag = "keyword-generic", name = x:sub(2)}
-				end
-				return {tag = "generic", name = x:sub(2)}
-			end
-		},
-		{
-			-- whitespace
-			"%s+",
-			function(x)
-				return false
-			end
-		},
-		{
-			-- comments
-			"//[^\n]*",
-
-			-- (greedy)
-			function(x)
-				return false
-			end
-		},
-		{
-			-- punctuation (braces, commas, etc)
-			"[.,:;!|()%[%]{}]",
-			function(x)
-				return {tag = "punctuation"}
-			end
-		},
-		{
-			-- operators and assignment
-			"[+%-*/<>=%%^]+",
-			function(x)
-				if x == "=" then
-					return {tag = "assign"}
-				end
-				return {tag = "operator"}
-			end
-		},
-		{
-			-- integer literals
-			"[0-9]+",
-			function(x)
-				return {tag = "integer-literal", value = tonumber(x)}
-			end
-		},
-	}
-
-	local QUOTE = "\""
-	local BACKSLASH = "\\"
-
+	
 	-- Create a list of the lines in the program, for location messages
 	local sourceLines = {}
 	for line in (source .. "\n"):gmatch("(.-)\n") do
@@ -141,11 +141,15 @@ local function lexSmol(source, filename)
 			end
 		until not index
 		line = line:gsub("\t", "    ")
-
+		
 		-- TODO: this should be aligned
 		table.insert(sourceLines, line)
 	end
-
+	
+	local file = {
+		filename = filename,
+		lines = sourceLines,
+	}
 	local tokens = {}
 
 	-- Track the location into the source file each token is
@@ -179,16 +183,13 @@ local function lexSmol(source, filename)
 				index = index + 1
 			end
 		end
-		final.filename = filename
-		final.sourceLines = sourceLines
 		return final
 	end
 
 	while #source > 0 do
 		local location = {
-			begins = {
-				filename = filename,
-				sourceLines = sourceLines,
+			file = file,
+			from = {
 				line = line,
 				column = column,
 				index = index,
@@ -210,7 +211,7 @@ local function lexSmol(source, filename)
 			for i = 2, #source do
 				local c = source:sub(i, i)
 				if c == "\n" or c == "\r" then
-					location.ends = advanceCursor(source:sub(1, i - 1))
+					location.to = advanceCursor(source:sub(1, i - 1))
 					quit(
 						"The compiler found an unfinished string literal ",
 						location
@@ -218,7 +219,7 @@ local function lexSmol(source, filename)
 				end
 				if escaped then
 					if not SPECIAL[c] then
-						location.ends = advanceCursor(source:sub(1, i))
+						location.to = advanceCursor(source:sub(1, i))
 						quit(
 							"The compiler found an unknown escape sequence",
 							" `\\",
@@ -234,7 +235,7 @@ local function lexSmol(source, filename)
 					escaped = true
 				elseif c == QUOTE then
 					-- Update location
-					location.ends = advanceCursor(source:sub(1, i))
+					location.to = advanceCursor(source:sub(1, i))
 					local lexeme = source:sub(1, i)
 
 					-- String literal is complete
@@ -263,7 +264,7 @@ local function lexSmol(source, filename)
 						"token must be table `" .. tokenRule[1] .. "`"
 					)
 
-					location.ends = advanceCursor(match)
+					location.to = advanceCursor(match)
 					if token then
 						token.location = location
 						token.lexeme = match
@@ -280,11 +281,14 @@ local function lexSmol(source, filename)
 
 			-- Check for an unlexible piece of source
 			if not matched then
-				local badToken = table.with(location, "ends", location.begins)
+				local badToken = table.with(location, "to", location.from)
 				quit("The compiler could not recognize any token ", badToken)
 			end
 		end
 	end
+
+	-- Annotate the token list with the source file
+	tokens.file = file
 
 	return tokens
 end

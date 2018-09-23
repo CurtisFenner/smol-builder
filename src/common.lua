@@ -89,40 +89,31 @@ end
 local function excerpt(location)
 	assertis(location, "Location")
 
-	local begins = location.begins
-	local ends = location.ends
+	local from, to = location.from, location.to
+	local source = location.file.lines
 
-	if type(begins) == "string" or type(ends) == "string" then
-		-- Internal code
-		return "<at " .. begins .. ">"
-	end
-
-	local source = begins.sourceLines
 	local out = ""
-	for line = begins.line, ends.line do
+	for line = from.line, to.line do
 		local low = 1
 		local high = #source[line]
-		if line == begins.line then
-			low = begins.column
+		if line == from.line then
+			low = from.column
 		end
-		if line == ends.line then
-			high = ends.column
+		if line == to.line then
+			high = to.column
 		end
 		out = out .. source[line]:sub(low, high)
 	end
 	return out
 end
 
+-- RETURNS a string
 local function locationBrief(location)
 	assertis(location, "Location")
 
-	local begins, ends = location.begins, location.ends
-	if type(begins) == "string" or type(ends) == "string" then
-		-- Internal code
-		return "<at " .. begins .. ">"
-	end
+	local from = location.from
 
-	return begins.filename .. ":" .. begins.line .. ":" .. begins.column
+	return location.file.filename .. ":" .. from.line .. ":" .. from.column
 end
 
 --------------------------------------------------------------------------------
@@ -177,14 +168,6 @@ local OPERATOR_ALIAS = {
 	["=>"] = "implies",
 	["&&"] = "and",
 }
-
---------------------------------------------------------------------------------
-
-local BUILTIN_LOC = {
-	begins = "builtin",
-	ends = "builtin",
-}
-
 
 --------------------------------------------------------------------------------
 
@@ -442,6 +425,18 @@ local function p(name, t)
 	}
 end
 
+-- RETURNS a fake location
+local function fakeLocation()
+	return {
+		file = {
+			filename = "<internal>",
+			lines = {"<internal code>"},
+		},
+		from = {line = 1, column = 1, index = 1},
+		to = {line = 1, column = 15, index = 15},
+	}
+end
+
 local BUILTIN_DEFINITIONS = {
 	-- Boolean
 	Boolean = {
@@ -484,7 +479,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				},
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -509,7 +504,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				},
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -534,7 +529,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				},
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -560,7 +555,7 @@ local BUILTIN_DEFINITIONS = {
 				},
 				bodyAST = false,
 				constraintArguments = {},
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 			},
 
 			-- method not(Boolean) Boolean
@@ -585,7 +580,7 @@ local BUILTIN_DEFINITIONS = {
 				},
 				bodyAST = false,
 				constraintArguments = {},
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 			},
 		},
 	},
@@ -621,7 +616,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -633,7 +628,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -659,7 +654,7 @@ local BUILTIN_DEFINITIONS = {
 					},
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -671,7 +666,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -683,7 +678,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -695,7 +690,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -721,7 +716,7 @@ local BUILTIN_DEFINITIONS = {
 					},
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -733,7 +728,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				}),
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 		},
@@ -776,7 +771,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				},
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 
@@ -798,7 +793,7 @@ local BUILTIN_DEFINITIONS = {
 					end,
 				},
 				bodyAST = false,
-				definitionLocation = BUILTIN_LOC,
+				definitionLocation = fakeLocation(),
 				constraintArguments = {},
 			},
 		},

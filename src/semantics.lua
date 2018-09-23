@@ -10,8 +10,6 @@ local showTypeKind = common.showTypeKind
 local showConstraintKind = common.showConstraintKind
 local areTypesEqual = common.areTypesEqual
 
-local UNKNOWN_LOCATION = {begins = "???", ends = "???"}
-
 local UNIT_TYPE = {
 	tag = "keyword-type",
 	role = "type",
@@ -142,7 +140,9 @@ local function makeDefinitionASTResolver(info, definitionMap)
 		packageName = "string",
 		importsByName = mapType("string", recordType {
 			packageName = "string",
-			definitionName = choiceType(constantType(false), "string"),
+			definition = choiceType(constantType(false), recordType {
+				name = "string",
+			}),
 		}),
 	})
 	assertis(definitionMap, mapType("string", mapType("string", recordType {})))
@@ -1633,6 +1633,7 @@ end
 local function compileStatement(statementAST, scope, context)
 	assertis(context, recordType {
 		returnTypes = listType "TypeKind",
+		returnTypesExpected = "Location",
 		canUseBang = "boolean",
 		proof = "boolean",
 		newType = choiceType(constantType(false), "TypeKind"),
@@ -1770,9 +1771,7 @@ local function compileStatement(statementAST, scope, context)
 			expected = context.returnTypes,
 			purpose = "returned value(s)",
 			givenLocation = statementAST.location,
-
-			-- TODO: Fix this
-			expectedLocation = UNKNOWN_LOCATION,
+			expectedLocation = context.returnTypesExpected,
 		}
 
 		table.insert(code, context.makePostamble(toReturn, statementAST.location))
@@ -2160,7 +2159,7 @@ end
 function compilePredicate(ast, callScope, proofContext, purpose)
 	assertis(ast, recordType {
 		condition = "ASTExpression",
-		whens = listType "ASTExpression",
+		whens = listlikeType "ASTExpression",
 	})
 	assertis(callScope, "object")
 	assertis(proofContext, recordType {
@@ -2578,6 +2577,7 @@ local function semanticsSmol(sources, main)
 						signature = signature,
 						bodyAST = not signature.foreign and methodAST.body,
 						definitionLocation = methodAST.signature.location,
+						returnsLocation = methodAST.signature.returnTypes.location,
 					}
 				end
 
@@ -2600,6 +2600,7 @@ local function semanticsSmol(sources, main)
 					functionMap[signature.memberName] = {
 						signature = signature,
 						definitionLocation = signatureAST.location,
+						returnsLocation = signatureAST.returnTypes.location,
 					}
 				end
 				definition._functionMap = functionMap
@@ -2776,6 +2777,7 @@ local function semanticsSmol(sources, main)
 				for key, f in pairs(definition._functionMap) do
 					local context = {
 						returnTypes = f.signature.returnTypes,
+						returnTypesExpected = f.returnsLocation,
 
 						-- Generic information, noting what Self is
 						constraintMap = table.with(definition.genericConstraintMap.map, "Self", {
@@ -2839,6 +2841,8 @@ local function semanticsSmol(sources, main)
 				for key, f in pairs(definition._functionMap) do
 					local context = {
 						returnTypes = f.signature.returnTypes,
+						returnTypesExpected = f.returnsLocation,
+
 						canUseBang = f.signature.bang,
 						newType = definition.kind,
 						proof = false,

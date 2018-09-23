@@ -23,7 +23,7 @@ end
 -- RETURNS a parser of Bs
 -- REQUIRES `p` is a parser of As
 -- REQUIRES `f` is a map from As to Bs
-function parser.map(parser, f, includeLocation)
+function parser.map(p, f, includeLocation)
 	assert(type(f) == "function")
 
 	return function(stream, grammar)
@@ -31,7 +31,7 @@ function parser.map(parser, f, includeLocation)
 
 		local begins = stream:location()
 
-		local object, rest = parser(stream, grammar)
+		local object, rest = p(stream, grammar)
 		if not rest then
 			return nil
 		end
@@ -41,11 +41,12 @@ function parser.map(parser, f, includeLocation)
 
 		if includeLocation then
 			local ends = rest:priorLocation()
-			out = table.with(
-				out,
-				"location",
-				{begins = begins.begins, ends = ends.ends}
-			)
+			local with = {}
+			for k, v in pairs(out) do
+				with[k] = v
+			end
+			with.location = parser.config.locationSpan(begins, ends)
+			out = with
 		end
 		return out, rest
 	end
@@ -103,13 +104,9 @@ function parser.composite(components)
 
 	return function(stream, parsers)
 		-- Annotate metadata
-		local frontLocation = stream:location()
+		local begins = stream:location()
 		local object = {
 			tag = components.tag,
-			location = {
-				begins = frontLocation.begins,
-				ends = frontLocation.ends,
-			},
 		}
 
 		local extracts = {}
@@ -133,7 +130,8 @@ function parser.composite(components)
 					object[key] = member
 				end
 				stream = rest
-				object.location.ends = rest:priorLocation().ends
+				local ends = rest:priorLocation()
+				object.location = parser.config.locationSpan(begins, ends)
 			elseif required then
 				-- This member was a required cut; report an error with
 				-- the input
@@ -236,6 +234,8 @@ function parser.delimited(object, count, delimiter, expected)
 	return function(stream, grammar)
 		assert(grammar)
 
+		local from = stream:location()
+
 		-- Consume the first element of the list
 		local first, rest = object(stream, grammar)
 		if not rest then
@@ -252,6 +252,8 @@ function parser.delimited(object, count, delimiter, expected)
 			local _, rest = delimiterParser(stream, grammar)
 			if not rest then
 				if minCount <= #list and #list <= maxCount then
+					local to = stream:priorLocation()
+					list.location = parser.config.locationSpan(from, to)
 					return list, stream
 				end
 				return nil
@@ -447,9 +449,9 @@ function parser.Stream(list, offset)
 		-- Validate that it looks like a list of tokens
 		for i = 1, #list do
 			assert(list[i].location)
-			assert(list[i].location.begins)
 		end
 	end
+	assert(list.file, "needs list.file")
 
 	return {
 		_list = list,
@@ -466,28 +468,14 @@ function parser.Stream(list, offset)
 		end,
 		location = function(self)
 			if self:size() == 0 then
-				local spot = {
-					filename = self._list[1].location.begins.filename,
-					sourceLines = self._list[1].location.begins.sourceLines,
-					column = 1,
-					index = 0,
-					line = #self._list[1].location.begins.sourceLines,
-				}
-				return {begins = spot, ends = spot}
+				return parser.config.locationFinal(self._list.file)
 			else
 				return self:head().location
 			end
 		end,
 		priorLocation = function(self)
 			if self._offset == 0 then
-				local spot = {
-					filename = self._list[1].location.begins.filename,
-					sourceLines = self._list[1].location.begins.sourceLines,
-					column = 1,
-					index = 0,
-					line = 1,
-				}
-				return {begins = spot, ends = spot}
+				return parser.config.locationInitial(self._list.file)
 			end
 			return self._list[self._offset].location
 		end,

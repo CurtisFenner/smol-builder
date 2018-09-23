@@ -152,11 +152,6 @@ local function impliesAssertion(a, b)
 	assertis(a, "Assertion")
 	assertis(b, "Assertion")
 
-	local BUILTIN_LOC = {
-		begins = "builtin",
-		ends = "builtin",
-	}
-
 	local p = {
 		tag = "fn",
 		arguments = {a, b},

@@ -1,5 +1,33 @@
 local parser = import "parser.lua"
 
+parser.config = {
+	locationSpan = function(from, to)
+		assert(from.file == to.file, "span must be in one file")
+
+		return {
+			file = from.file,
+			from = from.from,
+			to = to.to,
+		}
+	end,
+
+	locationFinal = function(file)
+		return {
+			line = #file.lines + 1,
+			column = 1,
+			index = 0,
+		}
+	end,
+
+	locationInitial = function(file)
+		return {
+			line = 1,
+			column = 1,
+			index = 0,
+		}
+	end,
+}
+
 local Stream = parser.Stream
 
 -- PARSER for literal lexeme (keywords, punctuation, etc.)
@@ -563,10 +591,10 @@ local parsers = {
 		function(x)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
-				local loc = {
-					begins = out.location.begins,
-					ends = access.location.ends,
-				}
+				local loc = parser.config.locationSpan(
+					out.location,
+					access.location
+				)
 				out = table.with(access, "base", out)
 				out = table.with(out, "location", loc)
 			end
@@ -656,13 +684,20 @@ local parsers = {
 	},
 }
 
+-- tokens: a list of tokens,
+-- with tokens.file being a file for location generation.
+-- RETURNS an AST of the given kind
 local function parseKind(tokens, kind)
+	assert(tokens.file, "tokens need file source")
 	local stream = Stream(tokens)
 
 	local source = parsers[kind](stream, parsers)
 	return source
 end
 
+-- tokens: a list of tokens,
+-- with tokens.file being a file for location generation.
+-- RETURNS a Source AST
 local function parseFile(tokens)
 	return parseKind(tokens, "source")
 end

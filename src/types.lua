@@ -290,13 +290,23 @@ _assertis = memoized(2, _assertis)
 local normalizedT = {}
 
 -- ASSERTS that `value` is of the specified type `t`
+local queryCount = {}
 function assertis(value, t)
-	do return true end
+	--do return true end
 
 	-- TYPE_DESCRIPTION must be injective
 	-- Normalize types so that memoization works
 	local x = TYPE_DESCRIPTION(t)
 	normalizedT[x] = normalizedT[x] or t
+	queryCount[x] = queryCount[x] or setmetatable({}, {__mode = "k"})
+	queryCount[x][t] = queryCount[x][t] or 0
+	
+	if math.exp(-queryCount[x][t]) < math.random() then
+		-- Assume that objects change less over time and that a repeatedly
+		-- checked object still matches the type
+		return
+	end
+	queryCount[x][t] = queryCount[x][t] + 1
 
 	return _assertis(value, normalizedT[x])
 end
@@ -382,23 +392,71 @@ end
 recordType = memoized(1, recordType)
 
 -- RETURNS a type-predicate
+-- listlikeType is less strict than listType in that it allows extra fields.
+-- However, it does not allow holes.
+function listlikeType(elementType)
+	local p =false
+	local function predicate(object)
+		if not isobject(object) then
+			return false, "value is not an object (for list-like type)"
+		end
+
+		if not p then
+			p = TYPE_PREDICATE(elementType)
+		end
+
+		for key, value in pairs(object) do
+			if type(key) ~= "number" then
+				-- Ignored
+			else
+				if key % 1 ~= 0 or key < 1 then
+					return false, "value has non-integer number key"
+				elseif key ~= 1 and object[key - 1] == nil then
+					return false, "value is missing index " .. show(key - 1)
+				end
+
+				local okay, reason = predicate(value)
+				if not okay then
+					if not reason then
+						return false, "bad value at index " .. show(key)
+					end
+					return false, reason .. " at index " .. show(key)
+				end
+			end
+		end
+
+		return true
+	end
+
+	local function describe()
+		return "[~ " .. TYPE_DESCRIPTION(elementType) .. "]"
+	end
+
+	return {predicate = predicate, describe = describe}
+end
+
+-- RETURNS a type-predicate
 function listType(elementType)
 	assert(elementType)
 
+	local p
 	local function predicate(object)
 		if not isobject(object) then
 			return false, "value is not an object (for list type)"
+		end
+
+		if not p then
+			p = TYPE_PREDICATE(elementType)
 		end
 
 		for key, value in pairs(object) do
 			if not isinteger(key) then
 				return false, "value has non-integer key " .. show(key)
 			elseif key ~= 1 and object[key - 1] == nil then
-				return false, "value is missing key " .. show(key - 1)
+				return false, "value is missing index " .. show(key - 1)
 			end
 
-			local predicate = TYPE_PREDICATE(elementType)
-			local okay, reason = predicate(value)
+			local okay, reason = p(value)
 			if not okay then
 				if not reason then
 					return false, "bad value at index " .. show(key)

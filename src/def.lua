@@ -1,14 +1,16 @@
-REGISTER_TYPE("Spot", choiceType(constantType "???", constantType "builtin", recordType {
-	filename = "string",
-	sourceLines = listType "string",
+REGISTER_TYPE("Spot", recordType {
 	line = "integer",
 	column = "integer",
 	index = "integer",
-}))
+})
 
 REGISTER_TYPE("Location", recordType {
-	begins = "Spot",
-	ends = "Spot",
+	file = recordType {
+		filename = "string",
+		lines = listType "string",
+	},
+	from = "Spot",
+	to = "Spot",
 })
 
 REGISTER_TYPE("Token", recordType {
