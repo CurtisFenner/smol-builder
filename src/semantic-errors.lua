@@ -1,6 +1,6 @@
 local Report = {}
 
-function Report.DEFINITION_DEFINED_TWICE(p)
+function Report.OBJECT_DEFINED_TWICE(p)
 	assertis(p, recordType {
 		fullName = "string",
 		firstLocation = "Location",
@@ -17,7 +17,7 @@ function Report.DEFINITION_DEFINED_TWICE(p)
 	)
 end
 
-function Report.IMPORT_PACKAGE_TWICE(p)
+function Report.PACKAGE_IMPORTED_TWICE(p)
 	quit(
 		"The package `", p.packageName, "` was already imported ",
 		p.firstLocation,
@@ -66,6 +66,26 @@ function Report.UNKNOWN_DEFINITION_IMPORTED(p)
 		p.name,
 		"` has not been defined.",
 		"\nHowever, you are trying to import it ",
+		p.location
+	)
+end
+
+function Report.NO_SUCH_OBJECT(p)
+	quit(
+		"No object called `",
+		p.name,
+		"` has been defined.",
+		"\nHowever, you are trying to use it ",
+		p.location
+	)
+end
+
+function Report.NO_SUCH_PACKAGE(p)
+	quit(
+		"A package called `",
+		p.package,
+		"` has not been defined.",
+		"\nHowever, you are trying to use it ",
 		p.location
 	)
 end

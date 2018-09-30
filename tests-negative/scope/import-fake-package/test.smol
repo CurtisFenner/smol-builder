@@ -1,0 +1,7 @@
+package test;
+import nosuch:File;
+
+class Test {
+	static main() Unit {
+	}
+}

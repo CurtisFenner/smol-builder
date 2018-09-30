@@ -180,7 +180,7 @@ local function makeDefinitionASTResolver(info, definitionMap)
 		else
 			-- Check if such a package really exists
 			if usePackages[importAST.packageName] then
-				Report.IMPORT_PACKAGE_TWICE {
+				Report.PACKAGE_IMPORTED_TWICE {
 					packageName = importAST.packageName,
 					firstLocation = usePackages[importAST.packageName],
 					secondLocation = importAST.location,
@@ -672,15 +672,13 @@ local compilePredicate
 -- impure is true if executing this expression could have observable side
 -- effects (because it contains a `!` action)
 local function compileExpression(expressionAST, scope, context)
-	assertis(expressionAST, recordType {
-		tag = "string",
-	})
+	assert(type(expressionAST.tag) == "string")
+	assert(type(context.canUseBang) == "boolean")
+	assert(type(context.proof) == "boolean")
+	assert(type(context.typeResolver) == "function")
 	assertis(context, recordType {
-		canUseBang = "boolean",
-		proof = "boolean",
 		newType = choiceType(constantType(false), "TypeKind"),
 
-		typeResolver = "function",
 		typeResolverContext = "object",
 		definitionMap = mapType("string", mapType("string", recordType {
 			_functionMap = mapType("string", recordType {}),
@@ -1631,11 +1629,11 @@ end
 -- The StatementIR represents the execution of the statement in the given
 -- context
 local function compileStatement(statementAST, scope, context)
+	assert(type(context.canUseBang) == "boolean")
+	assert(type(context.proof) == "boolean")
 	assertis(context, recordType {
 		returnTypes = listType "TypeKind",
 		returnTypesExpected = "Location",
-		canUseBang = "boolean",
-		proof = "boolean",
 		newType = choiceType(constantType(false), "TypeKind"),
 		makePostamble = "function",
 
@@ -1661,6 +1659,8 @@ local function compileStatement(statementAST, scope, context)
 			scopePrime = newScope
 			table.insert(statements, statement)
 
+			-- Check that exiting statements like `return` are the last in the
+			-- block
 			if statement.returns == "yes" and i ~= #statementAST.statements then
 				Report.UNREACHABLE_STATEMENT {
 					location = statementAST.statements[i + 1].location,
@@ -2243,9 +2243,336 @@ end
 
 --------------------------------------------------------------------------------
 
+local DefinitionASTUniverse = {}
+
+-- RETURNS an empty definition AST universe
+function DefinitionASTUniverse.new()
+	local instance = {
+		_objectsByPackage = {},
+	}
+	return setmetatable(instance, {__index = DefinitionASTUniverse})
+end
+
+-- RETURNS nothing
+-- MODIFIES this
+function DefinitionASTUniverse:createPackage(package)
+	assert(type(package) == "string")
+	self._objectsByPackage[package] = self._objectsByPackage[package] or {}
+end
+
+-- RETURNS nothing
+-- REQUIRES the package has already been created
+-- MODIFIES this
+-- REPORTS a problem when this name has already been defined
+function DefinitionASTUniverse:definitionAST(package, name, ast)
+	assert(type(name) == "string")
+	assert(self._objectsByPackage[package], "package not yet created")
+	assertis(ast, recordType {
+		tag = "string",
+	})
+
+	if self._objectsByPackage[package][name] then
+		Report.OBJECT_DEFINED_TWICE {
+			fullName = package .. ":" .. name,
+			firstLocation = self._objectsByPackage[package][name].location,
+			secondLocation = ast.location,
+		}
+	end
+
+	self._objectsByPackage[package][name] = {
+		location = ast.location,
+		ast = ast,
+		view = false,
+	}
+end
+
+-- RETURNS nothing
+-- MODIFIES this to record a view associated with the given definition
+function DefinitionASTUniverse:setView(package, name, view)
+	assert(self._objectsByPackage[package][name])
+	assert(view)
+	
+	self._objectsByPackage[package][name].view = view
+end
+
+-- RETURNS information about an object
+-- REPORTS that the object with the given name doesn't exist if it doesn't
+function DefinitionASTUniverse:lookupObject(package, name, useLocation)
+	assert(type(package) == "string")
+	assert(type(name) == "string")
+	assert(useLocation)
+
+	if not self._objectsByPackage[package] then
+		Report.NO_SUCH_PACKAGE {
+			package = package,
+			location = useLocation,
+		}
+	elseif not self._objectsByPackage[package][name] then
+		Report.NO_SUCH_OBJECT {
+			name = package .. ":" .. name,
+			location = useLocation,
+		}
+	end
+
+	return self._objectsByPackage[package][name]
+end
+
+--------------------------------------------------------------------------------
+
+local SourceScope = {}
+
+-- RETURNS a new SourceScope
+-- REQUIRES the package has been created in the given universe
+function SourceScope.new(universe, package, packageLocation)
+	assert(type(package) == "string")
+	assertis(packageLocation, "Location")
+
+	local instance = {
+		_package = package,
+		_universe = universe,
+
+		-- A mapping of name => information about a fully qualified object
+		_scope = {},
+
+		-- A set of packages that can be used in fully qualified names
+		_packages = {[package] = packageLocation},
+	}
+	
+	setmetatable(instance, {__index = SourceScope})
+
+	assert(universe._objectsByPackage[package], "package not yet created")
+	for name, information in pairs(universe._objectsByPackage[package]) do
+		instance._scope[name] = {
+			importLocation = information.location,
+			importType = "definition",
+			package = package,
+			name = name,
+		}
+		universe:setView(package, name, instance)
+	end
+
+	return instance
+end
+
+-- RETURNS nothing
+-- MODIFIES this
+-- REPORTS when a name has been imported/defined twice
+function SourceScope:importObject(package, name, importLocation)
+	assert(type(package) == "string")
+	assert(type(name) == "string")
+	assert(importLocation)
+
+	if self._scope[name] then
+		Report.NAME_IMPORTED_TWICE {
+			name = name,
+			firstLocation = self._scope[name].importLocation,
+			secondLocation = importLocation,
+		}
+	end
+
+	self._universe:lookupObject(package, name, importLocation)
+
+	self._scope[name] = {
+		importLocation = importLocation,
+		importType = "import",
+		package = package,
+		name = name,
+	}
+end
+
+-- RETURNS nothing
+-- MODIFIES this
+-- REPORTS when a package has been imported twice
+function SourceScope:importPackage(package, importLocation)
+	assert(type(package) == "string")
+	assert(importLocation)
+
+	if self._packages[package] then
+		Report.PACKAGE_IMPORTED_TWICE {
+			packageName = package,
+			firstLocation = self._packages[package],
+			secondLocation = importLocation,
+		}
+	end
+	self._packages[package] = importLocation
+end
+
+-- RETURNS a new plain-constraint for the given object
+-- REPORTS when types mentioned in this are not visible or have the wrong arity
+function SourceScope:astToPlainConstraint(ast)
+	assert(ast.tag == "concrete-type")
+	print(show(ast))
+
+	local info
+	if ast.package then
+		assert(type(ast.package) == "string")
+		if not self._packages[ast.package] then
+			Report.UNKNOWN_PACKAGE_USED {
+				package = ast.package,
+				location = ast.location,
+			}
+		end
+
+		info = self._universe:lookupObject(ast.package, ast.base, ast.location)
+	else
+		local localInfo = self._scope[ast.base]
+		if not localInfo then
+			Report.UNKNOWN_DEFINITION_USED {
+				name = ast.base,
+				location = ast.location,
+			}
+		end
+
+		info = self._universe:lookupObject(localInfo.package, ast.base, ast.location)
+	end
+
+	print(show(info))
+	error "TODO"
+end
+
+--------------------------------------------------------------------------------
+
+local TypeScope = {}
+
+-- RETURNS a new TypeScope made from the current view
+function TypeScope.fromView(view)
+	local instance = {
+		_view = view,
+		_generics = {},
+	}
+
+	return setmetatable(instance, {__index = TypeScope})
+end
+
+-- RETURNS nothing
+-- REQUIRES name is a valid generic name (ie, begings [A-Z] and is not "Self")
+-- MODIFIES this
+-- REPORTS when a generic is being re-defined
+function TypeScope:defineGeneric(name, location)
+	assert(type(name) == "string")
+	assert(name ~= "Self")
+	assert(location)
+
+	if self._generics[name] then
+		Report.GENERIC_DEFINED_TWICE {
+			name = name,
+			firstLocation = self._generics[name].location,
+			secondLocation = location,
+		}
+	end
+
+	self._generics[name] = {
+		location = location,
+		constraints = {},
+	}
+end
+
+-- RETURNS nothing
+-- MODIFIES this
+-- REPORTS when this generic name has not been defined
+-- These constraints are TRUSTED and must be scanned again to produce errors!
+function TypeScope:addGenericConstraint(name, plainConstraint, variableLocation)
+	assert(type(name) == "string")
+	assert(plainConstraint.tag == "plain-constraint")
+	assert(variableLocation)
+
+	if not self._generics[name] then
+		Report.UNKNOWN_GENERIC_USED {
+			name = name,
+			location = variableLocation,
+		}
+	end
+
+	table.insert(self._generics[name].constraints, plainConstraint)
+end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS a compiled description of one class/union
+local function compiledStructure(ast, view)
+	assert(ast.tag == "class-definition" or ast.tag == "union-definition")
+
+	local typeScope = TypeScope.fromView(view)
+	for _, parameter in ipairs(ast.generics.parameters) do
+		typeScope:defineGeneric(parameter.name, parameter.location)
+	end
+	for _, constraint in ipairs(ast.generics.constraints) do
+		typeScope:addGenericConstraint(
+			constraint.parameter.name,
+			view:astToPlainConstraint(constraint.constraint),
+			constraint.parameter.location
+		)
+	end
+	error "TODO"
+end
+
+-- RETURNS a compiled description of one interface
+local function compiledConstraint(ast, view)
+	assert(ast.tag == "interface-definition")
+
+	error "TODO"
+end
+
+-- RETURNS an IR program
+local function semanticsBeta(sources, main)
+	assert(type(main) == "string")
+
+	-- Collect the universe of definitions as ASTs
+	local astUniverse = DefinitionASTUniverse.new()
+	for _, source in ipairs(sources) do
+		local packageName = source.package.name
+		astUniverse:createPackage(packageName)
+
+		for _, definition in ipairs(source.definitions) do
+			astUniverse:definitionAST(packageName, definition.name, definition)
+		end
+	end
+
+	-- Compile each source
+	local out = {
+		classes = {},
+		unions = {},
+		interfaces = {},
+	}
+	for _, source in ipairs(sources) do
+		-- Prepare this source's view into the universe
+		local view = SourceScope.new(astUniverse, source.package.name)
+		for _, import in ipairs(source.imports) do
+			if import.definition then
+				-- Importing a particular object
+				view:importObject(
+					import.packageName,
+					import.definition.name,
+					import.location
+				)
+			else
+				-- Allowing use of a package
+				view:importPackage(import.packageName, import.location)
+			end
+		end
+
+		for _, definition in ipairs(source.definitions) do
+			if definition.tag == "class-definition" then
+				table.insert(out.classes, compiledStructure(definition, view))
+			elseif definition.tag == "union-definition" then
+				table.insert(out.unions, compiledStructure(definition, view))
+			elseif definition.tag == "interface-definition" then
+				table.insert(out.interfaces, compiledConstraint(definition, view))
+			else
+				error("unhandled definition ast `" .. definition.tag .. "`")
+			end
+		end
+	end
+	
+	error "TODO: Cook results."
+end
+
 -- RETURNS a Semantics, an IR description of the program
 local function semanticsSmol(sources, main)
-	assertis(main, "string")
+	assert(type(main) == "string")
+
+	local xxx = semanticsBeta(sources, main)
+	do return xxx end
 
 	-- Process package scopes
 	local definitionMap = {}
@@ -2276,14 +2603,14 @@ local function semanticsSmol(sources, main)
 			local previousDefinition = definitionMap[packageName][definition.name]
 			if previousDefinition then
 				-- Definition of same name already exists
-				Report.DEFINITION_DEFINED_TWICE {
+				Report.OBJECT_DEFINED_TWICE {
 					fullName = previousDefinition.fullName,
 					firstLocation = previousDefinition.definition.location,
 					secondLocation = definition.location,
 				}
 			elseif importsByName[definition.name] then
 				-- Import of same short name already exists
-				Report.DEFINITION_DEFINED_TWICE {
+				Report.OBJECT_DEFINED_TWICE {
 					fullName = definition.name,
 					firstLocation = importsByName[definition.name].location,
 					secondLocation = definition.location,

@@ -1,0 +1,11 @@
+package test;
+import core;
+
+class Foo[#T | #Y is core:Eq] {
+
+}
+
+class Test {
+	static main() Unit {
+	}
+}

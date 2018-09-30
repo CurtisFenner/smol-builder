@@ -1,0 +1,9 @@
+package test;
+
+class Foo[#Self] {
+}
+
+class Test {
+	static main() Unit {
+	}
+}
