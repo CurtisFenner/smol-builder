@@ -233,7 +233,11 @@ local parsers = {
 			})
 		},
 		{"_", K_CURLY_OPEN, "`{` to begin interface body"},
-		{"signatures", parser.query "interface-signature*"},
+		{"signatures", parser.zeroOrMore(parser.composite {
+			tag = "***signature",
+			{"#signature", parser.named "signature"},
+			{"_", K_SEMICOLON, "`;` after interface member"},
+		})},
 		{"_", K_CURLY_CLOSE, "`}` to end interface body"},
 		{"implements", parser.constant {}},
 	},
@@ -261,7 +265,7 @@ local parsers = {
 		tag = "constraint",
 		{"parameter", T_GENERIC},
 		{"_", K_IS, "`is` after generic parameter"},
-		{"constraint", parser.named "concrete-type", "a type constrain after `is`"},
+		{"constraint", parser.named "concrete-type", "a type constraint after `is`"},
 	},
 
 	-- Represents a smol Type
@@ -310,7 +314,7 @@ local parsers = {
 	["field-definition"] = parser.composite {
 		tag = "field-definition",
 		{"_", K_VAR},
-		{"name", T_IDENTIFIER, "the field's name after `var`"},
+		{"name", TR_IDENTIFIER, "the field's name after `var`"},
 		{"type", parser.named "type", "the field's type after field name"},
 		{"_", K_SEMICOLON, "`;` after field type"},
 	},
@@ -335,18 +339,12 @@ local parsers = {
 		{"foreign", parser.constant(true)},
 	},
 
-	["interface-signature"] = parser.composite {
-		tag = "***signature",
-		{"#signature", parser.named "signature"},
-		{"_", K_SEMICOLON, "`;` after interface method"},
-	},
-
 	-- Represents a function signature, including name, scope,
 	-- parameters, and return type.
 	["signature"] = parser.composite {
 		tag = "signature",
 		{"modifier", parser.named "method-modifier"},
-		{"name", T_IDENTIFIER, "a method name"},
+		{"name", TR_IDENTIFIER, "a method name"},
 		{"bang", parser.optional(K_BANG)},
 		{"_", K_ROUND_OPEN, "`(` after method name"},
 		{"parameters", parser.query "variable,0+"},
@@ -416,7 +414,7 @@ local parsers = {
 
 	["variable"] = parser.composite {
 		tag = "variable",
-		{"name", T_IDENTIFIER},
+		{"name", TR_IDENTIFIER},
 		{"type", parser.named "type", "a type after variable name"},
 	},
 

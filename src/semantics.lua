@@ -2282,17 +2282,18 @@ function DefinitionASTUniverse:definitionAST(package, name, ast)
 	self._objectsByPackage[package][name] = {
 		location = ast.location,
 		ast = ast,
+		fullName = package .. ":" .. name,
 		view = false,
 	}
 end
 
 -- RETURNS nothing
 -- MODIFIES this to record a view associated with the given definition
-function DefinitionASTUniverse:setView(package, name, view)
+function DefinitionASTUniverse:setSourceView(package, name, view)
 	assert(self._objectsByPackage[package][name])
 	assert(view)
 	
-	self._objectsByPackage[package][name].view = view
+	self._objectsByPackage[package][name].sourceView = view
 end
 
 -- RETURNS information about an object
@@ -2348,7 +2349,7 @@ function SourceScope.new(universe, package, packageLocation)
 			package = package,
 			name = name,
 		}
-		universe:setView(package, name, instance)
+		universe:setSourceView(package, name, instance)
 	end
 
 	return instance
@@ -2397,37 +2398,38 @@ function SourceScope:importPackage(package, importLocation)
 	self._packages[package] = importLocation
 end
 
--- RETURNS a new plain-constraint for the given object
--- REPORTS when types mentioned in this are not visible or have the wrong arity
-function SourceScope:astToPlainConstraint(ast)
-	assert(ast.tag == "concrete-type")
-	print(show(ast))
+-- RETURNS information about an object
+function SourceScope:getObject(package, name, location)
+	assert(package == false or type(package) == "string")
+	assert(type(name) == "string")
+	assert(location)
 
-	local info
-	if ast.package then
-		assert(type(ast.package) == "string")
-		if not self._packages[ast.package] then
+	if package then
+		assert(type(package) == "string")
+		if not self._packages[package] then
 			Report.UNKNOWN_PACKAGE_USED {
-				package = ast.package,
-				location = ast.location,
+				package = package,
+				location = location,
 			}
 		end
 
-		info = self._universe:lookupObject(ast.package, ast.base, ast.location)
+		return self._universe:lookupObject(package, name, location)
 	else
-		local localInfo = self._scope[ast.base]
+		local localInfo = self._scope[name]
 		if not localInfo then
 			Report.UNKNOWN_DEFINITION_USED {
-				name = ast.base,
-				location = ast.location,
+				name = name,
+				location = location,
 			}
 		end
 
-		info = self._universe:lookupObject(localInfo.package, ast.base, ast.location)
+		return self._universe:lookupObject(localInfo.package, name, location)
 	end
+end
 
-	print(show(info))
-	error "TODO"
+-- RETURNS the name of this package
+function SourceScope:getPackage()
+	return self._package
 end
 
 --------------------------------------------------------------------------------
@@ -2435,20 +2437,34 @@ end
 local TypeScope = {}
 
 -- RETURNS a new TypeScope made from the current view
-function TypeScope.fromView(view)
+function TypeScope.fromSource(view)
 	local instance = {
-		_view = view,
+		_sourceView = view,
 		_generics = {},
+
+		-- The constraint to use for `#Self`.
+		-- `false` indicates that `#Self` is illegal in this scope.
+		_self = false,
 	}
 
 	return setmetatable(instance, {__index = TypeScope})
 end
 
 -- RETURNS nothing
+-- MODIFIES this
+function TypeScope:setSelf(interface)
+	assert(type(interface.package) == "string")
+	assert(type(interface.name) == "string")
+
+	self._self = interface
+end
+
+-- RETURNS nothing
 -- REQUIRES name is a valid generic name (ie, begings [A-Z] and is not "Self")
 -- MODIFIES this
 -- REPORTS when a generic is being re-defined
-function TypeScope:defineGeneric(name, location)
+function TypeScope:defineGeneric(index, name, location)
+	assert(type(index) == "number")
 	assert(type(name) == "string")
 	assert(name ~= "Self")
 	assert(location)
@@ -2462,6 +2478,7 @@ function TypeScope:defineGeneric(name, location)
 	end
 
 	self._generics[name] = {
+		index = index,
 		location = location,
 		constraints = {},
 	}
@@ -2473,7 +2490,7 @@ end
 -- These constraints are TRUSTED and must be scanned again to produce errors!
 function TypeScope:addGenericConstraint(name, plainConstraint, variableLocation)
 	assert(type(name) == "string")
-	assert(plainConstraint.tag == "plain-constraint")
+	assert(plainConstraint.tag == "constraint-plain-interface")
 	assert(variableLocation)
 
 	if not self._generics[name] then
@@ -2486,31 +2503,387 @@ function TypeScope:addGenericConstraint(name, plainConstraint, variableLocation)
 	table.insert(self._generics[name].constraints, plainConstraint)
 end
 
+function TypeScope:_getObject(package, name, location)
+	return self._sourceView:getObject(package, name, location)
+end
+
+-- RETURNS a new plain-constraint for the given object
+-- REPORTS when types mentioned in this are not visible or have the wrong arity
+-- NOTE: Does NOT report unsatisfied constraints
+function TypeScope:astToPlainType(ast)
+	if ast.tag == "keyword-generic" then
+		if not self._self then
+			Report.SELF_OUTSIDE_INTERFACE {
+				location = ast.location,
+			}
+		end
+
+		return {
+			tag = "type-plain-self",
+			interface = self._self,
+		}
+	elseif ast.tag == "type-keyword" then
+		-- TODO: disallow Never, etc
+		return {
+			tag = "type-plain-keyword",
+			name = ast.name,
+		}
+	elseif ast.tag == "generic" then
+		if not self._generics[ast.name] then
+			Report.UNKNOWN_GENERIC_USED {
+				name = ast.name,
+				location = ast.location,
+			}
+		end
+
+		return {
+			tag = "type-plain-generic",
+			name = ast.name,
+		}
+	elseif ast.tag == "concrete-type" then
+		local info = self:_getObject(ast.package, ast.base, ast.location)
+
+		-- Check object type and arity
+		local definitionAST = info.ast
+		if definitionAST.tag ~= "union-definition" and definitionAST.tag ~= "class-definition" then
+			Report.INTERFACE_USED_AS_TYPE {
+				interface = definitionAST.fullName,
+				location = ast.location,
+			}
+		elseif #definitionAST.generics.parameters ~= #ast.arguments then
+			Report.WRONG_ARITY {
+				name = info.fullName,
+				definitionLocation = info.location,
+				expectedArity = #definitionAST.generics.parameters,
+				givenArity = #ast.arguments,
+				location = ast.location,
+			}
+		end
+
+		-- Recurse
+		local arguments = {}
+		for _, argument in ipairs(ast.arguments) do
+			table.insert(arguments, self:astToPlainType(argument))
+		end
+
+		return {
+			tag = "type-plain",
+			object = {
+				package = info.package,
+				name = info.name,
+			},
+			arguments = arguments,
+		}
+	end
+
+	error("unhandled type ast `" .. ast.tag .. "`")
+end
+
+-- RETURNS a new plain-constraint for the given object
+-- REPORTS when types mentioned in this are not visible or have the wrong arity
+-- NOTE: Does NOT report unsatisfied constraints
+function TypeScope:astToPlainConstraint(ast)
+	assert(ast.tag == "concrete-type")
+
+	local info = self:_getObject(ast.package, ast.base, ast.location)
+
+	-- Check object type and arity
+	local definitionAST = info.ast
+	if definitionAST.tag ~= "interface-definition" then
+		Report.CONSTRAINTS_MUST_BE_INTERFACES {
+			is = definitionAST.tag == "class-definition" and "class" or "union",
+			typeShown = info.fullName,
+			location = ast.location,
+		}
+	elseif #definitionAST.generics.parameters ~= #ast.arguments then
+		Report.WRONG_ARITY {
+			name = info.fullName,
+			definitionLocation = info.location,
+			expectedArity = #definitionAST.generics.parameters,
+			givenArity = #ast.arguments,
+			location = ast.location,
+		}
+	end
+
+	-- Recurse
+	local arguments = {}
+	for _, a in ipairs(ast.arguments) do
+		table.insert(arguments, self:astToPlainType(a))
+	end
+
+	return {
+		tag = "constraint-plain-interface",
+		object = {
+			package = info.package,
+			name = info.name,
+		},
+		arguments = arguments,
+	}
+end
+
 --------------------------------------------------------------------------------
 
--- RETURNS a compiled description of one class/union
-local function compiledStructure(ast, view)
-	assert(ast.tag == "class-definition" or ast.tag == "union-definition")
-
-	local typeScope = TypeScope.fromView(view)
-	for _, parameter in ipairs(ast.generics.parameters) do
-		typeScope:defineGeneric(parameter.name, parameter.location)
+local function signatureSkeleton(typeScope, signatureAST)
+	local parameters = {}
+	for _, parameterAST in ipairs(signatureAST.parameters) do
+		table.insert(parameters, {
+			name = parameterAST.name.lexeme,
+			typePlain = typeScope:astToPlainType(parameterAST.type),
+			location = parameterAST.location,
+		})
 	end
+
+	local returns = {}
+	for _, returnAST in ipairs(signatureAST.returnTypes) do
+		table.insert(returns, typeScope:astToPlainType(returnAST))
+	end
+
+	assert(type(signatureAST.modifier.lexeme) == "string")
+	return {
+		modifier = signatureAST.modifier.lexeme,
+		parameters = parameters,
+		returns = returns,
+		requiresASTs = signatureAST.requires,
+		ensuresAST = signatureAST.ensures,
+		bang = signatureAST.bang,
+		typeScope = typeScope,
+	}
+end
+
+--------------------------------------------------------------------------------
+
+local InterfaceSkeleton = {}
+
+function InterfaceSkeleton.new(typeScope, ast)
+	assert(ast.tag == "interface-definition")
+
+	local instance = {
+		tag = "interface-skeleton",
+		_typeScope = typeScope,
+		_methods = {},
+		_statics = {},
+	}
+
+	local memberLocations = {}
+
+	for _, signatureAST in ipairs(ast.signatures) do
+		local name = signatureAST.name.lexeme
+		assert(type(name) == "string")
+
+		if memberLocations[name] then
+			Report.MEMBER_DEFINED_TWICE {
+				name = name,
+				firstLocation = memberLocations[name],
+				secondLocation = signatureAST.name.location,
+			}
+		end
+		memberLocations[name] = signatureAST.name.location
+
+		local signature = signatureSkeleton(typeScope, signatureAST)
+		if signature.modifier == "method" then
+			instance._methods[name] = signature
+		else
+			instance._methods[name] = signature
+		end
+	end
+
+	return setmetatable(instance, {__index = InterfaceSkeleton})
+end
+
+--------------------------------------------------------------------------------
+
+local UnionSkeleton = {}
+
+function UnionSkeleton.new(typeScope, ast)
+	assert(ast.tag == "union-definition")
+
+	local instance = {
+		tag = "union-skeleton",
+		_typeScope = typeScope,
+		_variants = {},
+		_methods = {},
+		_statics = {},
+		_implements = {},
+	}
+
+	local memberLocations = {}
+
+	for _, implements in ipairs(ast.implements) do
+		table.insert(instance._implements, typeScope:astToPlainConstraint(implements))
+	end
+
+	for _, fieldAST in ipairs(ast.fields) do
+		local name = fieldAST.name.lexeme
+
+		if memberLocations[name] then
+			Report.MEMBER_DEFINED_TWICE {
+				name = name,
+				firstLocation = memberLocations[name],
+				secondLocation = fieldAST.name.location,
+			}
+		end
+		memberLocations[name] = fieldAST.name.location
+
+		local typePlain = typeScope:astToPlainType(fieldAST.type)
+		instance._variants[name] = {
+			location = fieldAST.location,
+			typePlain = typePlain,
+		}
+	end
+
+	for _, methodAST in ipairs(ast.methods) do
+		local name = methodAST.signature.name.lexeme
+
+		if memberLocations[name] then
+			Report.MEMBER_DEFINED_TWICE {
+				name = name,
+				firstLocation = memberLocations[name],
+				secondLocation = methodAST.signature.name.location,
+			}
+		end
+		memberLocations[name] = methodAST.signature.name.location
+	
+		local body = false
+		if not methodAST.foreign then
+			body = methodAST.body
+		end
+
+		local signature = signatureSkeleton(typeScope, methodAST.signature)
+		if signature.modifier == "method" then
+			instance._methods[name] = {
+				signature = signature,
+				body = body,
+			}
+		else
+			instance._statics[name] = {
+				signature = signature,
+				body = body,
+			}
+		end
+	end
+
+	return setmetatable(instance, {__index = UnionSkeleton})
+end
+
+--------------------------------------------------------------------------------
+
+local ClassSkeleton = {}
+
+function ClassSkeleton.new(typeScope, ast)
+	assert(ast.tag == "class-definition")
+
+	local instance = {
+		tag = "class-skeleton",
+		_typeScope = typeScope,
+		_fields = {},
+		_methods = {},
+		_statics = {},
+		_implements = {},
+	}
+
+	local memberLocations = {}
+
+	for _, implements in ipairs(ast.implements) do
+		table.insert(instance._implements, typeScope:astToPlainConstraint(implements))
+	end
+
+	for _, fieldAST in ipairs(ast.fields) do
+		local name = fieldAST.name.lexeme
+
+		if memberLocations[name] then
+			Report.MEMBER_DEFINED_TWICE {
+				name = name,
+				firstLocation = memberLocations[name],
+				secondLocation = fieldAST.name.location,
+			}
+		end
+		memberLocations[name] = fieldAST.name.location
+
+		local typePlain = typeScope:astToPlainType(fieldAST.type)
+		instance._fields[name] = {
+			location = fieldAST.location,
+			typePlain = typePlain,
+		}
+	end
+
+	for _, methodAST in ipairs(ast.methods) do
+		local name = methodAST.signature.name.lexeme
+
+		if memberLocations[name] then
+			Report.MEMBER_DEFINED_TWICE {
+				name = name,
+				firstLocation = memberLocations[name],
+				secondLocation = methodAST.signature.name.location,
+			}
+		end
+		memberLocations[name] = methodAST.signature.name.location
+	
+		local body = false
+		if not methodAST.foreign then
+			body = methodAST.body
+		end
+
+		local signature = signatureSkeleton(typeScope, methodAST.signature)
+		if signature.modifier == "method" then
+			instance._methods[name] = {
+				signature = signature,
+				body = body,
+			}
+		else
+			instance._statics[name] = {
+				signature = signature,
+				body = body,
+			}
+		end
+	end
+
+	return setmetatable(instance, {__index = ClassSkeleton})
+end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS a skeletal description of one class/union
+local function skeletonStructure(view, ast)
+	local group
+	if ast.tag == "class-definition" then
+		group = "class"
+	elseif ast.tag == "union-definition" then
+		group = "union"
+	elseif ast.tag == "interface-definition" then
+		group = "interface"
+	end
+	assert(group)
+
+	local typeScope = TypeScope.fromSource(view)
+	for i, parameter in ipairs(ast.generics.parameters) do
+		typeScope:defineGeneric(i, parameter.name, parameter.location)
+	end
+
+	if group == "interface" then
+		-- `#Self` is only allowed in interfaces
+		typeScope:setSelf {
+			package = view:getPackage(),
+			name = ast.name,
+		}
+	end
+
+	-- Record the required constraints
 	for _, constraint in ipairs(ast.generics.constraints) do
 		typeScope:addGenericConstraint(
 			constraint.parameter.name,
-			view:astToPlainConstraint(constraint.constraint),
+			typeScope:astToPlainConstraint(constraint.constraint),
 			constraint.parameter.location
 		)
 	end
-	error "TODO"
-end
 
--- RETURNS a compiled description of one interface
-local function compiledConstraint(ast, view)
-	assert(ast.tag == "interface-definition")
-
-	error "TODO"
+	if group == "class" then
+		return ClassSkeleton.new(typeScope, ast)
+	elseif group == "union" then
+		return UnionSkeleton.new(typeScope, ast)
+	elseif group == "interface" then
+		return InterfaceSkeleton.new(typeScope, ast)
+	end
+	error "unreachable"
 end
 
 -- RETURNS an IR program
@@ -2528,15 +2901,18 @@ local function semanticsBeta(sources, main)
 		end
 	end
 
-	-- Compile each source
-	local out = {
+	local skeletons = {
 		classes = {},
 		unions = {},
 		interfaces = {},
 	}
+
+	-- Compile each source
 	for _, source in ipairs(sources) do
 		-- Prepare this source's view into the universe
 		local view = SourceScope.new(astUniverse, source.package.name)
+
+		-- Bring all imports into scope
 		for _, import in ipairs(source.imports) do
 			if import.definition then
 				-- Importing a particular object
@@ -2551,13 +2927,14 @@ local function semanticsBeta(sources, main)
 			end
 		end
 
+		-- Create each object
 		for _, definition in ipairs(source.definitions) do
 			if definition.tag == "class-definition" then
-				table.insert(out.classes, compiledStructure(definition, view))
+				table.insert(skeletons.classes, skeletonStructure(view, definition))
 			elseif definition.tag == "union-definition" then
-				table.insert(out.unions, compiledStructure(definition, view))
+				table.insert(skeletons.unions, skeletonStructure(view, definition))
 			elseif definition.tag == "interface-definition" then
-				table.insert(out.interfaces, compiledConstraint(definition, view))
+				table.insert(skeletons.interfaces, skeletonStructure(view, definition))
 			else
 				error("unhandled definition ast `" .. definition.tag .. "`")
 			end

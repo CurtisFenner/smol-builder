@@ -1,0 +1,12 @@
+package test;
+
+interface M[#T] {
+}
+
+interface I[#T | #T is M[#Self]] {
+}
+
+class Test {
+	static main() Unit {
+	}
+}

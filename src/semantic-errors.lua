@@ -43,7 +43,7 @@ function Report.WRONG_ARITY(p)
 		p.definitionLocation,
 		"to take exactly ",
 		p.expectedArity,
-		" type arguments.",
+		" type argument(s).",
 		"\nHowever, you provide ",
 		p.givenArity,
 		" ",

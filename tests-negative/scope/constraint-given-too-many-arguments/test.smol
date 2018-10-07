@@ -1,0 +1,14 @@
+package test;
+
+interface I[#T] {
+
+}
+
+class Bar[#Y | #Y is I[Test, Test]] {
+
+}
+
+class Test {
+	static main() Unit {
+	}
+}

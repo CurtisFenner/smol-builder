@@ -1,0 +1,11 @@
+package test;
+
+class Bar {}
+
+class Foo[#T | #T is Bar] {
+}
+
+class Test {
+	static main() Unit {
+	}
+}
