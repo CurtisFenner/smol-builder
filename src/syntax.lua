@@ -96,7 +96,7 @@ local K_SELF = LEXEME "#Self"
 
 -- PARSER for token tag ("typename", "identifier", "operator", etc)
 local function TOKEN(tokenType, field)
-	assertis(tokenType, "string")
+	assert(type(tokenType) == "string")
 	assert(type(field) == "string" or field == nil)
 
 	return function(stream, parsers)
@@ -527,7 +527,7 @@ local parsers = {
 		function(x)
 			-- XXX: no precedence yet; reject unparenthesized
 			local out = x.base
-			assertis(out.tag, "string")
+			assert(type(out.tag) == "string")
 
 			local isa = x.isa
 

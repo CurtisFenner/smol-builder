@@ -1,0 +1,8 @@
+package test;
+
+import test;
+
+class Test {
+	static main() Unit {
+	}
+}

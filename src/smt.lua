@@ -399,10 +399,6 @@ local toCNF
 -- RETURNS a CNF as a Rope of lists of literals
 -- assignments: [][]("*" | true | false)
 local function toCNFFromBreakup(theory, terms, assignments, normalization)
-	-- assertis(theory, "Theory")
-	-- assertis(terms, listType(theory.assertion_t))
-	-- assert(1 <= #assignments)
-
 	local cnfs = {}
 	for _, assignment in ipairs(assignments) do
 		local clauses = Rope.empty()
@@ -455,12 +451,6 @@ end
 -- RETURNS a CNF description equivalent to (term == target)
 -- A CNF expression is Rope [](term, boolean).
 function toCNF(theory, bigTerm, target, normalization)
-	-- assertis(theory, "Theory")
-	-- assertis(bigTerm, theory.assertion_t)
-
-	-- assert(type(target) == "boolean")
-	-- assert(type(normalization) == "table")
-
 	local terms, assignments = theory:breakup(bigTerm, target)
 	if not terms then
 		-- Ask the theory for a key to normalize the term
@@ -531,9 +521,6 @@ end
 -- RETURNS false when no such satisfaction exists
 -- MODIFIES cnf to strengthen its clauses
 local function cnfSAT(theory, cnf, meta, initialModel)
-	assertis(theory, "Theory")
-	assertis(initialModel, "TheoryModel")
-
 	local modelStack = {[0] = initialModel}
 	local stack = {}
 

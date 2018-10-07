@@ -216,7 +216,7 @@ function CProgram:getClosure(rt, pts)
 		return self._root:getClosure(rt, pts)
 	end
 
-	assertis(rt, "string")
+	assert(type(rt) == "string")
 	assertis(pts, listType "string")
 
 	local parameters = {"void*", table.unpack(pts)}
@@ -430,7 +430,7 @@ local TAG_TYPE = "uint32_t"
 
 -- RETURNS a string representing a C identifier for a Smol variable or parameter
 local function localName(name)
-	assertis(name, "string")
+	assert(type(name) == "string")
 	name = name:gsub(":", "_")
 
 	return "smol_local_" .. name
@@ -452,7 +452,7 @@ end
 
 -- RETURNS a C type name
 local function compoundStructName(name)
-	assertis(name, "string")
+	assert(type(name) == "string")
 
 	if BUILTIN_NAME_MAP[name] then
 		return "smol_" .. name .. "_T"
@@ -469,7 +469,7 @@ end
 
 -- RETURNS a string
 local function cEncodedString(value)
-	assertis(value, "string")
+	assert(type(value) == "string")
 
 	local out = {}
 	local safe = "[#_A-Za-z0-9 +-^*/:.,?!%%%[%]]"
@@ -520,7 +520,7 @@ end
 
 -- RETURNS a C type name
 local function interfaceStructName(name)
-	assertis(name, "string")
+	assert(type(name) == "string")
 	assert(name:find(":"))
 
 	return "smol_interface_" .. name:gsub(":", "_") .. "_T"
@@ -528,7 +528,7 @@ end
 
 -- RETURNS a C identifier
 local function vtableMemberName(name)
-	assertis(name, "string")
+	assert(type(name) == "string")
 	assert(not name:find("[:.]"))
 
 	return "d_smol_" .. name
@@ -547,8 +547,7 @@ end
 -- RETURNS name, type as strings
 -- MODIFIES program
 local function generateVTable(a, program, info)
-	assertis(a, "VTableIR")
-	assertis(program, "object")
+	assertis(program)
 	assertis(info, recordType {
 		constraints = mapType("string", recordType {
 			members = listType "Signature",

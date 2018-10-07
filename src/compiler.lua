@@ -43,7 +43,6 @@ function quit(first, ...)
 			rest[i] = tostring(rest[i])
 		elseif type(rest[i]) ~= "string" then
 			assert(rest[i] ~= nil, "rest[i] ~= nil")
-			assertis(rest[i], "Location")
 			rest[i] = showLocation(rest[i])
 		end
 	end
@@ -69,10 +68,9 @@ local LOCATION_MODE = "column"
 -- RETURNS a string representing the location, respecting the command line
 -- location mode
 function showLocation(location)
-	assertis(location, "Location")
-
 	local from, to = location.from, location.to
 	local source = location.file.lines
+	assert(from and to and source)
 
 	-- Compute human-readable description of location
 	local contextLines = {}
