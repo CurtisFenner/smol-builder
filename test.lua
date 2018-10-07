@@ -61,6 +61,7 @@ local remainingArguments = arg[3] or ""
 --------------------------------------------------------------------------------
 
 local function shell(command)
+	print(command)
 	local status, _, code = os.execute(command)
 	if status == true then
 		-- Lua 5.2 returns true|nil, reason, status
@@ -84,6 +85,40 @@ local function ls(directory)
 		table.insert(contents, line)
 	end
 	return contents
+end
+
+local function c99(files, bin)
+	local FLAGS = {
+		"-g3",
+		"-pedantic",
+		"-std=c99",
+		"-Werror",
+		"-Wall",
+		"-Wextra",
+		"-Wconversion",
+
+		-- Only show one error
+		"-Wfatal-errors",
+
+		-- Disable unhelpful warnings
+		"-Wno-unused-parameter",
+		"-Wno-unused-but-set-variable",
+		"-Wno-unused-variable",
+	}
+
+	local cmd = table.concat {
+		"gcc ",
+		table.concat(FLAGS, " "),
+		" ",
+		"\"" .. table.concat(files, "\", \"") .. "\"",
+		" ",
+		"-o ",
+		"\"",
+		bin,
+		"\"",
+	}
+
+	return shell(cmd)
 end
 
 --------------------------------------------------------------------------------
@@ -113,7 +148,7 @@ local function printHeader(text, symbol, align)
 end
 
 -- Converts tabs to 4 spaces in a string that doesn't contain newlines
-function string.spaces(s)
+local function spaces(s)
 	assert(not s:find("\n"))
 	local out = ""
 	for i = 1, #s do
@@ -133,7 +168,7 @@ local function printBox(lines)
 	local bar = "+" .. string.rep("-", WIDTH-2) .. "+"
 	local out = {bar}
 	for _, line in ipairs(lines) do
-		local row = string.spaces("|\t" .. line)
+		local row = spaces("|\t" .. line)
 		row = row .. string.rep(" ", WIDTH - 1 - #row) .. "|"
 		table.insert(out, row)
 	end
@@ -260,25 +295,8 @@ if mode ~= "-" then
 			if status ~= 0 then
 				FAIL {name = "+ " .. test, expected = 0, got = status}
 			else
-				local bin = "\"\"tests-positive" .. SEP .. test .. SEP .. "bin\"\""
-				local flags = {
-					"-g3",
-					"-pedantic",
-					"-std=c99",
-					"-Werror",
-					"-Wall",
-					"-Wextra",
-					"-Wconversion",
-
-					-- Only show one error
-					"-Wfatal-errors",
-
-					-- Disable unhelpful warnings
-					"-Wno-unused-parameter",
-					"-Wno-unused-but-set-variable",
-					"-Wno-unused-variable",
-				}
-				local compiles = shell("gcc " .. table.concat(flags, " ") .. " output.c -o " .. bin)
+				local bin = path {"tests-positive", test, "bin"}
+				local compiles = c99({"output.c"}, bin)
 				if compiles then
 					local outFile = path {"tests-positive", test, "out.last"}
 					local runs = shell("" .. bin .. " > " .. outFile)
