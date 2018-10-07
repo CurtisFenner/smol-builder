@@ -639,19 +639,20 @@ local function skeletonStructure(view, ast)
 	end
 
 	if group == "class" then
-		return ClassSkeleton.new(typeScope, ast)
+		return group, ClassSkeleton.new(typeScope, ast)
 	elseif group == "union" then
-		return UnionSkeleton.new(typeScope, ast)
+		return group, UnionSkeleton.new(typeScope, ast)
 	elseif group == "interface" then
-		return InterfaceSkeleton.new(typeScope, ast)
+		return group, InterfaceSkeleton.new(typeScope, ast)
 	end
 	error "unreachable"
 end
 
--- RETURNS an IR program
-local function semanticsBeta(sources, main)
-	assert(type(main) == "string")
+--------------------------------------------------------------------------------
 
+local ProgramSkeleton = {}
+
+function ProgramSkeleton.new(sources)
 	-- Collect the universe of definitions as ASTs
 	local astUniverse = DefinitionASTUniverse.new()
 	for _, source in ipairs(sources) do
@@ -663,10 +664,12 @@ local function semanticsBeta(sources, main)
 		end
 	end
 
-	local skeletons = {
-		classes = {},
-		unions = {},
-		interfaces = {},
+	local instance = {
+		_objects = {
+			class = {},
+			union = {},
+			interface = {},
+		},
 	}
 
 	-- Compile each source
@@ -691,18 +694,24 @@ local function semanticsBeta(sources, main)
 
 		-- Create each object
 		for _, definition in ipairs(source.definitions) do
-			if definition.tag == "class-definition" then
-				table.insert(skeletons.classes, skeletonStructure(view, definition))
-			elseif definition.tag == "union-definition" then
-				table.insert(skeletons.unions, skeletonStructure(view, definition))
-			elseif definition.tag == "interface-definition" then
-				table.insert(skeletons.interfaces, skeletonStructure(view, definition))
-			else
-				error("unhandled definition ast `" .. definition.tag .. "`")
-			end
+			local group, structure = skeletonStructure(view, definition)
+			local packageName = view:getPackage()
+			local definitionName = definition.name
+			
+			instance._objects[group][packageName] = instance._objects[group][packageName] or {}
+			instance._objects[group][packageName][definitionName] = structure
 		end
 	end
-	
+
+	return setmetatable(instance, {__index = ProgramSkeleton})
+end
+
+-- RETURNS an IR program
+local function semanticsBeta(sources, main)
+	assert(type(main) == "string")
+
+	local program = ProgramSkeleton.new(sources)
+
 	error "TODO: Cook results."
 end
 
