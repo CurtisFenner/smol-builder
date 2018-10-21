@@ -46,6 +46,8 @@ function DefinitionASTUniverse:definitionAST(package, name, ast)
 		ast = ast,
 		fullName = package .. ":" .. name,
 		view = false,
+		package = package,
+		name = name,
 	}
 end
 
@@ -196,6 +198,97 @@ end
 
 --------------------------------------------------------------------------------
 
+local function showPlainType(t)
+	assert(type(t.tag) == "string")
+
+	if t.tag == "type-self-plain" then
+		return "#Self"
+	elseif t.tag == "type-keyword-plain" then
+		return t.name
+	elseif t.tag == "type-generic-plain" then
+		return "#" .. t.name
+	elseif t.tag == "type-object-plain" then
+		local prefix = t.object.package .. ":" .. t.object.object
+		if #t.arguments == 0 then
+			return prefix
+		end
+		local arguments = {}
+		for _, argument in ipairs(t.arguments) do
+			table.insert(arguments, showPlainType(argument))
+		end
+		return prefix .. "[" .. table.concat(arguments, ", ") .. "]"
+	end
+
+	error("unreachable")
+end
+
+local function showPlainConstraint(t)
+	assert(type(t.tag) == "string")
+
+	if t.tag == "constraint-plain-interface" then
+		local prefix = t.object.package .. ":" .. t.object.object
+		if #t.arguments == 0 then
+			return prefix
+		end
+		local arguments = {}
+		for _, argument in ipairs(t.arguments) do
+			table.insert(arguments, showPlainType(argument))
+		end
+		return prefix .. "[" .. table.concat(arguments, ", ") .. "]"
+	end
+
+	error("unreachable")
+end
+
+-- RETURNS a plain type
+local function substitutePlainType(mapping, t)
+	assert(type(t.tag) == "string")
+
+	if t.tag == "type-self-plain" then
+		assert(mapping.Self)
+		return mapping.Self
+	elseif t.tag == "type-keyword-plain" then
+		return t
+	elseif t.tag == "type-generic-plain" then
+		assert(mapping[t.name])
+		return mapping[t.name]
+	elseif t.tag == "type-object-plain" then
+		local arguments = {}
+		for _, argument in ipairs(t.arguments) do
+			table.insert(arguments, substitutePlainType(mapping, argument))
+		end
+
+		return {
+			tag = "type-object-plain",
+			object = t.object,
+			arguments = arguments,
+			location = t.location,
+		}
+	end
+
+	error("unhandled plain type tag `" .. t.tag .. "`")
+end
+
+-- RETURNS a plain constraint
+local function substitutePlainConstraint(mapping, constraint)
+	assert(type(constraint.tag) == "string", "constraint.tag is string")
+
+	if constraint.tag == "constraint-plain-interface" then
+		local arguments = {}
+		for _, argument in ipairs(constraint.arguments) do
+			table.insert(arguments, substitutePlainType(mapping, argument))
+		end
+		return {
+			tag = "constraint-plain-interface",
+			object = constraint.object,
+			arguments = arguments,
+			location = constraint.location,
+		}
+	end
+
+	error("unhandled plain constraint tag `" .. constraint.tag .. "`")
+end
+
 local TypeScope = {}
 
 -- RETURNS a new TypeScope made from the current view
@@ -203,6 +296,7 @@ function TypeScope.fromSource(view)
 	local instance = {
 		_sourceView = view,
 		_generics = {},
+		_genericList = {},
 
 		-- The constraint to use for `#Self`.
 		-- `false` indicates that `#Self` is illegal in this scope.
@@ -212,11 +306,24 @@ function TypeScope.fromSource(view)
 	return setmetatable(instance, {__index = TypeScope})
 end
 
+-- RETURNS a list of plain generic type objects.
+-- Use sparingly! This class can automatically substitute arguments.
+function TypeScope:dumpPlainGenerics()
+	local variables = {}
+	for _, name in ipairs(self._genericList) do
+		table.insert(variables, {
+			tag = "type-generic-plain",
+			name = name,
+		})
+	end
+	return variables
+end
+
 -- RETURNS nothing
 -- MODIFIES this
 function TypeScope:setSelf(interface)
 	assert(type(interface.package) == "string")
-	assert(type(interface.name) == "string")
+	assert(type(interface.object) == "string")
 
 	self._self = interface
 end
@@ -240,10 +347,10 @@ function TypeScope:defineGeneric(index, name, location)
 	end
 
 	self._generics[name] = {
-		index = index,
 		location = location,
 		constraints = {},
 	}
+	table.insert(self._genericList, name)
 end
 
 -- RETURNS nothing
@@ -265,11 +372,51 @@ function TypeScope:addGenericConstraint(name, plainConstraint, variableLocation)
 	table.insert(self._generics[name].constraints, plainConstraint)
 end
 
+-- RETURNS a function mapping plain types, for use by the containing skeleton
+function TypeScope:makeConstraintSubstituter(arguments)
+	assert(#arguments == #self._genericList)
+
+	local mapping = {}
+	for i, name in ipairs(self._genericList) do
+		mapping[name] = arguments[i]
+	end
+
+	return function(t)
+		return substitutePlainConstraint(mapping, t)
+	end
+end
+
+-- RETURNS a list of the constraints required, given the arguments.
+function TypeScope:getRequiredConstraints(arguments)
+	assert(#arguments == #self._genericList)
+
+	local mapping = {}
+	for i, name in ipairs(self._genericList) do
+		mapping[name] = arguments[i]
+	end
+
+	local required = {}
+	for i, name in ipairs(self._genericList) do
+		for _, constraint in ipairs(self._generics[name].constraints) do
+			table.insert(required, {
+				of = arguments[i],
+				constraint = substitutePlainConstraint(mapping, constraint),
+				cause = "object `" .. "?" .. "`",
+				component = "its " .. i .. "th type parameter `#" .. name .. "`",
+				requiredLocation = constraint.location or "TODO",
+				neededLocation = arguments[i].location or "TODO",
+			})
+		end
+	end
+
+	return required
+end
+
 function TypeScope:_getObject(package, name, location)
 	return self._sourceView:getObject(package, name, location)
 end
 
--- RETURNS a new plain-constraint for the given object
+-- RETURNS a new plain-type for the given object
 -- REPORTS when types mentioned in this are not visible or have the wrong arity
 -- NOTE: Does NOT report unsatisfied constraints
 function TypeScope:astToPlainType(ast)
@@ -281,13 +428,12 @@ function TypeScope:astToPlainType(ast)
 		end
 
 		return {
-			tag = "type-plain-self",
-			interface = self._self,
+			tag = "type-self-plain",
 		}
 	elseif ast.tag == "type-keyword" then
 		-- TODO: disallow Never, etc
 		return {
-			tag = "type-plain-keyword",
+			tag = "type-keyword-plain",
 			name = ast.name,
 		}
 	elseif ast.tag == "generic" then
@@ -299,7 +445,7 @@ function TypeScope:astToPlainType(ast)
 		end
 
 		return {
-			tag = "type-plain-generic",
+			tag = "type-generic-plain",
 			name = ast.name,
 		}
 	elseif ast.tag == "concrete-type" then
@@ -329,10 +475,10 @@ function TypeScope:astToPlainType(ast)
 		end
 
 		return {
-			tag = "type-plain",
+			tag = "type-object-plain",
 			object = {
 				package = info.package,
-				name = info.name,
+				object = info.name,
 			},
 			arguments = arguments,
 		}
@@ -377,10 +523,18 @@ function TypeScope:astToPlainConstraint(ast)
 		tag = "constraint-plain-interface",
 		object = {
 			package = info.package,
-			name = info.name,
+			object = info.name,
 		},
 		arguments = arguments,
 	}
+end
+
+-- RETURNS true when `supplied` satisfies `required`
+local function plainSatisfiesConstraint(supplied, required)
+	assert(type(supplied.tag) == "string")
+	assert(type(required.tag) == "string")
+
+	return showPlainConstraint(supplied) == showPlainConstraint(required)
 end
 
 --------------------------------------------------------------------------------
@@ -450,6 +604,10 @@ function InterfaceSkeleton.new(typeScope, ast)
 	end
 
 	return setmetatable(instance, {__index = InterfaceSkeleton})
+end
+
+function InterfaceSkeleton:genericRequirements(plainArguments)
+	return self._typeScope:getRequiredConstraints(plainArguments)
 end
 
 --------------------------------------------------------------------------------
@@ -527,6 +685,10 @@ function UnionSkeleton.new(typeScope, ast)
 	return setmetatable(instance, {__index = UnionSkeleton})
 end
 
+function UnionSkeleton:genericRequirements(plainArguments)
+	return self._typeScope:getRequiredConstraints(plainArguments)
+end
+
 --------------------------------------------------------------------------------
 
 local ClassSkeleton = {}
@@ -543,12 +705,14 @@ function ClassSkeleton.new(typeScope, ast)
 		_implements = {},
 	}
 
-	local memberLocations = {}
-
+	-- Record implements claims
 	for _, implements in ipairs(ast.implements) do
 		table.insert(instance._implements, typeScope:astToPlainConstraint(implements))
 	end
 
+	local memberLocations = {}
+
+	-- Record fields
 	for _, fieldAST in ipairs(ast.fields) do
 		local name = fieldAST.name.lexeme
 
@@ -568,6 +732,7 @@ function ClassSkeleton.new(typeScope, ast)
 		}
 	end
 
+	-- Record methods and statics
 	for _, methodAST in ipairs(ast.methods) do
 		local name = methodAST.signature.name.lexeme
 
@@ -602,6 +767,21 @@ function ClassSkeleton.new(typeScope, ast)
 	return setmetatable(instance, {__index = ClassSkeleton})
 end
 
+-- RETURNS a list of records with TODO
+function ClassSkeleton:genericRequirements(plainArguments)
+	return self._typeScope:getRequiredConstraints(plainArguments)
+end
+
+-- RETURNS a list of plain constraints
+function ClassSkeleton:implements(arguments)
+	local substituter = self._typeScope:makeConstraintSubstituter(arguments)
+	local list = {}
+	for _, claim in ipairs(self._implements) do
+		table.insert(list, substituter(claim))
+	end
+	return list
+end
+
 --------------------------------------------------------------------------------
 
 -- RETURNS a skeletal description of one class/union
@@ -625,7 +805,7 @@ local function skeletonStructure(view, ast)
 		-- `#Self` is only allowed in interfaces
 		typeScope:setSelf {
 			package = view:getPackage(),
-			name = ast.name,
+			object = ast.name,
 		}
 	end
 
@@ -639,11 +819,11 @@ local function skeletonStructure(view, ast)
 	end
 
 	if group == "class" then
-		return group, ClassSkeleton.new(typeScope, ast)
+		return group, ClassSkeleton.new(typeScope, ast), typeScope
 	elseif group == "union" then
-		return group, UnionSkeleton.new(typeScope, ast)
+		return group, UnionSkeleton.new(typeScope, ast), typeScope
 	elseif group == "interface" then
-		return group, InterfaceSkeleton.new(typeScope, ast)
+		return group, InterfaceSkeleton.new(typeScope, ast), typeScope
 	end
 	error "unreachable"
 end
@@ -694,23 +874,365 @@ function ProgramSkeleton.new(sources)
 
 		-- Create each object
 		for _, definition in ipairs(source.definitions) do
-			local group, structure = skeletonStructure(view, definition)
+			local group, structure, extra = skeletonStructure(view, definition)
 			local packageName = view:getPackage()
-			local definitionName = definition.name
-			
-			instance._objects[group][packageName] = instance._objects[group][packageName] or {}
-			instance._objects[group][packageName][definitionName] = structure
+			local objectName = definition.name
+
+			local group = instance._objects[group]
+			group[packageName] = group[packageName] or {}
+			group[packageName][objectName] = {
+				object = structure,
+				extra = extra,
+			}
 		end
 	end
 
 	return setmetatable(instance, {__index = ProgramSkeleton})
 end
 
--- RETURNS an IR program
+-- REQUIRES the object exist
+-- RETURNS the object's skeleton
+function ProgramSkeleton:getObject(object)
+	local packageName = object.package
+	local objectName = object.object
+	assert(packageName and objectName)
+
+	if not self._objects.class[packageName] then
+		self._objects.class[packageName] = {}
+	end
+	if not self._objects.union[packageName] then
+		self._objects.union[packageName] = {}
+	end
+	if not self._objects.interface[packageName] then
+		self._objects.interface[packageName] = {}
+	end
+
+	local class = self._objects.class[packageName][objectName]
+	local union = self._objects.union[packageName][objectName]
+	local interface = self._objects.interface[packageName][objectName]
+
+	return (class or union or interface).object or error "no such object"
+end
+
+-- RETURNS a set of classes as {packageName => {objectName => {
+--     object = class skeleton, extra = typeScope
+-- }}
+function ProgramSkeleton:getClasses()
+	return self._objects.class
+end
+
+-- RETURNS a set of interfaces as {packageName => {objectName => {
+--     object = interface skeleton, extra = typeScope
+-- }}
+function ProgramSkeleton:getInterfaces()
+	return self._objects.interface
+end
+
+--------------------------------------------------------------------------------
+
+local BlockScope = {}
+
+-- RETURNS a new BlockScope
+function BlockScope.new(skeleton, context)
+	assert(skeleton, "skeleton")
+	assert(context, "context")
+	assert(context.newObject == false or context.newObject.objectName)
+	assert(type(context.bang) == "boolean")
+
+	local instance = {
+		_skeleton = skeleton,
+		_stack = {},
+
+		-- The name of the object to use, or false if `new()` cannot be used
+		_newObject = context.newObject,
+
+		-- Whether or not ! actions can be used
+		_bang = context.bang,
+	}
+
+	return setmetatable(instance, {__index = BlockScope})
+end
+
+-- RETURNS nothing
+-- MODIFIES this
+function BlockScope:defineVariable(name, location, type)
+	assert(type(name) == "string")
+	assert(location)
+	assert(type.tag)
+
+	if self._stack[name] then
+		Report.VARIABLE_DEFINED_TWICE {
+			name = name,
+			first = self._stack[name].location,
+			second = location,
+		}
+	end
+
+	self._stack[name] = {
+		location = location,
+		type = type,
+	}
+end
+
+REGISTER_TYPE("Type", choiceType(
+	recordType {
+		tag = constantType "type-keyword",
+		name = "string",
+	},
+	recordType {
+		tag = constantType "type-generic",
+		name = "string",
+	},
+	recordType {
+		tag = constantType "type-object",
+		object = recordType {
+			package = "string",
+			object = "string",
+		},
+		arguments = listType "Type",
+	},
+	recordType {
+		tag = constantType "type-self",
+	}
+))
+
+-- RETURNS nothing
+-- REPORTS when a problem is found
+function BlockScope:checkTypeSatisfies(requirement, typeScope)
+	assert(requirement.of and requirement.of.tag)
+	assert(requirement.constraint and requirement.constraint.tag)
+	assert(requirement.cause and requirement.component)
+	assert(requirement.requiredLocation)
+	assert(requirement.neededLocation)
+
+	if requirement.of.tag == "type-generic-plain" then
+		local satisfied = false
+		-- TODO: remove private access
+		local supplied = typeScope._generics[requirement.of.name]
+		assert(supplied)
+		for _, constraint in ipairs(supplied.constraints) do
+			if plainSatisfiesConstraint(constraint, requirement.constraint) then
+				return
+			end
+		end
+
+		Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
+			cause = requirement.cause,
+			component = requirement.component,
+			constraint = showPlainConstraint(requirement.constraint),
+			type = showPlainType(requirement.of),
+			requiredLocation = requirement.requiredLocation,
+			neededLocation = requirement.neededLocation,
+		}
+	elseif requirement.of.tag == "type-object-plain" then
+		local object = self._skeleton:getObject(requirement.of.object)
+		assert(object.tag == "class-skeleton" or object.tag == "union-skeleton")
+		
+		local supplies = object:implements(requirement.of.arguments)
+		for _, supplied in ipairs(supplies) do
+			if plainSatisfiesConstraint(supplied, requirement.constraint) then
+				return
+			end
+		end
+
+		Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
+			cause = requirement.cause,
+			component = requirement.component,
+			constraint = showPlainConstraint(requirement.constraint),
+			type = showPlainType(requirement.of),
+			requiredLocation = requirement.requiredLocation,
+			neededLocation = requirement.neededLocation,
+		}
+	end
+
+	error("unhandled type tag `" .. requirement.of.tag .. "`")
+end
+
+-- RETURNS a Type
+-- REPORTS when the plain type is not valid (e.g., type arguments don't
+-- satisfy the constraints required by the base type)
+function BlockScope:upgradePlainType(plain, typeScope)
+	assert(typeScope)
+
+	if plain.tag == "type-self-plain" then
+		return {
+			tag = "type-self",
+		}
+	elseif plain.tag == "type-keyword-plain" then
+		return {
+			tag = "type-keyword",
+			name = plain.name,
+		}
+	elseif plain.tag == "type-generic-plain" then
+		return {
+			tag = "type-generic",
+			name = plain.name,
+		}
+	elseif plain.tag == "type-object-plain" then
+		local arguments = {}
+		for _, argumentPlain in ipairs(plain.arguments) do
+			table.insert(arguments, self:upgradePlainType(argumentPlain, typeScope))
+		end
+
+		assert(plain.object.object and plain.object.package)
+		local object = self._skeleton:getObject(plain.object)
+		assert(object.tag == "class-skeleton" or object.tag == "union-skeleton")
+
+		local requirements = object:genericRequirements(plain.arguments)
+		for _, requirement in ipairs(requirements) do
+			self:checkTypeSatisfies(requirement, typeScope)
+		end
+
+		return {
+			tag = "type-object",
+			object = plain.object,
+			arguments = arguments,
+		}
+	end
+	error("unhandled plain type tag `" .. plain.tag .. "`")
+end
+
+-- RETURNS a Constraint
+-- REPORTS when the plain constraint is not valid (e.g., type arguments don't
+-- satisfy the constraints required by the base interface)
+function BlockScope:upgradePlainConstraint(plain, typeScope)
+	assert(typeScope)
+
+	if plain.tag == "constraint-plain-interface" then
+		local arguments = {}
+		for _, argumentPlain in ipairs(plain.arguments) do
+			table.insert(arguments, self:upgradePlainType(argumentPlain, typeScope))
+		end
+
+		assert(plain.object.object and plain.object.package)
+		local object = self._skeleton:getObject(plain.object)
+		assert(object.tag == "interface-skeleton")
+	
+		local requirements = object:genericRequirements(plain.arguments)
+		for _, requirement in ipairs(requirements) do
+			self:checkTypeSatisfies(requirement, typeScope)
+		end
+
+		return {
+			tag = "constraint-object",
+			object = plain.object,
+			arguments = arguments,
+		}
+	end
+
+	error("unhanled plain constraint tag `" .. plain.tag .. "`")
+end
+
+--------------------------------------------------------------------------------
+
+-- RETURNS a Statement
+local function compileStatement(scope, ast)
+	error "TODO"
+end
+
+-- RETURNS a Class, a list of functions
+local function compileClass(skeleton, classInfo)
+	assert(classInfo.object and classInfo.extra)
+	local objectScope = BlockScope.new(skeleton, {
+		newObject = false,
+		bang = false,
+	})
+
+	local class = classInfo.object
+
+	-- Check the implements and generic constraints are well-formed
+	local genericContainer = classInfo.extra
+	local generics = genericContainer:dumpPlainGenerics()
+	local required1 = genericContainer:getRequiredConstraints(generics)
+	for _, requirement in ipairs(required1) do
+		-- TODO: avoid private access
+		objectScope:upgradePlainConstraint(requirement.constraint, class._typeScope)
+	end
+
+	local implementsClaims = class:implements(generics)
+	for _, claim in ipairs(implementsClaims) do
+		-- TODO: avoid private access
+		objectScope:upgradePlainConstraint(claim, class._typeScope)
+	end
+end
+
+
+-- RETURNS an Interface
+local function compileInterface(skeleton, interface)
+	assert(interface.object and interface.extra)
+	local objectScope = BlockScope.new(skeleton, {
+		newObject = false,
+		bang = false,
+	})
+
+	local genericContainer = interface.extra
+	local generics = genericContainer:dumpPlainGenerics()
+	local required = genericContainer:getRequiredConstraints(generics)
+	
+	-- Check that the generic constraints are well-formed
+	for _, requirement in ipairs(required) do
+		objectScope:upgradePlainConstraint(requirement.constraint, interface.object._typeScope)
+	end
+end
+
+-- RETURNS an IR program:
+-- {
+--     classes = [{
+--         packageName = string,
+--         objectName = string,
+--         fields = { string => Type },
+--     }],
+--     unions = [{
+--         packageName = string,
+--         objectName = string,
+--         variants = { string => Type }
+--     }],
+--     interfaces = [{
+--         packageName = string,
+--         objectName = string,
+--         arguments = [{packageName = string, objectName = string}],
+--         members = { string => plain signature }
+--         PRE-CONDITIONS?
+--         POST-CONDITIONS?
+--     }],
+--     functions = [{
+--         packageName = string,
+--         objectName = string,
+--         memberName = string,
+--         signature = plain signature,
+--         constraints = [ ??? ],
+--         body = statement,
+--         PRE-CONDITIONS?
+--         POST-CONDITIONS?
+--     }]
+--     main = {packageName, objectName, memberName = string}
+-- }
+-- Notes:
+-- Classes and unions are "unboxed" and do not list their constraints. Instead,
+-- constraints are passed to functions (possibly by closures for any "boxed"
+-- values)
 local function semanticsBeta(sources, main)
 	assert(type(main) == "string")
 
-	local program = ProgramSkeleton.new(sources)
+	local skeleton = ProgramSkeleton.new(sources)
+
+	local program = {}
+
+	program.classes = {}
+	for packageName, classes in pairs(skeleton:getClasses()) do
+		for className, class in pairs(classes) do
+			local struct, functions = compileClass(skeleton, class)
+			-- TODO
+		end
+	end
+
+	program.interfaces = {}
+	for packageName, interfaces in pairs(skeleton:getInterfaces()) do
+		for interfaceName, interface in pairs(interfaces) do
+			local struct = compileInterface(skeleton, interface)
+			-- TODO
+		end
+	end
 
 	error "TODO: Cook results."
 end

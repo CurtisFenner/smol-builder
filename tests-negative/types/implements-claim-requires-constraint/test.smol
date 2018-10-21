@@ -1,0 +1,13 @@
+package test;
+
+class Test {
+	static main() Unit {}
+}
+
+interface I {
+}
+
+interface J[#T | #T is I] {}
+
+class C is J[Test] {
+}

@@ -1,6 +1,6 @@
 package test;
 
-class RequiresIsFoo[#T | #T is IsFoo] {}
+interface RequiresIsFoo[#T | #T is IsFoo] {}
 
 interface IsFoo {}
 

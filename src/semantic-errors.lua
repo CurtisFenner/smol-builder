@@ -141,20 +141,20 @@ end
 
 function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 	quit(
-		"The type `",
-		p.container,
-		"` requires its ",
-		string.ordinal(p.nth),
-		" type-parameter to implement ",
-		p.constraint,
-		" ",
+		"The ",
 		p.cause,
+		" requires ",
+		p.component,
+		" to implement `",
+		p.constraint,
+		"` ",
+		p.requiredLocation,
 		"\nHowever, the type `",
 		p.type,
 		"` does not implement the interface `",
 		p.constraint,
 		"` ",
-		p.location
+		p.neededLocation
 	)
 end
 

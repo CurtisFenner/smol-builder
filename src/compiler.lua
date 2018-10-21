@@ -35,7 +35,7 @@ local ansi = import "ansi.lua"
 function quit(first, ...)
 	local rest = {...}
 	for i = 1, select("#", ...) do
-		assert(rest[i] ~= nil)
+		assert(rest[i] ~= nil, "missing arg " .. i + 1)
 	end
 
 	for i = 1, #rest do
