@@ -177,7 +177,7 @@ local parsers = {
 	["class-definition"] = parser.composite {
 		tag = "class-definition",
 		{"_", K_CLASS},
-		{"name", T_TYPENAME, "a type name"},
+		{"name", TR_TYPENAME, "a type name"},
 		{
 			"generics",
 			parserOtherwise(parser.query "generics?", {
@@ -205,7 +205,7 @@ local parsers = {
 	["union-definition"] = parser.composite {
 		tag = "union-definition",
 		{"_", K_UNION},
-		{"name", T_TYPENAME, "a type name"},
+		{"name", TR_TYPENAME, "a type name"},
 		{
 			"generics",
 			parserOtherwise(parser.query "generics?", {
@@ -224,7 +224,7 @@ local parsers = {
 	["interface-definition"] = parser.composite {
 		tag = "interface-definition",
 		{"_", K_INTERFACE},
-		{"name", T_TYPENAME, "a type name"},
+		{"name", TR_TYPENAME, "a type name"},
 		{
 			"generics",
 			parserOtherwise(parser.query "generics?", {

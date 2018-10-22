@@ -1,4 +1,3 @@
--- Curtis Fenner
 -- ANSI formatting helpers
 
 local ansi = {}

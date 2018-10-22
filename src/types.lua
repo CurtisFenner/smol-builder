@@ -1,4 +1,3 @@
--- Curtis Fenner, copyright (C) 2017
 -- Defines
 -- + `show`
 -- Defines
@@ -28,7 +27,8 @@ local specialRepresentation = {
 for i = 0, 31 do
 	local c = string.char(i)
 	if not specialRepresentation[c] then
-		specialRepresentation[c] = "\\" .. tostring(i):prepad("0", 3)
+		local digit = tostring(i)
+		specialRepresentation[c] = string.format("\\%03d", i)
 	end
 end
 for i = 128, 255 do

@@ -1,4 +1,3 @@
--- Curtis Fenner
 -- Source: https://github.com/CurtisFenner/lua-datastructures
 
 --------------------------------------------------------------------------------

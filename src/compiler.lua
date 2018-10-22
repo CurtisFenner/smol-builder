@@ -1,5 +1,4 @@
--- A transpiler for Smol -> ???
--- Curtis Fenner, copyright (C) 2017
+-- A transpiler for Smol -> C.
 
 local ARGV = arg
 
