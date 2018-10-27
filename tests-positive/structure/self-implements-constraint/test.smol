@@ -1,0 +1,13 @@
+package test;
+
+class Test {
+	static main() Unit {}
+}
+
+// Note: #Self is a type, not a constraint! It is the type implementing this
+// interface (thus it can be used as an argument to `RequiresI`)
+interface I[#K | #K is RequiresI[#Self]] {
+
+}
+
+interface RequiresI[#T | #T is I[#T]] {}

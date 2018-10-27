@@ -223,7 +223,7 @@ end
 local function showPlainConstraint(t)
 	assert(type(t.tag) == "string")
 
-	if t.tag == "constraint-plain-interface" then
+	if t.tag == "constraint-interface-plain" then
 		local prefix = t.object.package .. ":" .. t.object.object
 		if #t.arguments == 0 then
 			return prefix
@@ -271,13 +271,13 @@ end
 local function substitutePlainConstraint(mapping, constraint)
 	assert(type(constraint.tag) == "string", "constraint.tag is string")
 
-	if constraint.tag == "constraint-plain-interface" then
+	if constraint.tag == "constraint-interface-plain" then
 		local arguments = {}
 		for _, argument in ipairs(constraint.arguments) do
 			table.insert(arguments, substitutePlainType(mapping, argument))
 		end
 		return {
-			tag = "constraint-plain-interface",
+			tag = "constraint-interface-plain",
 			object = constraint.object,
 			arguments = arguments,
 			location = constraint.location,
@@ -301,7 +301,7 @@ function TypeScope.fromSource(view, objectDescription)
 
 		-- The constraint to use for `#Self`.
 		-- `false` indicates that `#Self` is illegal in this scope.
-		_self = false,
+		_selfConstraint = false,
 	}
 
 	return setmetatable(instance, {__index = TypeScope})
@@ -322,11 +322,19 @@ end
 
 -- RETURNS nothing
 -- MODIFIES this
-function TypeScope:setSelf(interface)
-	assert(type(interface.package) == "string")
-	assert(type(interface.object) == "string")
+function TypeScope:setSelfConstraint(constraint)
+	assert(type(constraint.tag) == "string")
+	assert(not self._selfConstraint, "self constraint has already been set")
 
-	self._self = interface
+	self._selfConstraint = constraint
+end
+
+-- RETURNS the plain type passed to :setSelf
+-- REQUIRES that self has bene set
+function TypeScope:getRawSelfConstraint()
+	assert(self._selfConstraint, "self constraint has not been set")
+
+	return self._selfConstraint
 end
 
 -- RETURNS nothing
@@ -360,7 +368,7 @@ end
 -- These constraints are TRUSTED and must be scanned again to produce errors!
 function TypeScope:addGenericConstraint(name, plainConstraint, variableLocation)
 	assert(type(name) == "string")
-	assert(plainConstraint.tag == "constraint-plain-interface")
+	assert(plainConstraint.tag == "constraint-interface-plain")
 	assert(variableLocation)
 
 	if not self._generics[name] then
@@ -424,7 +432,7 @@ end
 -- NOTE: Does NOT report unsatisfied constraints
 function TypeScope:astToPlainType(ast)
 	if ast.tag == "keyword-generic" then
-		if not self._self then
+		if not self._selfConstraint then
 			Report.SELF_OUTSIDE_INTERFACE {
 				location = ast.location,
 			}
@@ -527,7 +535,7 @@ function TypeScope:astToPlainConstraint(ast)
 	end
 
 	return {
-		tag = "constraint-plain-interface",
+		tag = "constraint-interface-plain",
 		object = {
 			package = info.package,
 			object = info.name,
@@ -817,9 +825,26 @@ local function skeletonStructure(view, ast, objectDescription)
 
 	if group == "interface" then
 		-- `#Self` is only allowed in interfaces
-		typeScope:setSelf {
-			package = view:getPackage(),
-			object = ast.name.lexeme,
+		local plainConstraint = {
+			tag = "constraint-interface-plain",
+			object = {},
+		}
+		local arguments = {}
+		for i, parameter in ipairs(ast.generics.parameters) do
+			table.insert(arguments, {
+				tag = "type-generic-plain",
+				name = parameter.name,
+				location = parameter.location,
+			})
+		end
+		typeScope:setSelfConstraint {
+			tag = "constraint-interface-plain",
+			object = {
+				package = view:getPackage(),
+				object = ast.name.lexeme,
+			},
+			arguments = arguments,
+			location = ast.name.location,
 		}
 	end
 
@@ -1031,15 +1056,12 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 				return
 			end
 		end
-
-		Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
-			cause = requirement.cause,
-			component = requirement.component,
-			constraint = showPlainConstraint(requirement.constraint),
-			type = showPlainType(requirement.of),
-			requiredLocation = requirement.requiredLocation,
-			neededLocation = requirement.neededLocation,
-		}
+	elseif requirement.of.tag == "type-self-plain" then
+		-- #Self implements only this interface
+		local supplied = typeScope:getRawSelfConstraint()
+		if plainSatisfiesConstraint(supplied, requirement.constraint) then
+			return
+		end
 	elseif requirement.of.tag == "type-object-plain" then
 		local object = self._skeleton:getObject(requirement.of.object)
 		assert(object.tag == "class-skeleton" or object.tag == "union-skeleton")
@@ -1050,18 +1072,18 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 				return
 			end
 		end
-
-		Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
-			cause = requirement.cause,
-			component = requirement.component,
-			constraint = showPlainConstraint(requirement.constraint),
-			type = showPlainType(requirement.of),
-			requiredLocation = requirement.requiredLocation,
-			neededLocation = requirement.neededLocation,
-		}
+	else
+		error("unhandled type tag `" .. requirement.of.tag .. "`")
 	end
 
-	error("unhandled type tag `" .. requirement.of.tag .. "`")
+	Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
+		cause = requirement.cause,
+		component = requirement.component,
+		constraint = showPlainConstraint(requirement.constraint),
+		type = showPlainType(requirement.of),
+		requiredLocation = requirement.requiredLocation,
+		neededLocation = requirement.neededLocation,
+	}
 end
 
 -- RETURNS a Type
@@ -1114,7 +1136,7 @@ end
 function BlockScope:upgradePlainConstraint(plain, typeScope)
 	assert(typeScope)
 
-	if plain.tag == "constraint-plain-interface" then
+	if plain.tag == "constraint-interface-plain" then
 		local arguments = {}
 		for _, argumentPlain in ipairs(plain.arguments) do
 			table.insert(arguments, self:upgradePlainType(argumentPlain, typeScope))
