@@ -239,17 +239,33 @@ local function showPlainConstraint(t)
 end
 
 -- RETURNS a plain type
+-- REQUIRES all #Self and generics are present in the mapping
+-- ENSURES return.location == t.location
 local function substitutePlainType(mapping, t)
 	assert(type(t.tag) == "string")
 
 	if t.tag == "type-self-plain" then
 		assert(mapping.Self)
-		return mapping.Self
+
+		-- Substitute in the current location
+		local obj = {}
+		for k, v in pairs(mapping.Self) do
+			obj[k] = v
+		end
+		obj.location = t.location
+		return obj
 	elseif t.tag == "type-keyword-plain" then
 		return t
 	elseif t.tag == "type-generic-plain" then
 		assert(mapping[t.name])
-		return mapping[t.name]
+
+		-- Substitute in the current location
+		local obj = {}
+		for k, v in pairs(mapping[t.name]) do
+			obj[k] = v
+		end
+		obj.location = t.location
+		return obj
 	elseif t.tag == "type-object-plain" then
 		local arguments = {}
 		for _, argument in ipairs(t.arguments) do
@@ -315,6 +331,7 @@ function TypeScope:dumpPlainGenerics()
 		table.insert(variables, {
 			tag = "type-generic-plain",
 			name = name,
+			location = self._generics[name].location,
 		})
 	end
 	return variables
@@ -409,13 +426,15 @@ function TypeScope:getRequiredConstraints(arguments, selfType)
 	local required = {}
 	for i, name in ipairs(self._genericList) do
 		for _, constraint in ipairs(self._generics[name].constraints) do
+			assert(constraint.location)
+			assert(arguments[i].location)
 			table.insert(required, {
 				of = arguments[i],
 				constraint = substitutePlainConstraint(mapping, constraint),
 				cause = self._objectDescription,
 				component = "its " .. i .. "th type parameter `#" .. name .. "`",
-				requiredLocation = constraint.location or "TODO",
-				neededLocation = arguments[i].location or "TODO",
+				requiredLocation = constraint.location,
+				neededLocation = arguments[i].location,
 			})
 		end
 	end
@@ -1046,6 +1065,9 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 	assert(requirement.requiredLocation)
 	assert(requirement.neededLocation)
 
+	-- Extra information for the error message
+	local trail = {}
+
 	if requirement.of.tag == "type-generic-plain" then
 		local satisfied = false
 		-- TODO: remove private access
@@ -1055,10 +1077,12 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 			if plainSatisfiesConstraint(constraint, requirement.constraint) then
 				return
 			end
+			table.insert(trail, "\t" .. showPlainConstraint(constraint))
 		end
 	elseif requirement.of.tag == "type-self-plain" then
 		-- #Self implements only this interface
 		local supplied = typeScope:getRawSelfConstraint()
+		table.insert(trail, "\t" .. showPlainConstraint(supplied))
 		if plainSatisfiesConstraint(supplied, requirement.constraint) then
 			return
 		end
@@ -1072,8 +1096,17 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 				return
 			end
 		end
+	elseif requirement.of.tag == "type-keyword-plain" then
+		-- TODO: Keywords only implement built-in constraints
 	else
 		error("unhandled type tag `" .. requirement.of.tag .. "`")
+	end
+
+	if #trail ~= 0 then
+		table.insert(trail, 1, string.format(
+			"\nThe type `%s` implements the following constraints:",
+			showPlainType(requirement.of)
+		))
 	end
 
 	Report.TYPE_MUST_IMPLEMENT_CONSTRAINT {
@@ -1083,6 +1116,7 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 		type = showPlainType(requirement.of),
 		requiredLocation = requirement.requiredLocation,
 		neededLocation = requirement.neededLocation,
+		trail = table.concat(trail, "\n"),
 	}
 end
 
@@ -1145,10 +1179,10 @@ function BlockScope:upgradePlainConstraint(plain, typeScope)
 		assert(plain.object.object and plain.object.package)
 		local object = self._skeleton:getObject(plain.object)
 		assert(object.tag == "interface-skeleton")
-	
+
 		local requirements = object:genericRequirements(plain.arguments, {
 			tag = "type-self-plain",
-			location = object.anchorLocation,
+			location = plain.location,
 		})
 		for _, requirement in ipairs(requirements) do
 			self:checkTypeSatisfies(requirement, typeScope)
@@ -1284,6 +1318,7 @@ local function semanticsBeta(sources, main)
 		end
 	end
 
+	os.exit(2)
 	error "TODO: Cook results."
 end
 

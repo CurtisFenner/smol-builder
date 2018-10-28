@@ -55,8 +55,18 @@ local function showAdd(object, indent, out)
 			table.insert(line, "\n" .. string.rep("\t", indent) .. "\t[")
 			showAdd(key, indent + 1, line)
 			table.insert(line, "] = ")
-			if rawequal(key, "location") then
-				table.insert(line, "<location...>")
+			if rawequal(key, "location") and type(value) == "table" then
+				if value.file and value.from and value.to then
+					table.insert(line, ("<%s:%d:%d-%d:%d>"):format(
+						value.file.filename,
+						value.from.line,
+						value.from.column,
+						value.to.line,
+						value.to.column
+					))
+				else
+					showAdd(value, indent + 1, line)
+				end
 			else
 				showAdd(value, indent + 1, line)
 			end

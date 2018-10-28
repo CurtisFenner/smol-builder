@@ -4,8 +4,8 @@ class Test {
 	static main() Unit {}
 }
 
-// Note: #Self is a type, not a constraint! It is the type implementing this
-// interface (thus it can be used as an argument to `RequiresI`)
+// Note: #Self is a type, not a constraint!
+// However, #Self is I[#K] rather than I[#Self].
 interface I[#K | #K is RequiresI[#Self]] {
 
 }

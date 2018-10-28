@@ -173,8 +173,9 @@ function Report.TYPE_MUST_IMPLEMENT_CONSTRAINT(p)
 		p.type,
 		"` does not implement the interface `",
 		p.constraint,
-		"` as is required ",
-		p.neededLocation
+		"` as is needed ",
+		p.neededLocation,
+		p.trail or ""
 	)
 end
 
