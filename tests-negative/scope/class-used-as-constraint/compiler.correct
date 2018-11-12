@@ -1,0 +1,8 @@
+ERROR:
+Constraints must be interfaces.
+However, the class `test:Bar` is used as a constraint at test.smol:5:22
+	 4 | 
+	 5 | class Foo[#T | #T is Bar] {
+	   |                      ^^^   
+	 6 | }
+

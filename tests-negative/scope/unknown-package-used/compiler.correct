@@ -1,0 +1,8 @@
+ERROR:
+The package `alpha` has not been imported.
+However, you are trying to use it at test.smol:4:13
+	 3 | class Test {
+	 4 |     var foo alpha:Foo;
+	   |             ^^^^^^^^^ 
+	 5 | 
+

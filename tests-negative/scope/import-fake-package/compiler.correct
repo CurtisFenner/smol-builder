@@ -1,0 +1,8 @@
+ERROR:
+A package called `nosuch` has not been defined.
+However, you are trying to use it at test.smol:2:1
+	1 | package test;
+	2 | import nosuch:File;
+	  | ^^^^^^^^^^^^^^^^^^^
+	3 | 
+

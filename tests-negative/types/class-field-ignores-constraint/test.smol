@@ -1,0 +1,14 @@
+package test;
+
+class Test {
+	var f Foo[Int];
+	static main() Unit {}
+}
+
+class Foo[#T | #T is I] {
+
+}
+
+interface I {
+
+}

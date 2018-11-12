@@ -1,0 +1,13 @@
+ERROR:
+The definition `test:Test` was defined at test.smol:5:1
+	 4 | 
+	 5 | class Test {
+	   | ^^^^^^^^^^
+	 6 |     var t Test[Int];
+to take exactly 0 type argument(s).
+However, you provide 1 at test.smol:6:11
+	 5 | class Test {
+	 6 |     var t Test[Int];
+	   |           ^^^^^^^^^ 
+	 7 | 
+

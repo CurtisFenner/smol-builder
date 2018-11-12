@@ -1,0 +1,7 @@
+ERROR:
+The compiler expected another definition to finish source at test.smol:9:1
+	 8 | 
+	 9 | static other() Unit {}
+	   | ^^^^^^                
+	10 | 
+

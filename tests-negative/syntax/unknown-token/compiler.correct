@@ -1,0 +1,7 @@
+ERROR:
+The compiler could not recognize any token at test.smol:4:16
+	3 | class Test {
+	4 |     static main$() Unit {
+	  |                ^         
+	5 |         var x String = "foo";
+

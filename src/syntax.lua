@@ -176,16 +176,22 @@ local parsers = {
 	-- Represents a class
 	["class-definition"] = parser.composite {
 		tag = "class-definition",
-		{"_", K_CLASS},
-		{"name", TR_TYPENAME, "a type name"},
 		{
-			"generics",
-			parserOtherwise(parser.query "generics?", {
-				parameters = {},
-				constraints = {},
-			})
+			"header",
+			parser.composite {
+				tag = "class-header",
+				{"_", K_CLASS},
+				{"name", TR_TYPENAME, "a type name"},
+				{
+					"generics",
+					parserOtherwise(parser.query "generics?", {
+						parameters = {},
+						constraints = {},
+					})
+				},
+				{"implements", parserOtherwise(parser.query "implements?", {})},
+			},
 		},
-		{"implements", parserOtherwise(parser.query "implements?", {})},
 		{"_", K_CURLY_OPEN, "`{` to begin class body"},
 		{"fields", parser.query "field-definition*"},
 		{"methods", parser.query "method-definition*"},
@@ -204,16 +210,22 @@ local parsers = {
 	-- Represents a union
 	["union-definition"] = parser.composite {
 		tag = "union-definition",
-		{"_", K_UNION},
-		{"name", TR_TYPENAME, "a type name"},
 		{
-			"generics",
-			parserOtherwise(parser.query "generics?", {
-				parameters = {},
-				constraints = {},
-			})
+			"header",
+			parser.composite {
+				tag = "union-header",
+				{"_", K_UNION},
+				{"name", TR_TYPENAME, "a type name"},
+				{
+					"generics",
+					parserOtherwise(parser.query "generics?", {
+						parameters = {},
+						constraints = {},
+					})
+				},
+				{"implements", parserOtherwise(parser.query "implements?", {})},
+			},
 		},
-		{"implements", parserOtherwise(parser.query "implements?", {})},
 		{"_", K_CURLY_OPEN, "`{` to begin union body"},
 		{"fields", parser.query "field-definition*"},
 		{"methods", parser.query "method-definition*"},
@@ -223,14 +235,20 @@ local parsers = {
 	-- Represents an interface
 	["interface-definition"] = parser.composite {
 		tag = "interface-definition",
-		{"_", K_INTERFACE},
-		{"name", TR_TYPENAME, "a type name"},
 		{
-			"generics",
-			parserOtherwise(parser.query "generics?", {
-				parameters = {},
-				constraints = {},
-			})
+			"header",
+			parser.composite {
+				tag = "interface-header",
+				{"_", K_INTERFACE},
+				{"name", TR_TYPENAME, "a type name"},
+				{
+					"generics",
+					parserOtherwise(parser.query "generics?", {
+						parameters = {},
+						constraints = {},
+					})
+				},
+			},
 		},
 		{"_", K_CURLY_OPEN, "`{` to begin interface body"},
 		{"signatures", parser.zeroOrMore(parser.composite {

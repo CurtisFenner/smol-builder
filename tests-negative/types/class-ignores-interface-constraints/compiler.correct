@@ -1,0 +1,13 @@
+ERROR:
+The interface `test:Oneable` requires its 1st type parameter `#A` to implement `test:IOne` at test.smol:14:30
+	13 | 
+	14 | interface Oneable[#A | #A is IOne] {
+	   |                              ^^^^   
+	15 | }
+
+However, the type `test:TwoableThing` does not implement the interface `test:IOne` as is needed at test.smol:17:23
+	16 | 
+	17 | class Impl is Oneable[TwoableThing] {
+	   |                       ^^^^^^^^^^^^   
+	18 | }
+

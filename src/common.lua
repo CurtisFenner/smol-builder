@@ -7,6 +7,29 @@ local ansi = import "ansi.lua"
 
 --------------------------------------------------------------------------------
 
+local function ordinal(n)
+	if 10 <= n % 100 and n % 100 <= 19 then
+		return n .. "th"
+	elseif n % 10 == 1 then
+		return n .. "st"
+	elseif n % 10 == 2 then
+		return n .. "nd"
+	elseif n % 10 == 3 then
+		return n .. "rd"
+	end
+	return n .. "th"
+end
+
+assert(ordinal(3) == "3rd")
+assert(ordinal(10) == "10th")
+assert(ordinal(11) == "11th")
+assert(ordinal(12) == "12th")
+assert(ordinal(21) == "21st")
+assert(ordinal(112) == "112th")
+assert(ordinal(122) == "122nd")
+
+--------------------------------------------------------------------------------
+
 -- RETURNS a parse object, or quits with a syntax error
 local function parseKind(s, k)
 	local tokens = tokenization(s, "<compiler-core>")
@@ -498,6 +521,8 @@ end
 --------------------------------------------------------------------------------
 
 return {
+	ordinal = ordinal,
+
 	STRING_TYPE = STRING_TYPE,
 	INT_TYPE = INT_TYPE,
 	BOOLEAN_TYPE = BOOLEAN_TYPE,

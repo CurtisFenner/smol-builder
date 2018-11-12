@@ -35,12 +35,12 @@ function DefinitionASTUniverse:definitionAST(package, name, ast)
 		Report.OBJECT_DEFINED_TWICE {
 			fullName = package .. ":" .. name,
 			firstLocation = self._objectsByPackage[package][name].location,
-			secondLocation = ast.location,
+			secondLocation = ast.header.location,
 		}
 	end
 
 	self._objectsByPackage[package][name] = {
-		location = ast.location,
+		location = ast.header.location,
 		ast = ast,
 		fullName = package .. ":" .. name,
 		view = false,
@@ -408,7 +408,24 @@ function TypeScope:makeConstraintSubstituter(arguments)
 	end
 
 	return function(t)
+		assert(t)
 		return substitutePlainConstraint(mapping, t)
+	end
+end
+
+-- RETURNS a function mapping plain constraints, for use by the containing
+-- skeleton
+function TypeScope:makeTypeSubstituter(arguments)
+	assert(#arguments == #self._genericList)
+
+	local mapping = {}
+	for i, name in ipairs(self._genericList) do
+		mapping[name] = arguments[i]
+	end
+
+	return function(t)
+		assert(t)
+		return substitutePlainType(mapping, t)
 	end
 end
 
@@ -432,7 +449,7 @@ function TypeScope:getRequiredConstraints(arguments, selfType)
 				of = arguments[i],
 				constraint = substitutePlainConstraint(mapping, constraint),
 				cause = self._objectDescription,
-				component = "its " .. i .. "th type parameter `#" .. name .. "`",
+				component = "its " .. common.ordinal(i) .. " type parameter `#" .. name .. "`",
 				requiredLocation = constraint.location,
 				neededLocation = arguments[i].location,
 			})
@@ -491,11 +508,11 @@ function TypeScope:astToPlainType(ast)
 				interface = info.fullName,
 				location = ast.location,
 			}
-		elseif #definitionAST.generics.parameters ~= #ast.arguments then
+		elseif #definitionAST.header.generics.parameters ~= #ast.arguments then
 			Report.WRONG_ARITY {
 				name = info.fullName,
 				definitionLocation = info.location,
-				expectedArity = #definitionAST.generics.parameters,
+				expectedArity = #definitionAST.header.generics.parameters,
 				givenArity = #ast.arguments,
 				location = ast.location,
 			}
@@ -537,11 +554,11 @@ function TypeScope:astToPlainConstraint(ast)
 			typeShown = info.fullName,
 			location = ast.location,
 		}
-	elseif #definitionAST.generics.parameters ~= #ast.arguments then
+	elseif #definitionAST.header.generics.parameters ~= #ast.arguments then
 		Report.WRONG_ARITY {
 			name = info.fullName,
 			definitionLocation = info.location,
-			expectedArity = #definitionAST.generics.parameters,
+			expectedArity = #definitionAST.header.generics.parameters,
 			givenArity = #ast.arguments,
 			location = ast.location,
 		}
@@ -574,6 +591,7 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS a representation of the signature for a skeleton
 local function signatureSkeleton(typeScope, signatureAST)
 	local parameters = {}
 	for _, parameterAST in ipairs(signatureAST.parameters) do
@@ -593,11 +611,10 @@ local function signatureSkeleton(typeScope, signatureAST)
 	return {
 		modifier = signatureAST.modifier.lexeme,
 		parameters = parameters,
-		returns = returns,
+		returnTypes = returns,
 		requiresASTs = signatureAST.requires,
 		ensuresAST = signatureAST.ensures,
 		bang = signatureAST.bang,
-		typeScope = typeScope,
 	}
 end
 
@@ -610,7 +627,7 @@ function InterfaceSkeleton.new(typeScope, ast)
 
 	local instance = {
 		tag = "interface-skeleton",
-		anchorLocation = ast.name.location,
+		anchorLocation = ast.header.name.location,
 		_typeScope = typeScope,
 		_methods = {},
 		_statics = {},
@@ -635,7 +652,7 @@ function InterfaceSkeleton.new(typeScope, ast)
 		if signature.modifier == "method" then
 			instance._methods[name] = signature
 		else
-			instance._methods[name] = signature
+			instance._statics[name] = signature
 		end
 	end
 
@@ -656,7 +673,7 @@ function UnionSkeleton.new(typeScope, ast)
 
 	local instance = {
 		tag = "union-skeleton",
-		anchorLocation = ast.name.location,
+		anchorLocation = ast.header.name.location,
 		_typeScope = typeScope,
 		_variants = {},
 		_methods = {},
@@ -666,7 +683,7 @@ function UnionSkeleton.new(typeScope, ast)
 
 	local memberLocations = {}
 
-	for _, implements in ipairs(ast.implements) do
+	for _, implements in ipairs(ast.header.implements) do
 		table.insert(instance._implements, typeScope:astToPlainConstraint(implements))
 	end
 
@@ -736,7 +753,7 @@ function ClassSkeleton.new(typeScope, ast)
 
 	local instance = {
 		tag = "class-skeleton",
-		anchorLocation = ast.name.location,
+		anchorLocation = ast.header.name.location,
 		_typeScope = typeScope,
 		_fields = {},
 		_methods = {},
@@ -745,7 +762,7 @@ function ClassSkeleton.new(typeScope, ast)
 	}
 
 	-- Record implements claims
-	for _, implements in ipairs(ast.implements) do
+	for _, implements in ipairs(ast.header.implements) do
 		table.insert(instance._implements, typeScope:astToPlainConstraint(implements))
 	end
 
@@ -814,13 +831,96 @@ function ClassSkeleton:genericRequirements(plainArguments)
 end
 
 -- RETURNS a list of plain constraints
-function ClassSkeleton:implements(arguments)
+-- REQUIRES the correct number of arguments
+function ClassSkeleton:getPlainImplements(arguments)
 	local substituter = self._typeScope:makeConstraintSubstituter(arguments)
 	local list = {}
 	for _, claim in ipairs(self._implements) do
 		table.insert(list, substituter(claim))
 	end
 	return list
+end
+
+-- RETURNS a map {string => {typePlain = plain-type, location = Location}}
+-- REQUIRES the correct number of arguments
+function ClassSkeleton:getPlainFields(arguments)
+	local substituter = self._typeScope:makeTypeSubstituter(arguments)
+	local map = {}
+	for name, field in pairs(self._fields) do
+		map[name] = {
+			typePlain = substituter(field.typePlain),
+			location = field.location,
+		}
+	end
+	return map
+end
+
+function ClassSkeleton:getPlainMethods(arguments)
+	local substituter = self._typeScope:makeTypeSubstituter(arguments)
+	
+	local methods = {}
+	for name, method in pairs(self._methods) do
+		local parameters = {}
+		for _, parameter in ipairs(method.signature.parameters) do
+			table.insert(parameters, {
+				name = parameter.name,
+				type = substituter(parameter.typePlain),
+			})
+		end
+		local returns = {}
+		for _, plainReturnType in ipairs(method.signature.returnTypes) do
+			table.insert(returns, substituter(plainReturnType))
+		end
+		local signature = {
+			parameters = parameters,
+			returnTypes = returns,
+			unsubstituedRequiresASTs = method.signature.requires,
+			unsubstituedEnsuresASTs = method.signature.ensures,
+			bang = method.signature.bang,
+		}
+
+		methods[name] = {
+			typeSubstituter = substituter,
+			signature = signature,
+			unsubstituedBody = method.body,
+		}
+	end
+
+	return methods
+end
+
+function ClassSkeleton:getPlainStatics(arguments)
+	local substituter = self._typeScope:makeTypeSubstituter(arguments)
+	
+	local statics = {}
+	for name, static in pairs(self._statics) do
+		local parameters = {}
+		for _, parameter in ipairs(static.signature.parameters) do
+			table.insert(parameters, {
+				name = parameter.name,
+				type = substituter(parameter.typePlain),
+			})
+		end
+		local returns = {}
+		for _, plainReturnType in ipairs(static.signature.returnTypes) do
+			table.insert(returns, substituter(plainReturnType))
+		end
+		local signature = {
+			parameters = parameters,
+			returns = returns,
+			unsubstituedRequiresASTs = static.signature.requires,
+			unsubstituedEnsuresASTs = static.signature.ensures,
+			bang = static.signature.bang,
+		}
+
+		statics[name] = {
+			typeSubstituter = substituter,
+			signature = signature,
+			unsubstituedBody = static.body,
+		}
+	end
+
+	return statics
 end
 
 --------------------------------------------------------------------------------
@@ -838,7 +938,7 @@ local function skeletonStructure(view, ast, objectDescription)
 	assert(group)
 
 	local typeScope = TypeScope.fromSource(view, ("%s `%s`"):format(group, objectDescription))
-	for i, parameter in ipairs(ast.generics.parameters) do
+	for i, parameter in ipairs(ast.header.generics.parameters) do
 		typeScope:defineGeneric(i, parameter.name, parameter.location)
 	end
 
@@ -849,7 +949,7 @@ local function skeletonStructure(view, ast, objectDescription)
 			object = {},
 		}
 		local arguments = {}
-		for i, parameter in ipairs(ast.generics.parameters) do
+		for i, parameter in ipairs(ast.header.generics.parameters) do
 			table.insert(arguments, {
 				tag = "type-generic-plain",
 				name = parameter.name,
@@ -860,15 +960,15 @@ local function skeletonStructure(view, ast, objectDescription)
 			tag = "constraint-interface-plain",
 			object = {
 				package = view:getPackage(),
-				object = ast.name.lexeme,
+				object = ast.header.name.lexeme,
 			},
 			arguments = arguments,
-			location = ast.name.location,
+			location = ast.header.name.location,
 		}
 	end
 
 	-- Record the required constraints
-	for _, constraint in ipairs(ast.generics.constraints) do
+	for _, constraint in ipairs(ast.header.generics.constraints) do
 		typeScope:addGenericConstraint(
 			constraint.parameter.name,
 			typeScope:astToPlainConstraint(constraint.constraint),
@@ -898,7 +998,7 @@ function ProgramSkeleton.new(sources)
 		astUniverse:createPackage(packageName)
 
 		for _, definition in ipairs(source.definitions) do
-			local objectName = definition.name.lexeme
+			local objectName = definition.header.name.lexeme
 			astUniverse:definitionAST(packageName, objectName, definition)
 		end
 	end
@@ -934,7 +1034,7 @@ function ProgramSkeleton.new(sources)
 		-- Create each object
 		for _, definition in ipairs(source.definitions) do
 			local packageName = view:getPackage()
-			local objectName = definition.name.lexeme
+			local objectName = definition.header.name.lexeme
 			local description = packageName .. ":" .. objectName
 			local group, structure, extra = skeletonStructure(view, definition, description)
 
@@ -1090,7 +1190,7 @@ function BlockScope:checkTypeSatisfies(requirement, typeScope)
 		local object = self._skeleton:getObject(requirement.of.object)
 		assert(object.tag == "class-skeleton" or object.tag == "union-skeleton")
 		
-		local supplies = object:implements(requirement.of.arguments)
+		local supplies = object:getPlainImplements(requirement.of.arguments)
 		for _, supplied in ipairs(supplies) do
 			if plainSatisfiesConstraint(supplied, requirement.constraint) then
 				return
@@ -1214,8 +1314,9 @@ local function compileClass(skeleton, classInfo)
 	})
 
 	local class = classInfo.object
+	assert(class.tag == "class-skeleton")
 
-	-- Check the implements and generic constraints are well-formed
+	-- Check that the generic constraints are well-formed
 	local genericContainer = classInfo.extra
 	local generics = genericContainer:dumpPlainGenerics()
 	local required1 = genericContainer:getRequiredConstraints(generics, false)
@@ -1224,10 +1325,28 @@ local function compileClass(skeleton, classInfo)
 		objectScope:upgradePlainConstraint(requirement.constraint, class._typeScope)
 	end
 
-	local implementsClaims = class:implements(generics)
+	-- Check that the implements claims are well-formed
+	local implementsClaims = class:getPlainImplements(generics)
 	for _, claim in ipairs(implementsClaims) do
 		-- TODO: avoid private access
 		objectScope:upgradePlainConstraint(claim, class._typeScope)
+	end
+
+	-- Check that the fields are well-formed
+	for name, field in pairs(class:getPlainFields(generics)) do
+		-- TODO: avoid private acess
+		objectScope:upgradePlainType(field.typePlain, class._typeScope)
+	end
+
+	local funcs = {}
+
+	-- Compile the methods and statics
+	for name, method in pairs(class:getPlainMethods(generics)) do
+		error "TODO"
+	end
+
+	for name, static in pairs(class:getPlainStatics(generics)) do
+		error "TODO"
 	end
 
 	return {"TODO"}, {}

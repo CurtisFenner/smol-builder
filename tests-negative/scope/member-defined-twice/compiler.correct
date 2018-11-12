@@ -1,0 +1,13 @@
+ERROR:
+The member `foo` was already defined at test.smol:4:9
+	 3 | class Foo {
+	 4 |     var foo Boolean;
+	   |         ^^^         
+	 5 |     static foo() Boolean {
+
+However, you are attempting to redefine it at test.smol:5:12
+	 4 |     var foo Boolean;
+	 5 |     static foo() Boolean {
+	   |            ^^^            
+	 6 |         return true;
+

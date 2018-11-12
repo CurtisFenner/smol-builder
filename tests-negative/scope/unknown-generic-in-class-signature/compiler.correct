@@ -1,0 +1,8 @@
+ERROR:
+A generic variable called `#T` has not been defined.
+However, you are trying to use it at test.smol:8:18
+	 7 | 
+	 8 |     static bar(t #T) Unit {
+	   |                  ^^        
+	 9 |     }
+

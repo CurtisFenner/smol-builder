@@ -1,0 +1,13 @@
+ERROR:
+A definition for `p:Foo` was already made at alpha.smol:3:1
+	2 | 
+	3 | class Foo {}
+	  | ^^^^^^^^^   
+	4 | 
+
+However, you are attempting to redefine it at beta.smol:3:1
+	2 | 
+	3 | interface Foo {}
+	  | ^^^^^^^^^^^^^   
+	4 | 
+

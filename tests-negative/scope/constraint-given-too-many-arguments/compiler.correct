@@ -1,0 +1,13 @@
+ERROR:
+The definition `test:I` was defined at test.smol:3:1
+	 2 | 
+	 3 | interface I[#T] {
+	   | ^^^^^^^^^^^^^^^  
+	 4 | 
+to take exactly 1 type argument(s).
+However, you provide 2 at test.smol:7:22
+	 6 | 
+	 7 | class Bar[#Y | #Y is I[Test, Test]] {
+	   |                      ^^^^^^^^^^^^^   
+	 8 | 
+

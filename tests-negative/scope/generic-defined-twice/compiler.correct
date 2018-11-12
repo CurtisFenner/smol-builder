@@ -1,0 +1,13 @@
+ERROR:
+The generic variable `#A` was already defined at test.smol:3:11
+	 2 | 
+	 3 | class Foo[#A, #A] {}
+	   |           ^^        
+	 4 | 
+
+However, you are attempting to redefine it at test.smol:3:15
+	 2 | 
+	 3 | class Foo[#A, #A] {}
+	   |               ^^    
+	 4 | 
+

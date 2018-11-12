@@ -1,0 +1,7 @@
+ERROR:
+The compiler expected generic parameter variables in generics at test.smol:3:11
+	 2 | 
+	 3 | class Foo[#Self] {
+	   |           ^^^^^   
+	 4 | }
+

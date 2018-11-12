@@ -1,0 +1,13 @@
+ERROR:
+A definition for `Foo` was already made at beta.smol:5:1
+	4 | 
+	5 | interface Foo {}
+	  | ^^^^^^^^^^^^^   
+	6 | 
+
+However, you are attempting to redefine it at beta.smol:3:1
+	2 | 
+	3 | import gamma:Foo;
+	  | ^^^^^^^^^^^^^^^^^
+	4 | 
+

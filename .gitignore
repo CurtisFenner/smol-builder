@@ -1,11 +1,7 @@
-out.last
-output.lua
-output.c
-*.exe
 bin
+out.last
+output.c
+output.lua
+*.exe
+*.out
 *.stackdump
-
-smolc.sh
-smolc.bat
-
-luafmt.lua

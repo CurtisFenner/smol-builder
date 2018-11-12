@@ -1,0 +1,13 @@
+ERROR:
+The class `test:Foo` requires its 1st type parameter `#T` to implement `test:I` at test.smol:8:22
+	 7 | 
+	 8 | class Foo[#T | #T is I] {
+	   |                      ^   
+	 9 | 
+
+However, the type `Int` does not implement the interface `test:I` as is needed at test.smol:4:15
+	 3 | class Test {
+	 4 |     var f Foo[Int];
+	   |               ^^^  
+	 5 |     static main() Unit {}
+

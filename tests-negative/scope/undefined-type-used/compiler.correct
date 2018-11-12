@@ -1,0 +1,8 @@
+ERROR:
+No object called `test:Nonexistent` has been defined.
+However, you are trying to use it at test.smol:4:25
+	 3 | class Test {
+	 4 |     static foo(argument test:Nonexistent) Unit {
+	   |                         ^^^^^^^^^^^^^^^^        
+	 5 |     }
+

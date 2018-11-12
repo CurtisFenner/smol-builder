@@ -1,0 +1,7 @@
+ERROR:
+The compiler found an unfinished string literal at test.smol:5:24
+	 4 |     static main() Unit {
+	 5 |         var x String = "foo\
+	   |                        ^^^^^
+	 6 |         n";
+

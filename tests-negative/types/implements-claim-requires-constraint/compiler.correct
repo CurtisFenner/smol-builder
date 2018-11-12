@@ -1,0 +1,13 @@
+ERROR:
+The interface `test:J` requires its 1st type parameter `#T` to implement `test:I` at test.smol:10:24
+	 9 | 
+	10 | interface J[#T | #T is I] {}
+	   |                        ^    
+	11 | 
+
+However, the type `test:Test` does not implement the interface `test:I` as is needed at test.smol:12:14
+	11 | 
+	12 | class C is J[Test] {
+	   |              ^^^^   
+	13 | }
+

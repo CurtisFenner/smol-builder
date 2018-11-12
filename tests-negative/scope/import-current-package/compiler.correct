@@ -1,0 +1,12 @@
+ERROR:
+The package `test` was already imported at test.smol:1:1
+	 1 | package test;
+	   | ^^^^^^^^^^^^^
+	 2 | 
+
+However, you try to import it again at test.smol:3:1
+	 2 | 
+	 3 | import test;
+	   | ^^^^^^^^^^^^
+	 4 | 
+

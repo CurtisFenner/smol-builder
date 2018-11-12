@@ -1,24 +1,6 @@
+local common = import "common.lua"
+
 local Report = {}
-
--- RETURNS the n-th (English) ordinal as a word
-local function ordinal(n)
-	assert(type(n) == "number", "n must be an integer")
-	assert(n % 1 == 0, "n must be an integer")
-
-	-- 0th, 1st, 2nd, 3rd, 4th, 5th, 6th, 7th, 8th, 9th
-	-- 10th, 11th, 12th, 13th, 14th, 15th, 16th, 17th, 18th, 19th
-	-- 20th, 21st, 22nd, 23rd, 24th, ... 29th
-	if 10 <= n % 100 and n % 100 <= 20 then
-		return n .. "th"
-	elseif n % 10 == 1 then
-		return n .. "st"
-	elseif n % 10 == 2 then
-		return n .. "nd"
-	elseif n % 10 == 3 then
-		return n .. "rd"
-	end
-	return n .. "th"
-end
 
 function Report.OBJECT_DEFINED_TWICE(p)
 	assertis(p, recordType {
@@ -308,7 +290,7 @@ function Report.INTERFACE_TYPE_MISMATCH(p)
 		" called `",
 		p.memberName,
 		"` with the ",
-		ordinal(p.index),
+		common.ordinal(p.index),
 		" " .. p.thing .. " of type `",
 		p.interfaceType,
 		"` ",
@@ -318,7 +300,7 @@ function Report.INTERFACE_TYPE_MISMATCH(p)
 		"` defines `",
 		p.memberName,
 		"` with the ",
-		ordinal(p.index),
+		common.ordinal(p.index),
 		" " .. p.thing .." of type `",
 		p.classType,
 		"` ",

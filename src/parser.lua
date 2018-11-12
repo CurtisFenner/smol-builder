@@ -154,6 +154,7 @@ function parser.composite(components)
 			end
 		end
 
+		-- Successfully parsed all components
 		assert(#extracts <= 1)
 		if #extracts == 1 then
 			local fullLocation = object.location
@@ -161,9 +162,17 @@ function parser.composite(components)
 			if isobject(object) and components.location ~= false then
 				object = table.with(object, "location", fullLocation)
 			end
+		else
+			setmetatable(object, {
+				__index = function(_, key)
+					error("no such key `" .. key .. "` to read", 2)
+				end,
+				__newindex = function(_, key)
+					error("no such key `" .. key .. "` to write", 2)
+				end,
+			})
 		end
 
-		-- Successfully parsed all components
 		return object, stream
 	end
 end

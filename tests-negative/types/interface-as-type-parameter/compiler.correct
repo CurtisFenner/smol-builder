@@ -1,0 +1,7 @@
+ERROR:
+The definition for `test:IFoo` is an interface, so you cannot use it as a type as you are at test.smol:14:24
+	13 | 
+	14 |     static foo(box Box[IFoo]) Unit {}
+	   |                        ^^^^          
+	15 | }
+

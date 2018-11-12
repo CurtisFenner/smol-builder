@@ -1,0 +1,8 @@
+ERROR:
+No definition called `Bar` has been defined in scope.
+However, you are trying to use it at test.smol:3:22
+	 2 | 
+	 3 | class Foo[#T | #T is Bar] {
+	   |                      ^^^   
+	 4 | 
+

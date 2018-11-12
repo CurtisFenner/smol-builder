@@ -1,0 +1,7 @@
+ERROR:
+The compiler expected expected at least one case in match-statement at test.smol:9:9
+	 8 |         match empty {
+	 9 |         }
+	   |         ^
+	10 |     }
+

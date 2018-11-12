@@ -1,0 +1,7 @@
+ERROR:
+The compiler expected a type constraint after `is` to finish constraint at test.smol:3:24
+	 2 | 
+	 3 | interface I[#T | #T is #Self] {
+	   |                        ^^^^^   
+	 4 | 
+
