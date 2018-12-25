@@ -302,7 +302,7 @@ local normalizedT = {}
 -- ASSERTS that `value` is of the specified type `t`
 local queryCount = {}
 function assertis(value, t)
-	do return true end
+	--do return true end
 
 	-- TYPE_DESCRIPTION must be injective
 	-- Normalize types so that memoization works

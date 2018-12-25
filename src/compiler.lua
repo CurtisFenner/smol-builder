@@ -27,6 +27,7 @@ end
 local showLocation
 
 local ansi = import "ansi.lua"
+local trace = import "trace.lua"
 
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
@@ -363,7 +364,11 @@ assert(#commandMap.main == 1)
 local mainFunction = commandMap.main[1]
 
 -- Get an intermediate representation of the program
-local semantics = calculateSemantics.semantics(sourceParses, mainFunction)
+local semantics = trace.run(
+	calculateSemantics.semantics,
+	sourceParses,
+	mainFunction
+)
 
 -- Verify the assertions in the program statically hold
 verify(semantics)

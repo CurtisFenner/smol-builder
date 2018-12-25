@@ -10,6 +10,8 @@ local DefinitionASTUniverse = {}
 -- RETURNS an empty definition AST universe
 function DefinitionASTUniverse.new()
 	local instance = {
+		_meta = "DefinitionASTUniverse",
+
 		_objectsByPackage = {},
 	}
 	return setmetatable(instance, {__index = DefinitionASTUniverse})
@@ -54,7 +56,7 @@ end
 function DefinitionASTUniverse:setSourceView(package, name, view)
 	assert(self._objectsByPackage[package][name])
 	assert(view)
-	
+
 	self._objectsByPackage[package][name].sourceView = view
 end
 
@@ -91,6 +93,8 @@ function SourceScope.new(universe, package, packageLocation)
 	assert(packageLocation)
 
 	local instance = {
+		_meta = "SourceScope",
+
 		_package = package,
 		_universe = universe,
 
@@ -303,6 +307,8 @@ local function substitutePlainConstraint(mapping, constraint)
 	error("unhandled plain constraint tag `" .. constraint.tag .. "`")
 end
 
+--------------------------------------------------------------------------------
+
 local TypeScope = {}
 
 -- RETURNS a new TypeScope made from the current view
@@ -310,6 +316,8 @@ function TypeScope.fromSource(view, objectDescription)
 	assert(type(objectDescription) == "string")
 
 	local instance = {
+		_meta = "TypeScope",
+
 		_sourceView = view,
 		_generics = {},
 		_genericList = {},
@@ -614,7 +622,7 @@ local function signatureSkeleton(typeScope, signatureAST)
 		returnTypes = returns,
 		requiresASTs = signatureAST.requires,
 		ensuresAST = signatureAST.ensures,
-		bang = signatureAST.bang,
+		bang = not not signatureAST.bang,
 	}
 end
 
@@ -748,13 +756,18 @@ end
 
 local ClassSkeleton = {}
 
-function ClassSkeleton.new(typeScope, ast)
+function ClassSkeleton.new(typeScope, ast, package)
 	assert(ast.tag == "class-definition")
+	assert(type(package) == "string")
 
 	local instance = {
 		tag = "class-skeleton",
 		anchorLocation = ast.header.name.location,
 		_typeScope = typeScope,
+
+		_name = ast.header.name.lexeme,
+		_package = package,
+
 		_fields = {},
 		_methods = {},
 		_statics = {},
@@ -841,6 +854,20 @@ function ClassSkeleton:getPlainImplements(arguments)
 	return list
 end
 
+-- RETURNS the type corresponding to this class with the given parameters
+-- REQUIRES the correct number of arguments
+function ClassSkeleton:getPlainSelfType(arguments)
+	assert(#arguments == #self._typeScope:dumpPlainGenerics())
+	return {
+		tag = "type-object-plain",
+		object = {
+			package = self._package,
+			object = self._name,
+		},
+		arguments = arguments,
+	}
+end
+
 -- RETURNS a map {string => {typePlain = plain-type, location = Location}}
 -- REQUIRES the correct number of arguments
 function ClassSkeleton:getPlainFields(arguments)
@@ -905,6 +932,7 @@ function ClassSkeleton:getPlainStatics(arguments)
 		for _, plainReturnType in ipairs(static.signature.returnTypes) do
 			table.insert(returns, substituter(plainReturnType))
 		end
+
 		local signature = {
 			parameters = parameters,
 			returns = returns,
@@ -912,6 +940,8 @@ function ClassSkeleton:getPlainStatics(arguments)
 			unsubstituedEnsuresASTs = static.signature.ensures,
 			bang = static.signature.bang,
 		}
+		assertis(signature.returns, listType "object")
+		assert(type(signature.bang) == "boolean")
 
 		statics[name] = {
 			typeSubstituter = substituter,
@@ -937,7 +967,8 @@ local function skeletonStructure(view, ast, objectDescription)
 	end
 	assert(group)
 
-	local typeScope = TypeScope.fromSource(view, ("%s `%s`"):format(group, objectDescription))
+	local description = string.format("%s `%s`", group, objectDescription)
+	local typeScope = TypeScope.fromSource(view, description)
 	for i, parameter in ipairs(ast.header.generics.parameters) do
 		typeScope:defineGeneric(i, parameter.name, parameter.location)
 	end
@@ -976,12 +1007,13 @@ local function skeletonStructure(view, ast, objectDescription)
 		)
 	end
 
+	local package = view:getPackage()
 	if group == "class" then
-		return group, ClassSkeleton.new(typeScope, ast), typeScope
+		return group, ClassSkeleton.new(typeScope, ast, package), typeScope
 	elseif group == "union" then
-		return group, UnionSkeleton.new(typeScope, ast), typeScope
+		return group, UnionSkeleton.new(typeScope, ast, package), typeScope
 	elseif group == "interface" then
-		return group, InterfaceSkeleton.new(typeScope, ast), typeScope
+		return group, InterfaceSkeleton.new(typeScope, ast, package), typeScope
 	end
 	error "unreachable"
 end
@@ -1096,15 +1128,17 @@ local BlockScope = {}
 function BlockScope.new(skeleton, context)
 	assert(skeleton, "skeleton")
 	assert(context, "context")
-	assert(context.newObject == false or context.newObject.objectName)
+	assert(context.newType == false or context.newType)
 	assert(type(context.bang) == "boolean")
 
 	local instance = {
+		_meta = "BlockScope",
+
 		_skeleton = skeleton,
 		_stack = {},
 
-		-- The name of the object to use, or false if `new()` cannot be used
-		_newObject = context.newObject,
+		-- The type of the object to use, or false if `new()` cannot be used
+		_newType = context.newType,
 
 		-- Whether or not ! actions can be used
 		_bang = context.bang,
@@ -1133,28 +1167,6 @@ function BlockScope:defineVariable(name, location, type)
 		type = type,
 	}
 end
-
-REGISTER_TYPE("Type", choiceType(
-	recordType {
-		tag = constantType "type-keyword",
-		name = "string",
-	},
-	recordType {
-		tag = constantType "type-generic",
-		name = "string",
-	},
-	recordType {
-		tag = constantType "type-object",
-		object = recordType {
-			package = "string",
-			object = "string",
-		},
-		arguments = listType "Type",
-	},
-	recordType {
-		tag = constantType "type-self",
-	}
-))
 
 -- RETURNS nothing
 -- REPORTS when a problem is found
@@ -1300,16 +1312,63 @@ end
 
 --------------------------------------------------------------------------------
 
+-- RETURNS Statement, [Variable], effects
+-- Statement: The execution of this statement.
+-- [Variable]: The resulting value(s) computed by this statement.
+-- effects: {impure=boolean} Whether or not this statement is impure.
+local function compileExpression(scope, ast)
+	assert(type(ast.tag) == "string")
+
+	if ast.tag == "static-call" then
+		local baseTypeAST = ast.baseType
+		local staticName = ast.funcName.lexeme
+		local callBang = not not ast.bang
+
+		local baseType = scope:resolveType(baseTypeAST)
+	end
+
+	error("TODO: compileExpression " .. ast.tag)
+end
+
 -- RETURNS a Statement
 local function compileStatement(scope, ast)
-	error "TODO"
+	assert(type(ast.tag) == "string")
+
+	if ast.tag == "do-statement" then
+		local execution, results = compileExpression(scope, ast.expression)
+	end
+
+	error("TODO: compileStatement " .. ast.tag)
+end
+
+-- RETURNS a Statement
+local function compileBlock(scope, ast)
+	assert(ast.tag == "block")
+
+	local sequence = {}
+	for _, statementAST in ipairs(ast.statements) do
+		if #sequence ~= 0 and sequence[#sequence].exits == "yes" then
+			Report.UNREACHABLE_STATEMENT {
+				location = statementAST.location,
+			}
+		end
+
+		local statement = compileStatement(scope, statementAST)
+		table.insert(sequence, statement)
+	end
+
+	return {
+		tag = "sequence-statement",
+		statements = sequence,
+		exits = #sequence == 0 and "no" or sequence[#sequence].exits,
+	}
 end
 
 -- RETURNS a Class, a list of functions
 local function compileClass(skeleton, classInfo)
 	assert(classInfo.object and classInfo.extra)
 	local objectScope = BlockScope.new(skeleton, {
-		newObject = false,
+		newType = false,
 		bang = false,
 	})
 
@@ -1318,38 +1377,57 @@ local function compileClass(skeleton, classInfo)
 
 	-- Check that the generic constraints are well-formed
 	local genericContainer = classInfo.extra
-	local generics = genericContainer:dumpPlainGenerics()
-	local required1 = genericContainer:getRequiredConstraints(generics, false)
+	local plainGenerics = genericContainer:dumpPlainGenerics()
+	local required1 = genericContainer:getRequiredConstraints(plainGenerics, false)
 	for _, requirement in ipairs(required1) do
 		-- TODO: avoid private access
 		objectScope:upgradePlainConstraint(requirement.constraint, class._typeScope)
 	end
 
 	-- Check that the implements claims are well-formed
-	local implementsClaims = class:getPlainImplements(generics)
+	local implementsClaims = class:getPlainImplements(plainGenerics)
 	for _, claim in ipairs(implementsClaims) do
 		-- TODO: avoid private access
 		objectScope:upgradePlainConstraint(claim, class._typeScope)
 	end
 
 	-- Check that the fields are well-formed
-	for name, field in pairs(class:getPlainFields(generics)) do
+	local fieldMap = {}
+	for name, field in pairs(class:getPlainFields(plainGenerics)) do
 		-- TODO: avoid private acess
-		objectScope:upgradePlainType(field.typePlain, class._typeScope)
+		local fieldType = objectScope:upgradePlainType(field.typePlain, class._typeScope)
+		fieldMap[name] = fieldType
 	end
 
 	local funcs = {}
 
+	local containingType = class:getPlainSelfType(plainGenerics)
+	assertis(containingType, "TypePlain")
+
 	-- Compile the methods and statics
-	for name, method in pairs(class:getPlainMethods(generics)) do
+	for name, method in pairs(class:getPlainMethods(plainGenerics)) do
 		error "TODO"
 	end
 
-	for name, static in pairs(class:getPlainStatics(generics)) do
+	for name, static in pairs(class:getPlainStatics(plainGenerics)) do
+		assert(type(static.signature.bang) == "boolean")
+		local environment = {
+			newType = containingType,
+			bang = static.signature.bang,
+		}
+		local scope = BlockScope.new(skeleton, environment)
+
+		local statement = compileBlock(scope, static.unsubstituedBody)
 		error "TODO"
 	end
 
-	return {"TODO"}, {}
+	local classDescriptor = {
+		packageName = class:getPackageName(),
+		objectName = class:getObjectName(),
+		fiels = fieldMap,
+	}
+
+	return classDescriptor, funcs
 end
 
 -- RETURNS an Interface
@@ -1357,7 +1435,7 @@ local function compileInterface(skeleton, interface)
 	assert(interface.object and interface.extra)
 	assert(interface.object.anchorLocation)
 	local objectScope = BlockScope.new(skeleton, {
-		newObject = false,
+		newType = false,
 		bang = false,
 	})
 

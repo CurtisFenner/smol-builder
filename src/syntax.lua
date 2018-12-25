@@ -622,7 +622,7 @@ local parsers = {
 	["method-access"] = parser.composite {
 		tag = "method-call",
 		{"_", K_DOT},
-		{"funcName", T_IDENTIFIER, "a method/field name"},
+		{"funcName", TR_IDENTIFIER, "a method/field name"},
 
 		-- What follows is optional, since a field access is also possible
 		{"bang", parser.optional(K_BANG)},
@@ -639,7 +639,7 @@ local parsers = {
 	["field-access"] = parser.composite {
 		tag = "field-access",
 		{"_", K_DOT},
-		{"field", T_IDENTIFIER, "a field name"},
+		{"field", TR_IDENTIFIER, "a field name"},
 	},
 
 	["access"] = parser.choice {
@@ -651,7 +651,7 @@ local parsers = {
 		tag = "static-call",
 		{"baseType", parser.named "type"},
 		{"_", K_DOT, "`.` after type name"},
-		{"funcName", T_IDENTIFIER, "a static method's name"},
+		{"funcName", TR_IDENTIFIER, "a static method's name"},
 		{"bang", parser.optional(K_BANG)},
 		{"_", K_ROUND_OPEN, "`(` after static method name"},
 		{"arguments", parser.query "expression,0+"},
