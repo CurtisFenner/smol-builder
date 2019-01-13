@@ -3,15 +3,13 @@ local common = import "common.lua"
 local Report = {}
 
 function Report.OBJECT_DEFINED_TWICE(p)
-	assertis(p, recordType {
-		fullName = "string",
-		firstLocation = "Location",
-		secondLocation = "Location",
-	})
+	assert(p.name)
+	assert(p.firstLocation)
+	assert(p.secondLocation)
 
 	quit(
 		"A definition for `",
-		p.fullName,
+		p.name,
 		"` was already made ",
 		p.firstLocation,
 		"\nHowever, you are attempting to redefine it ",
@@ -442,21 +440,9 @@ function Report.WRONG_VALUE_COUNT(p)
 	)
 end
 
-function Report.TYPE_MUST_BE(p)
-	quit(
-		"The type `",
-		p.givenType,
-		"` cannot be used as ",
-		p.purpose,
-		" as it is ",
-		p.givenLocation
-	)
-end
-
 function Report.THIS_USED_OUTSIDE_METHOD(p)
 	quit("You try to use `this` in a non-method function ", p.location)
 end
-
 
 function Report.CONFLICTING_INTERFACES(p)
 	quit(
@@ -473,8 +459,6 @@ function Report.CONFLICTING_INTERFACES(p)
 		"`"
 	)
 end
-
---------------------------------------------------------------------------------
 
 function Report.FUNCTION_DOESNT_RETURN(p)
 	assertis(p, recordType {
@@ -494,10 +478,6 @@ function Report.FUNCTION_DOESNT_RETURN(p)
 		" as it says it does ",
 		p.location
 	)
-end
-
-function Report.NO_MAIN(p)
-	quit("There is no class `" .. p.name .. "`.")
 end
 
 function Report.NO_MAIN_STATIC(p)

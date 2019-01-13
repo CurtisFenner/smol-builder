@@ -20,6 +20,10 @@ function parser.zeroOrMore(object)
 	end
 end
 
+function parser.into(p, c, constructor)
+	return parser.map(p, f[constructor or "new"], false)
+end
+
 -- RETURNS a parser of Bs
 -- REQUIRES `p` is a parser of As
 -- REQUIRES `f` is a map from As to Bs
@@ -36,7 +40,7 @@ function parser.map(p, f, includeLocation)
 			return nil
 		end
 
-		local out = f(object)
+		local out = f(object, grammar.ticket)
 		assert(out ~= nil)
 
 		if includeLocation then

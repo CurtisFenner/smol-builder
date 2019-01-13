@@ -27,7 +27,6 @@ end
 local showLocation
 
 local ansi = import "ansi.lua"
-local trace = import "trace.lua"
 
 -- DISPLAYS the concatenation of the input,
 -- and terminates the program.
@@ -60,6 +59,7 @@ end
 import "extend.lua"
 import "types.lua"
 import "def.lua"
+local trace = import "trace.lua"
 
 --------------------------------------------------------------------------------
 
@@ -217,6 +217,13 @@ end
 local commonRaw = commonPrefix(commandMap.sources)
 local common = commonRaw:gsub("%.[a-zA-Z0-9]+$", ""):gsub("[a-zA-Z_0-9]+$", "")
 local sourceFiles = {}
+
+table.insert(sourceFiles, {
+	path = "<compiler-core>",
+	short = "<compiler-core>",
+	contents = import "core.lua",
+})
+
 for _, source in ipairs(commandMap.sources) do
 	table.insert(sourceFiles, {
 		path = source,
@@ -224,140 +231,29 @@ for _, source in ipairs(commandMap.sources) do
 	})
 end
 
-table.insert(sourceFiles, {
-	path = "<compiler-core>",
-	short = "<compiler-core>",
-	contents = [==[
-package core;
-
-class Out {
-	foreign static println!(message String) Unit;
-}
-
-class ASCII {
-	foreign static formatInt(value Int) String;
-}
-
-interface Showable {
-	static showType() String;
-	method show() String;
-}
-
-union Option[#T | #T is Eq] {
-	var some #T;
-	var none Unit;
-
-	static makeSome(value #T) Option[#T]
-	ensures return is some
-	ensures return.some == value {
-		return new(some = value);
-	}
-
-	static makeNone() Option[#T]
-	ensures return is none {
-		return new(none = unit);
-	}
-
-	method get() #T
-	requires this is some
-	ensures return == this.some {
-		var out #T = this.some;
-		assert out == this.some;
-		return out;
-	}
-}
-
-class Pair[#A, #B | #A is Eq, #B is Eq] is Eq {
-	var left #A;
-	var right #B;
-
-	method getLeft() #A
-	ensures return == this.left {
-		return this.left;
-	}
-
-	method getRight() #B
-	ensures return == this.right {
-		return this.right;
-	}
-
-	static make(left #A, right #B) Pair[#A, #B]
-	ensures return.getLeft() == left
-	ensures return.getRight() == right {
-		return new(left = left, right = right);
-	}
-
-	method eq(other Pair[#A, #B]) Boolean {
-		return (this.left == other.left).and(this.right == other.right);
-	}
-}
-
-interface Orderable {
-	// RETURNS true when this is smaller than other in this ordering.
-	method lessThan(other #Self) Boolean
-	// ensures this.lessThan(this).not()
-	// ensures forall (middle #Self) return when this.lessThan(middle).and( middle.lessThan(other)  )
-	;
-}
-
-interface Eq {
-	// RETURNS true when these elements are equal such that
-	// (a == b) => f(a) == f(b)
-	method eq(other #Self) Boolean;
-}
-
-class WInt is Eq {
-	var value Int;
-
-	method get() Int ensures return == this.value {
-		return this.value;
-	}
-
-	static make(n Int) WInt ensures return.get() == n {
-		var out WInt = new(value = n);
-		assert out.value == n;
-		assert out.get() == n;
-		return out;
-	}
-
-	method eq(other WInt) Boolean {
-		return this.value == other.value;
-	}
-}
-
-]==]
-})
-
 -- Load and parse source files
 local sourceParses = {}
-for _, sourceFile in ipairs(sourceFiles) do
+for sourceIndex, sourceFile in ipairs(sourceFiles) do
 	local contents = sourceFile.contents
 	if not contents then
-		local file, err = io.open(sourceFile.path, "r")
+		local file, err = io.open(sourceFile.path, "rb")
 		if not file then
-			quit(
-				"The compiler could not open source file `",
-				sourceFile.path,
-				"`"
-			)
+			quit(("The compiler could not open source file `%s`"):format(sourceFile.path))
 		end
 		contents = file:read("*all")
 		file:close()
 		if not contents then
-			quit(
-				"The compiler could not read from the source file `",
-				sourceFile.path,
-				"`"
-			)
+			quit(("The compiler could not read from the source file `%s`"):format(sourceFile.path))
 		end
 	end
-	assert(contents)
+	assert(type(contents) == "string")
 
 	-- Lex contents
 	local tokens = tokenization(contents, sourceFile.short)
 
 	-- Parse contents
-	table.insert(sourceParses, syntax.parseFile(tokens))
+	local ticket = string.format("source-ticket-%d", sourceIndex)
+	sourceParses[ticket] = syntax.parseFile(tokens, ticket)
 end
 
 assert(#commandMap.main == 1)
@@ -371,7 +267,7 @@ local semantics = trace.run(
 )
 
 -- Verify the assertions in the program statically hold
-verify(semantics)
+--verify(semantics)
 
 if semantics.main then
 	-- Compile output in the given target

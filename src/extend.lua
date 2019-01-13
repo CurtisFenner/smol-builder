@@ -1,3 +1,5 @@
+package = nil
+
 -- RETURNS a list formed by the concatenation of the arguments
 function table.concatted(...)
 	local out = {}

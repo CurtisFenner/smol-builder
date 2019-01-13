@@ -130,6 +130,15 @@ local function parserOtherwise(p, value)
 	end)
 end
 
+--------------------------------------------------------------------------------
+
+local tree = import "tree.lua"
+
+local ExprMethodCall = tree.MethodCallTree
+local TypeTree = tree.TypeTree
+
+--------------------------------------------------------------------------------
+
 -- DEFINES the grammar for the language
 local parsers = {
 	-- Represents an entire source file
@@ -145,7 +154,7 @@ local parsers = {
 	["package"] = parser.composite {
 		tag = "package",
 		{"_", K_PACKAGE},
-		{"name", T_IDENTIFIER, "an identifier"},
+		{"name", TR_IDENTIFIER, "an identifier"},
 		{"_", K_SEMICOLON, "`;` to finish package declaration"},
 	},
 
@@ -153,10 +162,10 @@ local parsers = {
 	["import"] = parser.composite {
 		tag = "import",
 		{"_", K_IMPORT},
-		{"packageName", T_IDENTIFIER, "an imported package name"},
+		{"packageName", TR_IDENTIFIER, "an imported package name"},
 		{
 			-- string | false
-			"definition",
+			"objectName",
 			parser.optional(parser.composite {
 				tag = "***type name",
 				{"_", K_SCOPE},
@@ -604,15 +613,24 @@ local parsers = {
 			{"base", parser.named "atom-base"},
 			{"accesses", parser.query "access*"},
 		},
-		function(x)
+		function(x, ticket)
 			local out = x.base
 			for _, access in ipairs(x.accesses) do
-				local loc = parser.config.locationSpan(
+				local location = parser.config.locationSpan(
 					out.location,
 					access.location
 				)
-				out = table.with(access, "base", out)
-				out = table.with(out, "location", loc)
+				if access.tag == "method-access" then
+					out = ExprMethodCall.new(out, access, location, ticket)
+				else
+					assert(access.tag == "field-access")
+					out = {
+						tag = "field-expression",
+						base = out,
+						field = access.field,
+						location = location,
+					}
+				end
 			end
 			return out
 		end,
@@ -620,9 +638,9 @@ local parsers = {
 	),
 
 	["method-access"] = parser.composite {
-		tag = "method-call",
+		tag = "method-access",
 		{"_", K_DOT},
-		{"funcName", TR_IDENTIFIER, "a method/field name"},
+		{"methodName", TR_IDENTIFIER, "a method/field name"},
 
 		-- What follows is optional, since a field access is also possible
 		{"bang", parser.optional(K_BANG)},
@@ -703,19 +721,21 @@ local parsers = {
 -- tokens: a list of tokens,
 -- with tokens.file being a file for location generation.
 -- RETURNS an AST of the given kind
-local function parseKind(tokens, kind)
+local function parseKind(tokens, kind, ticket)
 	assert(tokens.file, "tokens need file source")
 	local stream = Stream(tokens)
 
-	local source = parsers[kind](stream, parsers)
+	local grammar = setmetatable({ticket = ticket}, {__index = parsers})
+	local source = parsers[kind](stream, grammar)
 	return source
 end
 
 -- tokens: a list of tokens,
 -- with tokens.file being a file for location generation.
 -- RETURNS a Source AST
-local function parseFile(tokens)
-	return parseKind(tokens, "source")
+local function parseFile(tokens, ticket)
+	assert(type(ticket) == "string")
+	return parseKind(tokens, "source", ticket)
 end
 
 return {

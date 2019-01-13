@@ -54,4 +54,9 @@ function trace.run(f, ...)
 	return table.unpack(response, 2)
 end
 
+do
+	local a = trace.run(function(a) return a + 1 end, 1)
+	assert(a == 2, "expected `2` but got `" .. tostring(a) .. "`")
+end
+
 return trace

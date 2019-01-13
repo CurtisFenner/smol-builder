@@ -105,15 +105,15 @@ if rawget(_G, "unpack") then
 	_G.unpack = nil
 end
 
-function table.unpack(object)
+function table.unpack(object, from)
 	if getmetatable(object) then
 		local asList = {}
 		for i = 1, #object do
 			asList[i] = object[i]
 		end
-		return realUnpack(asList)
+		return realUnpack(asList, from)
 	end
-	return realUnpack(object)
+	return realUnpack(object, from)
 end
 
 --------------------------------------------------------------------------------
