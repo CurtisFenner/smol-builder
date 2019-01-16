@@ -17,6 +17,13 @@ function Report.OBJECT_DEFINED_TWICE(p)
 	)
 end
 
+function Report.IMPORT_OWN_PACKAGE(p)
+	quit(
+		"The package `", p.packageName, "` cannot import itself.",
+		"\nHowever, you try to import it ", p.location
+	)
+end
+
 function Report.PACKAGE_IMPORTED_TWICE(p)
 	quit(
 		"The package `", p.packageName, "` was already imported ",
@@ -83,17 +90,17 @@ end
 function Report.NO_SUCH_PACKAGE(p)
 	quit(
 		"A package called `",
-		p.package,
+		p.packageName,
 		"` has not been defined.",
 		"\nHowever, you are trying to use it ",
 		p.location
 	)
 end
 
-function Report.UNKNOWN_PACKAGE_USED(p)
+function Report.UNIMPORTED_PACKAGE_USED(p)
 	quit(
 		"The package `",
-		p.package,
+		p.packageName,
 		"` has not been imported.",
 		"\nHowever, you are trying to use it ",
 		p.location

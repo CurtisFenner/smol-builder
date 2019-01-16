@@ -49,6 +49,7 @@ function ObjectScope.new(registry, ticket, packageName, packageLocation)
 		_ticket = ticket,
 		_packageName = packageName,
 		_packageLocation = packageLocation,
+		_importedPackages = {},
 		_aliases = {},
 	}
 
@@ -122,19 +123,54 @@ function ObjectScope:initializeObjectList(ast)
 	end
 end
 
-function ObjectScope:_importPackage(package, location)
-	assert(type(package) == "string")
+function ObjectScope:_importPackage(packageName, location)
+	assert(type(packageName) == "string")
 	assert(location)
 
-	error "TODO"
+	if self._packageName == packageName then
+		Report.IMPORT_OWN_PACKAGE {
+			packageName = packageName,
+			location = location,
+		}
+	elseif self._importedPackages[packageName] then
+		Report.PACKAGE_IMPORTED_TWICE {
+			packageName = packageName,
+			firstLocation = self._importedPackages[packageName].location,
+			secondLocation = location,
+		}
+	elseif not self._registry:hasPackage(packageName) then
+		Report.NO_SUCH_PACKAGE {
+			packageName = packageName,
+			location = location,
+		}
+	end
+
+	self._importedPackages[packageName] = {location = location}
 end
 
-function ObjectScope:_importObject(package, objectName, location)
-	assert(type(package) == "string")
+function ObjectScope:_importObject(packageName, objectName, location)
+	assert(type(packageName) == "string")
 	assert(type(objectName) == "string")
 	assert(location)
 
-	error "TODO"
+	if self._aliases[objectName] then
+		Report.OBJECT_DEFINED_TWICE {
+			name = objectName,
+			firstLocation = self._aliases[objectName].location,
+			secondLocation = location,
+		}
+	elseif not self._registry:getObject(packageName, objectName) then
+		Report.NO_SUCH_OBJECT {
+			name = string.format("%s:%s", packageName, objectName),
+			location = location,
+		}
+	end
+
+	self._aliases[objectName] = {
+		packageName = packageName,
+		objectName = objectName,
+		location = location,
+	}
 end
 
 function ObjectScope:_doImports(imports)
@@ -205,10 +241,18 @@ function ObjectRegistry:defineObject(packageName, objectName, location, object)
 	}
 end
 
-function ObjectRegistry:getObject(packageName, objectName, kind)
+-- RETURNS whether or not the given package name has been defined anywhere.
+function ObjectRegistry:hasPackage(packageName)
+	assert(type(packageName) == "string")
+
+	return not not self._definedPackages[packageName]
+end
+
+function ObjectRegistry:getObject(packageName, objectName)
 	assert(type(packageName) == "string")
 	assert(type(objectName) == "string")
-	assert(kind == "class" or kind == "union" or kind == "interface")
+
+	error("TODO")
 end
 
 --------------------------------------------------------------------------------
