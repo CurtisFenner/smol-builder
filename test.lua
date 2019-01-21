@@ -339,7 +339,7 @@ if mode ~= "-" then
 				local bin = path {"tests-positive", test, "bin"}
 				local compiles = c99({"output.c"}, bin)
 				if not compiles then
-					return fail, {expected = 0, got = 1, reason = "gcc rejected"}
+					return "fail", {expected = 0, got = 1, reason = "gcc rejected"}
 				end
 
 				local outFile = path {"tests-positive", test, "out.last"}
