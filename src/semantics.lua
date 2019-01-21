@@ -135,7 +135,7 @@ function ObjectScope:_importPackage(packageName, location)
 	elseif self._importedPackages[packageName] then
 		Report.PACKAGE_IMPORTED_TWICE {
 			packageName = packageName,
-			firstLocation = self._importedPackages[packageName].location,
+			firstLocation = self._importedPackages[packageName].importLocation,
 			secondLocation = location,
 		}
 	elseif not self._registry:hasPackage(packageName) then
@@ -145,7 +145,7 @@ function ObjectScope:_importPackage(packageName, location)
 		}
 	end
 
-	self._importedPackages[packageName] = {location = location}
+	self._importedPackages[packageName] = {importLocation = location}
 end
 
 function ObjectScope:_importObject(packageName, objectName, location)
@@ -159,12 +159,9 @@ function ObjectScope:_importObject(packageName, objectName, location)
 			firstLocation = self._aliases[objectName].location,
 			secondLocation = location,
 		}
-	elseif not self._registry:getObject(packageName, objectName) then
-		Report.NO_SUCH_OBJECT {
-			name = string.format("%s:%s", packageName, objectName),
-			location = location,
-		}
 	end
+
+	local obj = self._registry:getObject(packageName, objectName, location)
 
 	self._aliases[objectName] = {
 		packageName = packageName,
@@ -248,11 +245,28 @@ function ObjectRegistry:hasPackage(packageName)
 	return not not self._definedPackages[packageName]
 end
 
-function ObjectRegistry:getObject(packageName, objectName)
+-- RETURNS the object registered to the given package-name, object-name pair.
+-- REPORTS if no such package / object has been defined.
+function ObjectRegistry:getObject(packageName, objectName, useLocation)
 	assert(type(packageName) == "string")
 	assert(type(objectName) == "string")
+	assert(useLocation)
 
-	error("TODO")
+	local package = self._definedPackages[packageName]
+	if not package then
+		Report.NO_SUCH_PACKAGE {
+			packageName = packageName,
+			location = useLocation,
+		}
+	elseif not package.objects[objectName] then
+		Report.NO_SUCH_OBJECT {
+			name = string.format("%s:%s", packageName, objectName),
+			location = useLocation,
+		}
+	end
+
+	-- TODO: Figure out what information is needed here.
+	return true
 end
 
 --------------------------------------------------------------------------------
