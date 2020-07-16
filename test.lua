@@ -205,8 +205,9 @@ local function compiler(directory, main)
 		end
 	end
 
+	local luaExe = string.format("%q", arg[-1])
 	local command = table.concat {
-		arg[-1] .. " " .. path {"src", "compiler.lua"},
+		luaExe .. " " .. path {"src", "compiler.lua"},
 		" --sources ", table.concat(sources, "    "),
 		" --main ", main,
 		" ", remainingArguments
